@@ -193,8 +193,13 @@ export default {
         // screen is locked or the app is in the background (20 Oct). The audio session is
         // only active while capturing or playing, so this does not keep the app alive otherwise.
         UIBackgroundModes: ["audio"],
-        // The app runs its own standard encryption (E2EE: @noble Noise NK / X25519 / ChaCha20-Poly1305, tweetnacl), not only Apple's.
-        ITSAppUsesNonExemptEncryption: true,
+        // Export compliance: the app runs its own standard encryption (E2EE: @noble Noise NK /
+        // X25519 / ChaCha20-Poly1305, tweetnacl), not only Apple's, so `false` would be wrong. But
+        // `ITSAppUsesNonExemptEncryption: true` without an ITSEncryptionExportComplianceCode from App
+        // Store Connect is rejected at upload (ITMS-90592, 28 Oct). So the key is left out: App Store
+        // Connect asks the encryption questions on each build ("Missing Compliance"). Once it issues a
+        // compliance code, set `ITSAppUsesNonExemptEncryption: true` plus
+        // `ITSEncryptionExportComplianceCode: "<code>"` here.
         // Busy-bots Live Activity (targets/live-activity, modules/paseo-live-activity).
         NSSupportsLiveActivities: true,
         // Updates go out at priority 10 within ~5 s of a change; this raises Apple's budget for those.
