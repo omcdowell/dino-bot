@@ -15,6 +15,11 @@ const flavour = resolveFlavour();
 const appVariant = process.env.APP_VARIANT ?? "production";
 const isFdroidBuild = process.env.PASEO_FDROID_BUILD === "1";
 const isProfileBuild = process.env.PASEO_PROFILE_BUILD === "1";
+// aps-environment entitlement: expo-notifications writes "development" unless told otherwise, so a
+// distribution build (TestFlight/App Store, PASEO_APNS_ENVIRONMENT=production) must pass "production"
+// or the archive keeps the sandbox entitlement and does not match the App Store profile.
+const apsEnvironment =
+  process.env.PASEO_APNS_ENVIRONMENT === "production" ? "production" : "development";
 
 const buildProfile = isFdroidBuild
   ? {
@@ -51,6 +56,7 @@ const buildProfile = isFdroidBuild
           {
             icon: "./assets/images/notification-icon.png",
             color: "#20744A",
+            mode: apsEnvironment,
           },
         ],
       ],
