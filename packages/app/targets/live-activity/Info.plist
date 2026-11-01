@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>PaseoSharedKeychainGroup</key>
+    <string>$(AppIdentifierPrefix)com.example.paseo.shared</string>
+    <!-- The Lock Screen dino's live-mode timer fonts (DinoLiveLane.swift), from Flint's la-live gen_live.py. -->
+    <key>UIAppFonts</key>
+    <array>
+      <string>DinoLive3j0m.ttf</string>
+      <string>DinoLive3j1m.ttf</string>
+      <string>DinoLive3j2m.ttf</string>
+      <string>DinoLive6j0m.ttf</string>
+      <string>DinoLive6j1m.ttf</string>
+      <string>DinoLive6j2m.ttf</string>
+      <string>DinoLive6j3m.ttf</string>
+      <string>DinoLive6j4m.ttf</string>
+      <string>DinoLive6j5m.ttf</string>
+      <string>DinoLiveGatee.ttf</string>
+      <string>DinoLiveGateo.ttf</string>
+      <string>DinoLiveStill.ttf</string>
+    </array>
+    <key>NSExtension</key>
+    <dict>
+      <key>NSExtensionPointIdentifier</key>
+      <string>com.apple.widgetkit-extension</string>
+    </dict>
+  </dict>
+</plist>

@@ -1,0 +1,13 @@
+DinoBot
+Copyright 2026 omcdowell
+
+This product is a modified version of Paseo (https://github.com/getpaseo/paseo),
+Copyright 2025-present Mohamed Boudra, licensed under the Apache License, Version 2.0
+(see LICENSE). This tree is Paseo commit a1da1b8f234afe7a75785022292cdf8a50ee11a5 with
+modifications by omcdowell; compare it with that commit to see every change.
+
+Third-party components keep their own licences; the app lists them under
+Settings > About > Licences.
+
+The DinoBot name, the dino icon, artwork and fonts are not licensed under
+Apache-2.0 (no trademark rights are granted, Apache-2.0 section 6).
