@@ -1,7 +1,7 @@
 # Build and test
 
 ```sh
-build/build-tarball.sh                         # -> dist/dinobot-<os>-<arch>.tar.gz (+ .sha256, stamped dist/install.sh)
+build/build-tarball.sh                         # -> dist/dinobot-<os>-<arch>.tar.gz and .tar.zst (+ .sha256 each, stamped dist/install.sh)
 HERDR_BIN=<mac herdr> build/build-tarball.sh --target darwin-arm64   # cross-assembled on Linux
 node --test test/*.test.mjs                    # unit + install.sh tests (temp dirs inside the repo)
 test/e2e-temp-home.sh found|nosignin|tty|longhome|notailscale        # throwaway HOME (UPDATE=1: real update too)

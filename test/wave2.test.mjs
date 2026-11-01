@@ -238,7 +238,7 @@ describe("doctor output and update source", () => {
 
 describe("own pi dir (split) and default packages", async () => {
   const { layout } = await import("../lib/util.mjs");
-  const { writePiSetup, writeWrappers, writeDaemonEnv, DEFAULT_PI_PACKAGES } = await import("../lib/config.mjs");
+  const { writePiSetup, writeWrappers, writeDaemonEnv, DEFAULT_PI_PACKAGES, stickyEnv } = await import("../lib/config.mjs");
   const { detectSignIns } = await import("../lib/detect.mjs");
   it("lives in ~/.dinobot/pi and ignores the caller's PI_CODING_AGENT_DIR", () => {
     const L = layout({ HOME: "/h", PI_CODING_AGENT_DIR: "/h/.pi/agent" });
@@ -255,6 +255,14 @@ describe("own pi dir (split) and default packages", async () => {
     assert.equal(env.HOME, home);
     writeWrappers(L, "linux");
     assert.match(readFileSync(join(L.bin, "pi"), "utf8"), new RegExp(`export PI_CODING_AGENT_DIR="${L.piAgentDir}"`));
+    // bot-dm / bot-room: the bundled daemon's CLI internals, not ~/.local/lib/node_modules (visual-bugs 1).
+    assert.equal(env.PASEO_CLI_DIST, join(L.app, "daemon", "dist"));
+    // Install-time Tailscale CLI and launchd label stick in the dinobot wrapper (visual-bugs 5: pair --link).
+    assert.equal(stickyEnv({ DINOBOT_TAILSCALE_BIN: "/opt/ts/tailscale", DINOBOT_LAUNCHD_LABEL: "x.test", OTHER: "1" }), 'export DINOBOT_LAUNCHD_LABEL="x.test"\nexport DINOBOT_TAILSCALE_BIN="/opt/ts/tailscale"\n');
+    assert.equal(stickyEnv({}), "");
+    for (const w of ["bot-dm", "bot-room"]) {
+      assert.ok(readFileSync(join(L.bin, w), "utf8").includes(`export PASEO_CLI_DIST="${join(L.app, "daemon", "dist")}"`), w);
+    }
     mkdirSync(join(L.app, "pi-packages", "node_modules", "pi-web-access"), { recursive: true });
     const r = writePiSetup(L);
     assert.deepEqual(JSON.parse(readFileSync(r.settingsPath, "utf8")).packages, DEFAULT_PI_PACKAGES);

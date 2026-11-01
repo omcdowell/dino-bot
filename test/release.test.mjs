@@ -2,13 +2,13 @@
 // HTTP server on 127.0.0.1), the checksum and signature failing closed, and update's source choice.
 //   node --test test/release.test.mjs   (temp dirs under ./.test-tmp3, never /tmp)
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { updateSource } from "../lib/update.mjs";
+import { tarballName, untarZst, updateSource } from "../lib/update.mjs";
 import { DOWNLOAD_BASE_URL, layout, PRODUCT_ID } from "../lib/util.mjs";
 
 const HERE = join(import.meta.dirname, "..");
@@ -20,13 +20,22 @@ const tmp = () => mkdtempSync(join(TMP, "t-"));
 const OS = process.platform === "darwin" ? "darwin" : "linux";
 const ARCH = process.arch === "arm64" ? "arm64" : "x64";
 const ASSET = `${PRODUCT_ID}-${OS}-${ARCH}.tar.gz`;
+const ZASSET = `${PRODUCT_ID}-${OS}-${ARCH}.tar.zst`;
+const HAS_ZSTD = (() => {
+  try {
+    execFileSync("sh", ["-c", "command -v zstd"], { env: { PATH: "/usr/bin:/bin" }, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 
 /** A release folder: a tiny tarball whose "node" just reports that the wizard was reached. */
-function makeRelease(dir) {
+function makeRelease(dir, { zst = false } = {}) {
   const stage = join(dir, "stage", `${PRODUCT_ID}-${OS}-${ARCH}`, "node", "bin");
   mkdirSync(stage, { recursive: true });
-  writeFileSync(join(stage, "node"), '#!/bin/sh\necho "WIZARD REACHED $*"\n');
+  writeFileSync(join(stage, "node"), '#!/bin/sh\necho "WIZARD REACHED $* format=$DINOBOT_TARBALL_FORMAT"\n');
   chmodSync(join(stage, "node"), 0o755);
   const rel = join(dir, "release");
   mkdirSync(rel, { recursive: true });
@@ -38,6 +47,13 @@ function makeRelease(dir) {
       // A signature placeholder: the fake cosign below accepts it if it arrived (fetched by the
       // same route as the tarball). Real verification: test/signing.test.mjs.
       writeFileSync(join(rel, `${ASSET}.sigstore.json`), `{"for":"${s}"}`);
+      if (zst) {
+        // The same tree as .tar.zst (build-tarball.sh makes both), checksummed and signed alike.
+        execFileSync("sh", ["-c", `tar -cf - -C "$1" "$2" | zstd -q -19 --long=27 -o "$3"`, "sh", join(dir, "stage"), `${PRODUCT_ID}-${OS}-${ARCH}`, join(rel, ZASSET)]);
+        const z = sha(readFileSync(join(rel, ZASSET)));
+        writeFileSync(join(rel, `${ZASSET}.sha256`), `${z}  ${ZASSET}\n`);
+        writeFileSync(join(rel, `${ZASSET}.sigstore.json`), `{"for":"${z}"}`);
+      }
       res({ rel, sha: s });
     }),
   );
@@ -49,7 +65,8 @@ function serve(rel) {
   const server = http.createServer((req, res) => {
     hits.push(req.url);
     const f = join(rel, decodeURIComponent(req.url.slice(1)));
-    if (!req.url.includes("..") && existsSync(f)) return res.writeHead(200).end(readFileSync(f));
+    // Files only: a request for the folder itself is a 404 (it used to throw EISDIR in here).
+    if (!req.url.includes("..") && existsSync(f) && statSync(f).isFile()) return res.writeHead(200).end(readFileSync(f));
     res.writeHead(404).end();
   });
   return new Promise((r) => server.listen(0, "127.0.0.1", () => r({ server, hits, url: `http://127.0.0.1:${server.address().port}` })));
@@ -92,10 +109,68 @@ describe("install.sh: public release download, checksum and signature fail close
   it("url route: tarball, .sha256 and signature from the release, then the wizard", async () => {
     const h = tmp();
     srv.hits.length = 0;
+    const r = await runInstall({ HOME: h, DINOBOT_HOME: join(h, ".db"), DINOBOT_BASE_URL: srv.url, DINOBOT_FORMAT: "gz" });
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /WIZARD REACHED.*format=gz/);
+    assert.deepEqual(srv.hits.sort(), [`/${ASSET}`, `/${ASSET}.sha256`, `/${ASSET}.sigstore.json`]);
+  });
+
+  it("zstd here: the .tar.zst (checksum and signature of the .tar.zst); without zstd: the .tar.gz", { skip: !HAS_ZSTD && "no zstd on this computer" }, async () => {
+    const { rel: zrel } = await makeRelease(tmp(), { zst: true });
+    const zsrv = await serve(zrel);
+    try {
+      let h = tmp();
+      let r = await runInstall({ HOME: h, DINOBOT_HOME: join(h, ".db"), DINOBOT_BASE_URL: zsrv.url });
+      assert.equal(r.code, 0, r.out);
+      assert.match(r.out, /WIZARD REACHED.*format=zst/);
+      // The .tar.zst; the small files of both archives are asked for during the download.
+      assert.deepEqual(zsrv.hits.sort(), [`/${ASSET}.sha256`, `/${ASSET}.sigstore.json`, `/${ZASSET}`, `/${ZASSET}.sha256`, `/${ZASSET}.sigstore.json`]);
+      assert.deepEqual(readdirSync(join(h, ".db", "download")), [], "download folder emptied");
+      // No zstd (DINOBOT_FORMAT=gz is the same branch): only .tar.gz files are fetched.
+      zsrv.hits.length = 0;
+      h = tmp();
+      r = await runInstall({ HOME: h, DINOBOT_HOME: join(h, ".db"), DINOBOT_BASE_URL: zsrv.url, DINOBOT_FORMAT: "gz" });
+      assert.equal(r.code, 0, r.out);
+      assert.match(r.out, /WIZARD REACHED.*format=gz/);
+      assert.deepEqual(zsrv.hits.sort(), [`/${ASSET}`, `/${ASSET}.sha256`, `/${ASSET}.sigstore.json`]);
+      // A tampered .tar.zst is refused like a tampered .tar.gz (its own checksum).
+      writeFileSync(join(zrel, ZASSET), Buffer.concat([readFileSync(join(zrel, ZASSET)), Buffer.from("x")]));
+      h = tmp();
+      r = await runInstall({ HOME: h, DINOBOT_HOME: join(h, ".db"), DINOBOT_BASE_URL: zsrv.url });
+      assert.notEqual(r.code, 0, r.out);
+      assert.match(r.out, /does not match its checksum/);
+      assert.equal(existsSync(join(h, ".db", "app")), false, r.out);
+    } finally {
+      zsrv.server.close();
+    }
+  });
+
+  it("a release without the .tar.zst (older releases): the .tar.gz", { skip: !HAS_ZSTD && "no zstd on this computer" }, async () => {
+    const h = tmp();
+    srv.hits.length = 0;
     const r = await runInstall({ HOME: h, DINOBOT_HOME: join(h, ".db"), DINOBOT_BASE_URL: srv.url });
     assert.equal(r.code, 0, r.out);
-    assert.match(r.out, /WIZARD REACHED/);
-    assert.deepEqual(srv.hits.sort(), [`/${ASSET}`, `/${ASSET}.sha256`, `/${ASSET}.sigstore.json`]);
+    assert.match(r.out, /WIZARD REACHED.*format=gz/);
+    assert.deepEqual(srv.hits.sort(), [`/${ASSET}`, `/${ASSET}.sha256`, `/${ASSET}.sigstore.json`, `/${ZASSET}`, `/${ZASSET}.sha256`, `/${ZASSET}.sigstore.json`]);
+  });
+
+  it("update unpacks a .tar.zst with Node's own zstd (no zstd program needed)", async () => {
+    const d = tmp();
+    const stage = join(d, "stage", "pkg", "node", "bin");
+    mkdirSync(stage, { recursive: true });
+    writeFileSync(join(stage, "node"), "hello");
+    const tarFile = join(d, "x.tar");
+    execFileSync("tar", ["-cf", tarFile, "-C", join(d, "stage"), "pkg"]);
+    const { zstdCompressSync } = await import("node:zlib");
+    writeFileSync(join(d, "x.tar.zst"), zstdCompressSync(readFileSync(tarFile)));
+    mkdirSync(join(d, "out"));
+    const r = await untarZst(join(d, "x.tar.zst"), join(d, "out"));
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(readFileSync(join(d, "out", "node", "bin", "node"), "utf8"), "hello");
+    writeFileSync(join(d, "bad.tar.zst"), "not zstd");
+    mkdirSync(join(d, "out2"));
+    const bad = await untarZst(join(d, "bad.tar.zst"), join(d, "out2"));
+    assert.notEqual(bad.code, 0);
   });
 
   it("a tampered tarball, a missing .sha256 or a missing signature is refused, nothing installed", async () => {
@@ -185,6 +260,13 @@ describe("update: release source", () => {
       src: `${DOWNLOAD_BASE_URL.replace(/\/latest\/download$/, "/download/v1.2.0")}/${PRODUCT_ID}-darwin-arm64.tar.gz`,
     });
     assert.deepEqual(updateSource({ env: {}, p, savedBaseUrl: "file:///srv/rel/" }), { kind: "file", src: `/srv/rel/${PRODUCT_ID}-darwin-arm64.tar.gz` });
+  });
+  it("an install that got the .tar.zst updates from the .tar.zst; flags and DINOBOT_TARBALL are taken as given", () => {
+    assert.equal(tarballName(p, "zst"), `${PRODUCT_ID}-darwin-arm64.tar.zst`);
+    assert.equal(tarballName(p), `${PRODUCT_ID}-darwin-arm64.tar.gz`);
+    assert.deepEqual(updateSource({ env: {}, p, format: "zst" }), { kind: "url", src: `${DOWNLOAD_BASE_URL}/${PRODUCT_ID}-darwin-arm64.tar.zst` });
+    assert.deepEqual(updateSource({ env: {}, p, savedBaseUrl: "https://example.test/rel", format: "zst" }), { kind: "url", src: `https://example.test/rel/${PRODUCT_ID}-darwin-arm64.tar.zst` });
+    assert.deepEqual(updateSource({ tarball: "/x/y.tar.gz", env: {}, p, format: "zst" }), { kind: "file", src: "/x/y.tar.gz" });
   });
 });
 

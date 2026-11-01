@@ -11,7 +11,8 @@
 # Env:
 #   DINOBOT_RELEASE   release tag (default: the latest release)
 #   DINOBOT_BASE_URL  where tarballs live: https://… or file:///dir (tests, stand-ins); skips GitHub
-#   DINOBOT_TARBALL   a local .tar.gz or URL to use instead (tests, offline installs)
+#   DINOBOT_TARBALL   a local .tar.gz/.tar.zst or URL to use instead (tests, offline installs)
+#   DINOBOT_FORMAT=gz the .tar.gz even when zstd is here (default: .tar.zst when zstd is installed)
 #   DINOBOT_HOME      install root (default ~/.dinobot)
 #   DINOBOT_NAME      your name (skips the question)
 #   DINOBOT_COSIGN    a cosign (v3+) to check the signature with (default: on PATH, else downloaded)
@@ -97,6 +98,12 @@ main() {
     *) fail "unsupported CPU $(uname -m)" ;;
   esac
   NAME="$PRODUCT_ID-$OS-$ARCH"
+  # Two archives of the same build in every release: $NAME.tar.zst (~40% smaller, faster to unpack)
+  # when this computer has zstd (Ubuntu/Fedora desktops, Homebrew), else $NAME.tar.gz. Both are
+  # checksummed and signed alike; where there is no .tar.zst (older releases), the .tar.gz is used.
+  # DINOBOT_FORMAT=gz forces the .tar.gz.
+  ZST=0
+  if command -v zstd >/dev/null 2>&1 && [ "${DINOBOT_FORMAT:-}" != gz ]; then ZST=1; fi
   ASSET="$NAME.tar.gz"
   command -v tar >/dev/null 2>&1 || fail "tar is missing"
   # Linux: the daemon stops bot processes with ps (procps-ng); minimal Debian/Fedora images lack it
@@ -119,6 +126,10 @@ main() {
   #   url      DINOBOT_BASE_URL=https://…, else the GitHub release (DEFAULT_BASE_URL; DINOBOT_RELEASE=<tag>
   #            picks one release instead of the latest)
   if [ -n "${DINOBOT_TARBALL:-}" ]; then MODE=tarball
+    case "$DINOBOT_TARBALL" in
+      *.zst) ASSET="$NAME.tar.zst"; command -v zstd >/dev/null 2>&1 || fail "$DINOBOT_TARBALL needs zstd to unpack; use the .tar.gz" ;;
+    esac
+    TARBALL="$ROOT/download/$ASSET"
   elif [ -n "${DINOBOT_BASE_URL:-}" ]; then
     case "$DINOBOT_BASE_URL" in file://*) MODE=file; BASE=${DINOBOT_BASE_URL#file://} ;; *) MODE=url; BASE=$DINOBOT_BASE_URL ;; esac
   else
@@ -148,13 +159,38 @@ main() {
     esac
   }
 
-  # 1. Download in the background.
-  ( fetch "$ASSET" "$TARBALL.part" && mv "$TARBALL.part" "$TARBALL" ) >"$ROOT/logs/download.log" 2>&1 &
+  # 1. Download in the background (.tar.zst first when it can be unpacked here; the asset that
+  # arrived is written to download/asset).
+  rm -f "$ROOT/download/asset" "$ROOT/download/$NAME".tar.*
+  (
+    # (The .tar.zst try logs to download-zst.log: download.log is about the archive that decided.)
+    if [ "$MODE" != tarball ] && [ "$ZST" = 1 ] && fetch "$NAME.tar.zst" "$ROOT/download/$NAME.tar.zst.part" 2>"$ROOT/logs/download-zst.log"; then
+      mv "$ROOT/download/$NAME.tar.zst.part" "$ROOT/download/$NAME.tar.zst" && echo "$NAME.tar.zst" >"$ROOT/download/asset"
+    else
+      rm -f "$ROOT/download/$NAME.tar.zst.part"
+      fetch "$ASSET" "$TARBALL.part" && mv "$TARBALL.part" "$TARBALL" && echo "$ASSET" >"$ROOT/download/asset"
+    fi
+  ) >"$ROOT/logs/download.log" 2>&1 &
   DL=$!
+  # 1a. At the same time, the small files beside it: <archive>.sha256 and <archive>.sigstore.json for
+  # each archive it may be (each was one more round trip after the download; on GitHub that is a
+  # redirect too). Checked exactly as before (step 3); one that did not arrive is fetched again there.
+  (
+    for a in $([ "$MODE" != tarball ] && [ "$ZST" = 1 ] && echo "$NAME.tar.zst") "$ASSET"; do
+      for s in .sha256 "$SIG_SUFFIX"; do
+        ( fetch "$a$s" "$ROOT/download/$a$s.part" && mv "$ROOT/download/$a$s.part" "$ROOT/download/$a$s" || rm -f "$ROOT/download/$a$s.part" ) &
+      done
+    done
+    wait
+  ) >"$ROOT/logs/sidecar.log" 2>&1 &
+  SIDE=$!
 
   # 1b. Also in the background: the signature checker. A cosign v3+ you already have (DINOBOT_COSIGN,
-  # or on PATH), else sigstore/cosign's release binary for this computer (~100 MB, once; kept in
-  # $ROOT/tools for updates), refused unless it matches the sha256 pinned above.
+  # or on PATH), else sigstore/cosign's release binary for this computer (100-146 MB, once; kept in
+  # $ROOT/tools for updates), refused unless it matches the sha256 pinned above. Our release carries
+  # that same binary compressed (cosign-<os>-<arch>.zst/.gz, 51-60 MB for Linux): fetched by the
+  # tarball's route and unpacked first; the pin is checked on the unpacked binary, so where it came
+  # from does not matter. Missing there: sigstore's own download.
   SIGN=1
   [ "$SIGNING_MODE" = off ] && SIGN=0
   if [ "${DINOBOT_ALLOW_UNSIGNED:-0}" = 1 ] || [ "${DINOBOT_ALLOW_UNVERIFIED:-0}" = 1 ]; then SIGN=0; fi
@@ -173,9 +209,21 @@ main() {
       [ -n "$COSIGN_PIN" ] || { kill "$DL" 2>/dev/null; fail "no pinned signature checker (cosign) for $OS/$ARCH. Nothing was installed."; }
       COSIGN=$ROOT/tools/cosign
       (
-        case "$COSIGN_URL" in file://*) CCURL="curl -fsSL" ;; *) CCURL="curl -fsSL --proto =https --tlsv1.2" ;; esac
-        if command -v curl >/dev/null 2>&1; then $CCURL --retry 2 "$COSIGN_URL" -o "$COSIGN.part"
-        else wget -qO "$COSIGN.part" "$COSIGN_URL"; fi || exit 1
+        rm -f "$COSIGN.part"
+        if [ "$MODE" != tarball ]; then
+          for z in $([ "$ZST" = 1 ] && echo zst) gz; do
+            if fetch "$COSIGN_ASSET.$z" "$COSIGN.$z"; then
+              if [ "$z" = zst ]; then zstd -dcq "$COSIGN.$z" >"$COSIGN.part"; else gzip -dc "$COSIGN.$z" >"$COSIGN.part"; fi || rm -f "$COSIGN.part"
+            fi
+            rm -f "$COSIGN.$z"
+            [ -s "$COSIGN.part" ] && { echo "cosign from the release ($COSIGN_ASSET.$z)"; break; }
+          done
+        fi
+        if [ ! -s "$COSIGN.part" ]; then
+          case "$COSIGN_URL" in file://*) CCURL="curl -fsSL" ;; *) CCURL="curl -fsSL --proto =https --tlsv1.2" ;; esac
+          if command -v curl >/dev/null 2>&1; then $CCURL --retry 2 "$COSIGN_URL" -o "$COSIGN.part"
+          else wget -qO "$COSIGN.part" "$COSIGN_URL"; fi || exit 1
+        fi
         [ "$(sha256_of "$COSIGN.part")" = "$COSIGN_PIN" ] || { rm -f "$COSIGN.part"; echo "cosign download does not match its pinned checksum"; exit 1; }
         chmod 755 "$COSIGN.part" && mv "$COSIGN.part" "$COSIGN"
       ) >"$ROOT/logs/cosign.log" 2>&1 &
@@ -204,9 +252,13 @@ main() {
   [ -n "$USER_NAME" ] || USER_NAME=$NAME_DEFAULT
 
   # 3. Wait for the download, check it, unpack (old app kept until the new one is in place).
+  # (Dots from a ticker; `wait` returns the moment the download ends, not at the next second.)
   printf 'Downloading'
-  while kill -0 "$DL" 2>/dev/null; do printf '.'; sleep 1; done
-  if ! wait "$DL"; then
+  ( while sleep 1; do printf '.'; done ) &
+  TICK=$!
+  DLRC=0; wait "$DL" || DLRC=$?
+  kill "$TICK" 2>/dev/null || true; wait "$TICK" 2>/dev/null || true
+  if [ "$DLRC" != 0 ]; then
     echo; cat "$ROOT/logs/download.log" >&2
     # curl -f: "error: 404"; wget: "ERROR 404". A release URL that 404s means nothing is published there.
     [ "$MODE" = url ] && grep -Eq '(error|ERROR):? 404' "$ROOT/logs/download.log" 2>/dev/null &&
@@ -214,6 +266,10 @@ main() {
     fail "download of $ASSET failed ($MODE). Nothing was installed."
   fi
   echo " done"
+  wait "$SIDE" 2>/dev/null || true
+  ASSET=$(cat "$ROOT/download/asset")
+  TARBALL="$ROOT/download/$ASSET"
+  rm -f "$ROOT/download/asset"
   # Verify, fail closed: no checksum, no install. Two sources, both from the release: the checksum
   # pinned into this script when the release was published, and the release's <tarball>.sha256.
   # Either is enough; if both are there they must agree. Checksums catch corruption; authenticity
@@ -223,7 +279,7 @@ main() {
   PIN_SHA=""
   for p in $PINNED_SHA256S; do [ "${p%%=*}" = "$ASSET" ] && PIN_SHA=${p#*=}; done
   FILE_SHA=""
-  if fetch "$ASSET.sha256" "$TARBALL.sha256" >/dev/null 2>&1 && [ -s "$TARBALL.sha256" ]; then FILE_SHA=$(cut -d' ' -f1 "$TARBALL.sha256"); fi
+  if { [ -s "$TARBALL.sha256" ] || fetch "$ASSET.sha256" "$TARBALL.sha256" >/dev/null 2>&1; } && [ -s "$TARBALL.sha256" ]; then FILE_SHA=$(cut -d' ' -f1 "$TARBALL.sha256"); fi
   rm -f "$TARBALL.sha256"
   WANT_SHA=${PIN_SHA:-$FILE_SHA}
   if [ -n "$PIN_SHA" ] && [ -n "$FILE_SHA" ] && [ "$PIN_SHA" != "$FILE_SHA" ]; then
@@ -239,14 +295,16 @@ main() {
   # same route as the tarball (URL or file).
   if [ "$SIGN" = 1 ]; then
     BUNDLE="$TARBALL$SIG_SUFFIX"
-    rm -f "$BUNDLE"
-    fetch "$ASSET$SIG_SUFFIX" "$BUNDLE" >/dev/null 2>&1 || rm -f "$BUNDLE"
+    [ -s "$BUNDLE" ] || { fetch "$ASSET$SIG_SUFFIX" "$BUNDLE" >/dev/null 2>&1 || rm -f "$BUNDLE"; }
     [ -s "$BUNDLE" ] || { rm -f "$TARBALL" "$BUNDLE"; fail "the release has no signature ($ASSET$SIG_SUFFIX), so it cannot be verified. Nothing was installed."; }
     if [ -n "$CS" ]; then
       printf 'Getting the signature checker'
-      while kill -0 "$CS" 2>/dev/null; do printf '.'; sleep 1; done
+      ( while sleep 1; do printf '.'; done ) &
+      TICK=$!
+      CSRC=0; wait "$CS" || CSRC=$?
+      kill "$TICK" 2>/dev/null || true; wait "$TICK" 2>/dev/null || true
       echo
-      wait "$CS" || { rm -f "$TARBALL" "$BUNDLE"; fail "could not get the signature checker (cosign $COSIGN_VERSION from github.com/sigstore/cosign): $(tail -1 "$ROOT/logs/cosign.log"). Nothing was installed."; }
+      [ "$CSRC" = 0 ] || { rm -f "$TARBALL" "$BUNDLE"; fail "could not get the signature checker (cosign $COSIGN_VERSION): $(tail -1 "$ROOT/logs/cosign.log"). Nothing was installed."; }
     fi
     mkdir -p "$ROOT/tools/sigstore"
     if ! TUF_ROOT="$ROOT/tools/sigstore" "$COSIGN" verify-blob "$TARBALL" --bundle "$BUNDLE" \
@@ -261,16 +319,23 @@ main() {
   fi
   rm -rf "$ROOT/app.new"
   mkdir -p "$ROOT/app.new"
-  tar -xzf "$TARBALL" -C "$ROOT/app.new" --strip-components=1 || fail "could not unpack $TARBALL"
+  # -m: the files get today's time (the sources' fixed commit date may lie in the future).
+  case "$ASSET" in
+    *.zst)
+      rm -f "$ROOT/download/unzstd.failed"
+      { zstd -dcq "$TARBALL" || : >"$ROOT/download/unzstd.failed"; } | tar -xmf - -C "$ROOT/app.new" --strip-components=1 || fail "could not unpack $TARBALL"
+      [ ! -e "$ROOT/download/unzstd.failed" ] || { rm -f "$ROOT/download/unzstd.failed"; fail "could not unpack $TARBALL (zstd)"; } ;;
+    *) tar -xmzf "$TARBALL" -C "$ROOT/app.new" --strip-components=1 || fail "could not unpack $TARBALL" ;;
+  esac
   [ -x "$ROOT/app.new/node/bin/node" ] || fail "the tarball has no Node"
   if [ -d "$ROOT/app" ]; then rm -rf "$ROOT/app.old"; mv "$ROOT/app" "$ROOT/app.old"; fi
   mv "$ROOT/app.new" "$ROOT/app"
-  rm -f "$TARBALL"
+  rm -f "$TARBALL" "$ROOT/download/$NAME".tar.*
   T1=$(now_ms)
 
   # 4. The wizard (bundled Node). It prints the QR as soon as the daemon listens.
   # The wizard reads answers from /dev/tty itself, so `curl | sh` works.
-  DINOBOT_T0_MS=$T0 DINOBOT_FETCH_MS=$((T1 - T0)) DINOBOT_HOME=$ROOT DINOBOT_TARBALL_SHA=$TAR_SHA DINOBOT_SOURCE_MODE=$MODE \
+  DINOBOT_T0_MS=$T0 DINOBOT_FETCH_MS=$((T1 - T0)) DINOBOT_HOME=$ROOT DINOBOT_TARBALL_SHA=$TAR_SHA DINOBOT_TARBALL_FORMAT=${ASSET##*.} DINOBOT_SOURCE_MODE=$MODE \
     exec "$ROOT/app/node/bin/node" --experimental-transform-types --no-warnings \
     "$ROOT/app/installer/lib/cli.mjs" setup --name "$USER_NAME" "$@"
 }

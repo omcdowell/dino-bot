@@ -4,6 +4,10 @@
 #
 #   build/build-tarball.sh [--out DIR] [--full] [--target OS-ARCH]
 #
+# Output: DIR/dinobot-OS-ARCH.tar.gz and .tar.zst (same tree; .sha256 beside each), DIR/install.sh.
+# node_modules are pruned (build/prune-stage.mjs; PRUNE=0 keeps all); the Node binary is nodejs.org's,
+# untouched (STRIP_NODE=1 strips a native Linux one); ZSTD=0 skips the .tar.zst.
+#
 # --target (e.g. darwin-arm64) cross-assembles on this host: the official Node for the target from
 # nodejs.org (NODE_VERSION, default this host's), and every platform package in the daemon and pi
 # (`*-<host os>-<host arch>`, e.g. sherpa-onnx, msgpackr-extract, esbuild) swapped for the target's
@@ -215,7 +219,9 @@ fi
 
 archive_tree() { # repo tree-ish dest
   mkdir -p "$3"
-  git -C "$1" archive --format=tar "$2" | tar -x -C "$3"
+  # -m: the build's time, not the commit's (fixed source commits are dated 2026-11-01; future times make
+  # every tar that unpacks the release warn once per file).
+  git -C "$1" archive --format=tar "$2" | tar -xm -C "$3"
 }
 
 set -- $OPTCHAT_REFS
@@ -325,6 +331,23 @@ for floor in $SECURITY_FLOORS; do
   done
 done
 
+# Smaller download, faster unpack (perf-install, 31 Oct): drop what never runs from every node_modules
+# tree (source maps, type declarations, package docs, unreferenced src/test folders; licences stay;
+# build/prune-stage.mjs lists the rules). Before the notices, so they describe what ships.
+# PRUNE=0 keeps everything.
+if [ "${PRUNE:-1}" = 1 ]; then
+  say "$(node "$HERE/build/prune-stage.mjs" "$STAGE")"
+fi
+# Default: the official Node binary ships byte-identical to nodejs.org's (it carries its symbol
+# table, ~18 MB, ~4 MB compressed). STRIP_NODE=1 strips it on Linux when this host can (native
+# builds; a Mac binary would lose its code signature, so never there).
+if [ "${STRIP_NODE:-0}" = 1 ] && [ "$OS" = linux ] && [ "$CROSS" = 0 ] && command -v strip >/dev/null; then
+  before=$(wc -c <"$STAGE/node/bin/node")
+  strip "$STAGE/node/bin/node"
+  "$STAGE/node/bin/node" -e 0 || { echo "stripped node does not run" >&2; exit 1; }
+  say "stripped node/bin/node ($(( (before - $(wc -c <"$STAGE/node/bin/node")) / 1048576 )) MB of symbols)"
+fi
+
 say "installer $HERE"
 mkdir -p "$STAGE/installer"
 cp -a "$HERE/lib" "$STAGE/installer/"
@@ -371,13 +394,27 @@ cat >"$STAGE/MANIFEST.json" <<EOF
 }
 EOF
 
+# Two archives of the same tree: .tar.zst (zstd -19 --long=27, ~40% smaller than gzip and faster to
+# unpack; install.sh uses it when the computer has zstd, `dinobot update` always can, through the
+# bundled Node's zlib) and .tar.gz (every computer). The 128 MB window (--long=27) is the largest a
+# default zstd decoder accepts without extra flags. ZSTD=0 skips the .tar.zst (local builds only:
+# the release workflow requires both).
 TAR="$OUT/$NAME.tar.gz"
+ZTAR="$OUT/$NAME.tar.zst"
+rm -f "$TAR" "$TAR.sha256" "$ZTAR" "$ZTAR.sha256"
 say "packing $TAR"
 if command -v pigz >/dev/null; then
-  tar -C "$OUT" -cf - "$NAME" | pigz -6 >"$TAR"
+  tar -C "$OUT" -cf - "$NAME" | pigz -9 >"$TAR"
 else
-  tar -C "$OUT" -czf "$TAR" "$NAME"
+  tar -C "$OUT" -cf - "$NAME" | gzip -9 >"$TAR"
 fi
 ( cd "$OUT" && sha256sum "$NAME.tar.gz" >"$NAME.tar.gz.sha256" )
+if [ "${ZSTD:-1}" = 1 ]; then
+  command -v zstd >/dev/null || { echo "zstd is missing (needed for $NAME.tar.zst; ZSTD=0 skips it)" >&2; exit 1; }
+  say "packing $ZTAR"
+  tar -C "$OUT" -cf - "$NAME" | zstd -q -19 --long=27 -T0 -o "$ZTAR"
+  zstd -q -t "$ZTAR" # decodes with default decoder limits
+  ( cd "$OUT" && sha256sum "$NAME.tar.zst" >"$NAME.tar.zst.sha256" )
+fi
 rm -rf "$STAGE"
-say "done: $(du -h "$TAR" | cut -f1) $TAR"
+say "done: $(du -h "$TAR" | cut -f1) $TAR$([ -f "$ZTAR" ] && echo ", $(du -h "$ZTAR" | cut -f1) $ZTAR")"

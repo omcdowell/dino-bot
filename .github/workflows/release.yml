@@ -107,6 +107,8 @@ jobs:
       - name: macOS has shasum, not sha256sum
         if: runner.os == 'macOS'
         run: command -v sha256sum || brew install coreutils
+      - name: zstd for the .tar.zst (preinstalled on GitHub's images; installed if not)
+        run: command -v zstd || { if [ "$RUNNER_OS" = macOS ]; then brew install zstd; else sudo apt-get install -y zstd; fi; }
       - name: macOS, no Spotlight indexing of node_modules (npm ci took 14 min there on 28 Oct)
         if: runner.os == 'macOS'
         run: sudo mdutil -a -i off || true
@@ -118,6 +120,8 @@ jobs:
       - name: secret scan of the staged tarball
         # A real key, not a placeholder: pi's own docs carry 'sk-ant-oat01-{rand}' (preflight, 28 Oct).
         run: |
+          # The .tar.zst must hold exactly the .tar.gz's files (same tree, two compressions).
+          cmp <(tar -tzf "dist/dinobot-${{ matrix.target }}.tar.gz") <(zstd -dcq "dist/dinobot-${{ matrix.target }}.tar.zst" | tar -tf -)
           mkdir -p /tmp/scan && tar -xzf "dist/dinobot-${{ matrix.target }}.tar.gz" -C /tmp/scan
           if grep -rIlE 'sk-ant-(oat|api)[0-9]{2}-[A-Za-z0-9_-]{20}|sk-or-v1-[0-9a-f]{20}|ghp_[A-Za-z0-9]{30}|github_pat_[A-Za-z0-9_]{30}|-----BEGIN [A-Z ]*PRIVATE KEY-----' \
               /tmp/scan --exclude-dir=node_modules; then echo "secret-shaped string in the tarball (above)"; exit 1; fi
@@ -127,6 +131,8 @@ jobs:
           path: |
             dist/dinobot-${{ matrix.target }}.tar.gz
             dist/dinobot-${{ matrix.target }}.tar.gz.sha256
+            dist/dinobot-${{ matrix.target }}.tar.zst
+            dist/dinobot-${{ matrix.target }}.tar.zst.sha256
             dist/install.sh
           if-no-files-found: error
           retention-days: 1 # only the release job reads them; keeps artifact storage (Free: 500 MB) near zero
@@ -183,6 +189,8 @@ jobs:
       - name: macOS has shasum, not sha256sum
         if: runner.os == 'macOS'
         run: command -v sha256sum || brew install coreutils
+      - name: zstd for the .tar.zst (preinstalled on GitHub's images; installed if not)
+        run: command -v zstd || { if [ "$RUNNER_OS" = macOS ]; then brew install zstd; else sudo apt-get install -y zstd; fi; }
       - name: macOS, no Spotlight indexing of node_modules (npm ci took 14 min there on 28 Oct)
         if: runner.os == 'macOS'
         run: sudo mdutil -a -i off || true
@@ -194,6 +202,8 @@ jobs:
       - name: secret scan of the staged tarball
         # A real key, not a placeholder: pi's own docs carry 'sk-ant-oat01-{rand}' (preflight, 28 Oct).
         run: |
+          # The .tar.zst must hold exactly the .tar.gz's files (same tree, two compressions).
+          cmp <(tar -tzf "dist/dinobot-${{ matrix.target }}.tar.gz") <(zstd -dcq "dist/dinobot-${{ matrix.target }}.tar.zst" | tar -tf -)
           mkdir -p /tmp/scan && tar -xzf "dist/dinobot-${{ matrix.target }}.tar.gz" -C /tmp/scan
           if grep -rIlE 'sk-ant-(oat|api)[0-9]{2}-[A-Za-z0-9_-]{20}|sk-or-v1-[0-9a-f]{20}|ghp_[A-Za-z0-9]{30}|github_pat_[A-Za-z0-9_]{30}|-----BEGIN [A-Z ]*PRIVATE KEY-----' \
               /tmp/scan --exclude-dir=node_modules; then echo "secret-shaped string in the tarball (above)"; exit 1; fi
@@ -203,6 +213,8 @@ jobs:
           path: |
             dist/dinobot-${{ matrix.target }}.tar.gz
             dist/dinobot-${{ matrix.target }}.tar.gz.sha256
+            dist/dinobot-${{ matrix.target }}.tar.zst
+            dist/dinobot-${{ matrix.target }}.tar.zst.sha256
             dist/install.sh
           if-no-files-found: error
           retention-days: 1 # only the release job reads them; keeps artifact storage (Free: 500 MB) near zero
@@ -237,8 +249,10 @@ jobs:
           mkdir release
           for d in out/tarball-*; do
             t=${d#out/tarball-}
-            cp "$d/dinobot-$t.tar.gz" "$d/dinobot-$t.tar.gz.sha256" release/
-            (cd release && sha256sum -c "dinobot-$t.tar.gz.sha256")
+            for x in tar.gz tar.zst; do
+              cp "$d/dinobot-$t.$x" "$d/dinobot-$t.$x.sha256" release/
+              (cd release && sha256sum -c "dinobot-$t.$x.sha256")
+            done
           done
           # install.sh is stamped identically on every runner; publish one, refuse if they differ.
           set -- out/tarball-*/install.sh; first=$1
@@ -248,7 +262,12 @@ jobs:
             import { readFileSync } from "node:fs"; import { stampSigning } from "./build/stamp-signing.mjs";
             const s = readFileSync("release/install.sh", "utf8");
             if (stampSigning(s, JSON.parse(readFileSync("lib/signing.json", "utf8"))) !== s) { console.error("install.sh is not stamped from lib/signing.json"); process.exit(1); }'
-          (cd release && sha256sum dinobot-*.tar.gz install.sh >SHA256SUMS)
+          ls -la release
+      - name: the signature checker, compressed (install.sh's first download; same pinned binary)
+        run: |
+          targets=$(ls release | sed -n 's/^dinobot-\(.*\)\.tar\.gz$/\1/p')
+          build/cosign-assets.sh release $targets
+          (cd release && sha256sum dinobot-*.tar.gz dinobot-*.tar.zst cosign-*.gz cosign-*.zst install.sh >SHA256SUMS)
           ls -la release
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
@@ -256,7 +275,7 @@ jobs:
       - name: sign (keyless; Fulcio certificate for this workflow at this tag, logged in Rekor)
         run: |
           cd release
-          for f in dinobot-*.tar.gz install.sh SHA256SUMS; do
+          for f in dinobot-*.tar.gz dinobot-*.tar.zst cosign-*.gz cosign-*.zst install.sh SHA256SUMS; do
             cosign sign-blob --yes --bundle "$f.sigstore.json" "$f"
           done
       - name: verify exactly as install.sh / dinobot update will
@@ -265,7 +284,7 @@ jobs:
           ISS=$(jq -r .issuer lib/signing.json); REPO=$(jq -r .repo lib/signing.json)
           [ "$REPO" = "$GITHUB_REPOSITORY" ] || { echo "lib/signing.json repo $REPO != $GITHUB_REPOSITORY: clients would refuse this release"; exit 1; }
           cd release
-          for f in dinobot-*.tar.gz install.sh SHA256SUMS; do
+          for f in dinobot-*.tar.gz dinobot-*.tar.zst cosign-*.gz cosign-*.zst install.sh SHA256SUMS; do
             cosign verify-blob "$f" --bundle "$f.sigstore.json" \
               --certificate-identity-regexp "$RE" --certificate-oidc-issuer "$ISS" \
               --certificate-github-workflow-repository "$REPO"
@@ -274,7 +293,9 @@ jobs:
         if: ${{ !github.event.repository.private }}
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: release/dinobot-*.tar.gz
+          subject-path: |
+            release/dinobot-*.tar.gz
+            release/dinobot-*.tar.zst
       - name: publish the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

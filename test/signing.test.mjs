@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { stampSigning } from "../build/stamp-signing.mjs";
@@ -209,6 +209,71 @@ describe("install.sh: signature fails closed", () => {
     assert.notEqual(bad.status, 0);
     assert.match(bad.out, /could not get the signature checker.*does not match its pinned checksum/);
     assert.ok(!existsSync(join(d3, "h", ".dinobot", "tools", "cosign")) && !existsSync(join(d3, "h", ".dinobot", "app")));
+  });
+});
+
+describe("install.sh: the release's compressed cosign (smaller first download)", () => {
+  // Release route (DINOBOT_BASE_URL=file://…): cosign-<os>-<arch>.gz/.zst beside the tarballs; the pin
+  // is checked on the unpacked binary. sigstore's own download (DINOBOT_COSIGN_BASE_URL) only when
+  // the release has none.
+  const asset = cosignAsset(P).name;
+  function release(d, cosignBytes, exts) {
+    const rel = join(d, "rel");
+    mkdirSync(rel, { recursive: true });
+    const tar = fakeRelease(d);
+    for (const f of [tar, `${tar}.sha256`, `${tar}.sigstore.json`]) copyFileSync(f, join(rel, f.split("/").pop()));
+    for (const ext of exts) {
+      const raw = join(d, `cosign-raw-${ext}`);
+      writeFileSync(raw, cosignBytes);
+      spawnSync("sh", ["-c", ext === "gz" ? `gzip -9 -c "$1" >"$2"` : `zstd -q -19 -c "$1" >"$2"`, "sh", raw, join(rel, `${asset}.${ext}`)]);
+    }
+    return rel;
+  }
+  const pinnedFor = (bytes) => stampSigning(INSTALL_SH, { ...SIGNING, cosign: { ...SIGNING.cosign, sha256: { ...SIGNING.cosign.sha256, [`${OS}-${ARCH}`]: createHash("sha256").update(bytes).digest("hex") } } });
+  const hasZstd = spawnSync("sh", ["-c", "command -v zstd"], { env: { PATH: "/usr/bin:/bin" } }).status === 0;
+
+  it("cosign-<os>-<arch>.gz from the release: unpacked, pin checked, kept; sigstore not asked", () => {
+    const d = tmp();
+    const cos = readFileSync(fakeCosign(d));
+    const rel = release(d, cos, ["gz"]);
+    const r = runInstall({ script: pinnedFor(cos), tarball: "", home: join(d, "h"), env: { DINOBOT_TARBALL: "", DINOBOT_BASE_URL: `file://${rel}`, DINOBOT_FORMAT: "gz", DINOBOT_COSIGN_BASE_URL: `file://${join(d, "nowhere")}` } });
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /Signature OK/);
+    assert.ok(cos.equals(readFileSync(join(r.root, "tools", "cosign"))));
+    assert.match(readFileSync(join(r.root, "logs", "cosign.log"), "utf8"), new RegExp(`cosign from the release \\(${asset}\\.gz\\)`));
+    assert.deepEqual(readdirSync(join(r.root, "tools")).filter((f) => /\.(gz|zst|part)$/.test(f)), [], "no leftovers");
+  });
+  it("cosign-<os>-<arch>.zst first when this computer has zstd", { skip: !hasZstd && "no zstd" }, () => {
+    const d = tmp();
+    const cos = readFileSync(fakeCosign(d));
+    const rel = release(d, cos, ["zst"]);
+    const r = runInstall({ script: pinnedFor(cos), tarball: "", home: join(d, "h"), env: { DINOBOT_TARBALL: "", DINOBOT_BASE_URL: `file://${rel}`, DINOBOT_COSIGN_BASE_URL: `file://${join(d, "nowhere")}` } });
+    assert.equal(r.status, 0, r.out);
+    assert.match(readFileSync(join(r.root, "logs", "cosign.log"), "utf8"), new RegExp(`cosign from the release \\(${asset}\\.zst\\)`));
+  });
+  it("a compressed cosign that is not the pinned binary is refused (no fallback), nothing installed", () => {
+    const d = tmp();
+    const cos = readFileSync(fakeCosign(d));
+    const rel = release(d, Buffer.concat([cos, Buffer.from("# changed\n")]), ["gz"]);
+    // sigstore's route would have the right binary: it must not be tried after a mismatch.
+    const sig = join(d, "sigstore");
+    mkdirSync(sig);
+    writeFileSync(join(sig, asset), cos);
+    const r = runInstall({ script: pinnedFor(cos), tarball: "", home: join(d, "h"), env: { DINOBOT_TARBALL: "", DINOBOT_BASE_URL: `file://${rel}`, DINOBOT_FORMAT: "gz", DINOBOT_COSIGN_BASE_URL: `file://${sig}` } });
+    assert.notEqual(r.status, 0, r.out);
+    assert.match(r.out, /could not get the signature checker.*does not match its pinned checksum/);
+    assert.ok(!existsSync(join(r.root, "tools", "cosign")) && !existsSync(join(r.root, "app")));
+  });
+  it("no compressed cosign in the release: sigstore's binary (DINOBOT_COSIGN_BASE_URL)", () => {
+    const d = tmp();
+    const cos = readFileSync(fakeCosign(d));
+    const rel = release(d, cos, []);
+    const sig = join(d, "sigstore");
+    mkdirSync(sig);
+    writeFileSync(join(sig, asset), cos);
+    const r = runInstall({ script: pinnedFor(cos), tarball: "", home: join(d, "h"), env: { DINOBOT_TARBALL: "", DINOBOT_BASE_URL: `file://${rel}`, DINOBOT_COSIGN_BASE_URL: `file://${sig}` } });
+    assert.equal(r.status, 0, r.out);
+    assert.ok(cos.equals(readFileSync(join(r.root, "tools", "cosign"))));
   });
 });
 

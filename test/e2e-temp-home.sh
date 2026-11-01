@@ -34,6 +34,10 @@ E2E_PORT=${E2E_PORT:-6791}
 
 SRV_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
 mkdir -p "$E2E/www"; ln -sf "$TAR" "$TAR.sha256" "$E2E/www/"
+# The .tar.zst too when the build made one (install.sh takes it where zstd is installed; FORMAT=gz
+# serves only the .tar.gz, the route of a computer without zstd).
+ZTAR=${TAR%.gz}.zst
+[ "${FORMAT:-}" != gz ] && [ -f "$ZTAR" ] && ln -sf "$ZTAR" "$ZTAR.sha256" "$E2E/www/"
 python3 -m http.server "$SRV_PORT" --bind 127.0.0.1 --directory "$E2E/www" >"$E2E/http.log" 2>&1 &
 SRV=$!
 cleanup() {
@@ -126,6 +130,23 @@ if env -i HOME="$HOMEDIR" PATH=/usr/bin:/bin HERDR_SESSION=paseo-bots "$HOMEDIR/
 SL=$(env -i HOME="$HOMEDIR" PATH=/usr/bin:/bin HERDR_SESSION=paseo-bots "$HOMEDIR/.$PRODUCT_ID/bin/herdr" session list --json)
 node -e "const s=JSON.parse(process.argv[1]).sessions.find(x=>x.name==='paseo-bots'); if(!s?.running) process.exit(1)" "$SL" && echo "ok   herdr session list: paseo-bots running ($(node -p "JSON.parse(process.argv[1]).sessions.find(x=>x.name==='paseo-bots').socket_path" "$SL"))" || { echo "FAIL session list: $SL"; fails=$((fails + 1)); }
 
+# A bot posting into a group (bot-room) and DMing (bot-dm) from the daemon's environment: they load
+# the bundled daemon's CLI internals (PASEO_CLI_DIST), not ~/.local/lib/node_modules (visual-bugs 1:
+# "cannot load .../@getpaseo/cli/dist/utils/client.js"). The group and agent are made up, so the
+# daemon's answer is a refusal (exit 3); reaching it proves the load and the connection worked.
+BOT_ENV=(env -i); while IFS= read -r l; do [ -n "$l" ] && BOT_ENV+=("$l"); done <"$HOMEDIR/.$PRODUCT_ID/daemon.env"
+BOT_ENV+=(PASEO_AGENT_ID=e2e-no-such-agent)
+set +e
+BR=$("${BOT_ENV[@]}" "$HOMEDIR/.$PRODUCT_ID/bin/bot-room" post e2e-no-such-group --re e2e-1 --text "e2e" 2>&1); BRC=$?
+set -e
+if [ "$BRC" = 3 ] && echo "$BR" | grep -q '"ok":false'; then echo "ok   bot-room post reaches the daemon from a bot's env (refused: $(echo "$BR" | grep -o '"code":"[^"]*"' | head -1))"
+else echo "FAIL bot-room post (exit $BRC): $(echo "$BR" | tr '\n' ' ' | cut -c1-300)"; fails=$((fails + 1)); fi
+set +e
+BD=$("${BOT_ENV[@]}" "$HOMEDIR/.$PRODUCT_ID/bin/bot-dm" juniper --text "e2e" 2>&1); BDC=$?
+set -e
+# Unknown agent id: bot-dm lists the daemon's agents, then refuses the sender ("is not a bot").
+echo "$BD" | grep -q 'is not a bot' && echo "ok   bot-dm reaches the daemon from a bot's env (sender refused, exit $BDC)" || { echo "FAIL bot-dm (exit $BDC): $(echo "$BD" | tr '\n' ' ' | cut -c1-300)"; fails=$((fails + 1)); }
+
 # One sign-in for daemon, bots and herdr workers: DinoBot's own pi dir; ~/.pi untouched.
 test -f "$HOMEDIR/.$PRODUCT_ID/pi/auth.json" && echo "ok   sign-in saved in ~/.$PRODUCT_ID/pi" || { echo "FAIL no auth in own pi dir"; fails=$((fails + 1)); }
 test -e "$HOMEDIR/.pi" && { echo "FAIL ~/.pi was created"; fails=$((fails + 1)); } || echo "ok   ~/.pi not touched"
@@ -139,6 +160,7 @@ grep -q '^FAIL' "$E2E/doctor.txt" && { echo "FAIL doctor reported problems"; fai
 
 echo "== update (same tarball)"
 "${BW[@]}" update | tee "$E2E/update-same.txt"
+echo "   installed from $(node -p "require('$HOMEDIR/.$PRODUCT_ID/state.json').tarballFormat" 2>/dev/null) archive"
 grep -q 'already up to date' "$E2E/update-same.txt" && echo "ok   update: same build is a no-op" || { echo "FAIL update no-op"; fails=$((fails + 1)); }
 if [ "${UPDATE:-0}" = 1 ]; then
   echo "== update (changed tarball)"
@@ -147,7 +169,8 @@ if [ "${UPDATE:-0}" = 1 ]; then
   tar -C "$E2E/upd" -czf "$E2E/www/u.tar.gz" "$d"; rm -rf "$E2E/upd"
   uv=$("${BW[@]}" update --url "http://127.0.0.1:$SRV_PORT/u.tar.gz" 2>&1 || true)
   grep -q "e2e-update" "$HOMEDIR/.$PRODUCT_ID/app/MANIFEST.json" && { echo "FAIL unverified update was installed"; fails=$((fails + 1)); }
-  echo "$uv" | grep -q "cannot be verified" && echo "ok   update without a checksum refused (fail closed)" || { echo "FAIL update without checksum: $uv"; fails=$((fails + 1)); }
+  # (ff0690f: a .sha256 that 404s is reported as "no release published", still refused.)
+  echo "$uv" | grep -Eq "cannot be verified|No release has been published" && echo "ok   update without a checksum refused (fail closed)" || { echo "FAIL update without checksum: $uv"; fails=$((fails + 1)); }
   (cd "$E2E/www" && sha256sum u.tar.gz >u.tar.gz.sha256)
   t0=$(now_ms)
   "${BW[@]}" update --url "http://127.0.0.1:$SRV_PORT/u.tar.gz" | tee "$E2E/update.txt"

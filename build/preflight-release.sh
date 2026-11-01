@@ -84,7 +84,7 @@ say "secret scan ok"
 
 # 5. The release job's collect step on this one tarball; the verify step's identity regexp.
 mkdir -p "$W/rel/out/tarball-linux-x64"
-cp "$R"/dist/dinobot-linux-x64.tar.gz "$R"/dist/dinobot-linux-x64.tar.gz.sha256 "$R"/dist/install.sh "$W/rel/out/tarball-linux-x64/"
+cp "$R"/dist/dinobot-linux-x64.tar.gz "$R"/dist/dinobot-linux-x64.tar.gz.sha256 "$R"/dist/dinobot-linux-x64.tar.zst "$R"/dist/dinobot-linux-x64.tar.zst.sha256 "$R"/dist/install.sh "$W/rel/out/tarball-linux-x64/"
 COLLECT=$(step release "collect, check checksums, one install.sh")
 (cd "$R" && rm -rf release out && cp -r "$W/rel/out" out && bash -euo pipefail -c "$COLLECT" && rm -rf release out) >"$W/collect.log" 2>&1 || { cat "$W/collect.log" >&2; die "release collect step"; }
 (cd "$R" && node -e 'import("./lib/signature.mjs").then(m => { const r = m.identityRegexp(); if (!r) process.exit(1); console.log(r) })') >"$W/identity.log" 2>&1 || { cat "$W/identity.log" >&2; die "identityRegexp"; }
