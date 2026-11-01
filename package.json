@@ -1,0 +1,40 @@
+{
+  "name": "paseo-bots",
+  "private": true,
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "author": "omcdowell",
+  "description": "Paseo plugin: a Bots list in the sidebar that opens each OptChat bot's chat in one tap.",
+  "files": [
+    "paseo-plugin.json",
+    "LICENSE",
+    "NOTICE",
+    "README.md",
+    "index.client.tsx",
+    "index.server.ts",
+    "client/",
+    "server/",
+    "shared/"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "smoke:bot-dm": "node bin/bot-dm-smoke.mjs",
+    "avatar:pack": "node scripts/avatar/build-pack.mjs",
+    "avatar:parity": "tsx scripts/avatar/parity.mjs"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  },
+  "devDependencies": {
+    "@getpaseo/plugin": "0.11.1",
+    "@tanstack/react-query": "^5.90.11",
+    "@types/node": "^24.0.0",
+    "@types/react": "~19.2.0",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3",
+    "zod": "^4.4.3"
+  }
+}

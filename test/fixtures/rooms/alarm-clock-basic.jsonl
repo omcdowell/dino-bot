@@ -1,0 +1,13 @@
+{"op":"route","now":0,"id":"m1","from":"user","text":"morning all, where are we on the launch?","hop":0,"expect":{"to":["wallace"],"refused":[],"assign":[]}}
+{"op":"deliver","bot":"wallace","busy":false,"expect":{"ids":["m1"]}}
+{"op":"route","now":1000,"id":"m2","from":"wallace","text":"@scrat do you have the date? @peggy copy status?","hop":1,"expect":{"to":["scrat","peggy"],"refused":[],"assign":[]}}
+{"op":"route","now":2000,"id":"m3","from":"user","text":"@Peggy also send me the draft","hop":0,"expect":{"to":["peggy","wallace"],"refused":[],"assign":[]}}
+{"op":"deliver","bot":"peggy","busy":true,"expect":{"ids":[]}}
+{"op":"deliver","bot":"scrat","busy":false,"expect":{"ids":["m1","m2","m3"]}}
+{"op":"deliver","bot":"peggy","busy":false,"expect":{"ids":["m1","m2","m3"]}}
+{"op":"deliver","bot":"peggy","busy":false,"expect":{"ids":[]}}
+{"op":"route","now":3000,"id":"m4","from":"scrat","text":"3 Nov. @wallace, @scrat noted.","hop":2,"expect":{"to":["wallace"],"refused":[{"bot":"scrat","reason":"self"}],"assign":[]}}
+{"op":"route","now":4000,"id":"m5","from":"wallace","text":"@scrat thanks","hop":6,"expect":{"to":[],"refused":[{"bot":"scrat","reason":"hop_cap"}],"assign":[]}}
+{"op":"route","now":5000,"id":"m6","from":"user","text":"@wallace task: book the venue for 3 Nov","hop":0,"expect":{"to":["wallace"],"refused":[],"assign":["wallace"]}}
+{"op":"deliver","bot":"wallace","busy":false,"expect":{"ids":["m3","m4","m6"]}}
+{"op":"route","now":6000,"id":"m7","from":"system","text":"Sent to Wallace's main chat","hop":0,"expect":{"to":[],"refused":[],"assign":[]}}
