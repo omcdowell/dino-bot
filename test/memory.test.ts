@@ -1,0 +1,860 @@
+import { mock, test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, appendFileSync, writeFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Memory, appendJson, cap, CAP, start, end, bytes, localDay, type Compression } from '../src/memory.ts';
+import { lockProfile } from '../src/profiles.ts';
+import { logMessage, buildContext, boundedMessage } from '../src/transcript.ts';
+import { Inbox } from '../src/inbox.ts';
+import type { ToolResultMessage } from '@earendil-works/pi-ai';
+import type { AssistantMessage, SystemMessage, UserMessage } from '@earendil-works/pi-ai';
+
+test('tree covers all history, fits incrementally, and exact originals survive restart', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-test-'));
+  const calls: Compression[] = [];
+  const compress = async (input: Compression) => {
+    calls.push(input);
+    return input.source.slice(0, 170);
+  };
+  let memory = new Memory(dir, compress, () => {}, 1500);
+  try {
+    for (let i = 0; i < 48; i++) memory.append('user', `Original ${i}: ${'valuable detail '.repeat(30)}`);
+    await memory.settle(AbortSignal.timeout(5000), true);
+    assert.equal(start(memory.view[0]), 0);
+    assert.equal(end(memory.view.at(-1)!), 48);
+    for (let i = 1; i < memory.view.length; i++) assert.equal(end(memory.view[i - 1]), start(memory.view[i]));
+    assert.ok(memory.size <= 1500);
+    assert.ok(memory.view.some(p => p.l > 0));
+    assert.ok(calls.every(c => !c.context.includes('not summarized yet')));
+    assert.match(memory.zoom(17, 1), /Original 17:/);
+    const originals = memory.root.map(e => e.text);
+    const parts = [...memory.view];
+    memory.append('talk', 'One short new reply.');
+    await memory.settle(AbortSignal.timeout(5000), true);
+    for (const before of parts) assert.ok(memory.view.some(after => start(after) <= start(before) && end(after) >= end(before)));
+    await memory.close();
+    memory = new Memory(dir, compress, () => {}, 1500);
+    await memory.settle(AbortSignal.timeout(5000), true);
+    assert.deepEqual(
+      memory.root.slice(0, 48).map(e => e.text),
+      originals,
+    );
+    assert.match(memory.zoom(17, 1), /valuable detail/);
+    assert.throws(() => memory.zoom(3, 4), /No line/);
+  } finally {
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('pending compaction blocks a turn, cancellation works, failure retries', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-test-'));
+  let attempts = 0;
+  const memory = new Memory(
+    dir,
+    async () => {
+      attempts++;
+      if (attempts === 1) throw new Error('temporary outage');
+      return 'user: retained decision';
+    },
+    () => {},
+    128000,
+    8,
+    100,
+  );
+  try {
+    memory.append('user', 'large message '.repeat(100));
+    await assert.rejects(memory.settle(AbortSignal.timeout(20)), /cancelled/);
+    await memory.settle(AbortSignal.timeout(2000));
+    assert.equal(attempts, 2);
+    assert.ok(memory.ready);
+    assert.equal(memory.root.length, 1);
+  } finally {
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a turn waits for the view to be built, not for merges that bring it under budget', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-test-'));
+  let release = () => {};
+  const merging = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  // Each 300-byte message is its own summary; merging two goes past 512 bytes, so it needs the compactor, which holds it.
+  const memory = new Memory(
+    dir,
+    async input => {
+      if (input.merge) await merging;
+      return 'merged';
+    },
+    () => {},
+    500,
+  );
+  try {
+    memory.append('user', 'a'.repeat(300));
+    memory.append('user', 'b'.repeat(300));
+    await memory.settle(AbortSignal.timeout(2000));
+    assert.ok(memory.ready);
+    assert.ok(memory.size > memory.budget, 'the view is still over budget while the merge is pending');
+    release();
+    await memory.settle(AbortSignal.timeout(2000), true);
+    assert.ok(memory.size <= memory.budget);
+  } finally {
+    release();
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('torn final line is reported and the next append remains readable', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-test-'));
+  let memory = new Memory(dir, async () => 'summary');
+  memory.append('user', 'first');
+  await memory.close();
+  appendFileSync(join(dir, 'main', `${localDay()}.jsonl`), '{"torn":');
+  const warnings: string[] = [];
+  memory = new Memory(
+    dir,
+    async () => 'summary',
+    text => warnings.push(text),
+  );
+  memory.append('user', 'second');
+  await memory.close();
+  memory = new Memory(
+    dir,
+    async () => 'summary',
+    () => {},
+  );
+  try {
+    assert.equal(warnings.length, 1);
+    assert.deepEqual(
+      memory.root.map(e => e.text),
+      ['first', 'second'],
+    );
+  } finally {
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a second writer on one profile is refused before it writes, and the profile still opens', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-test-')),
+    compress = async () => 'summary';
+  const first = new Memory(dir, compress, () => {}),
+    second = new Memory(dir, compress, () => {});
+  try {
+    first.append('user', 'from the first writer');
+    const file = join(dir, 'main', `${localDay()}.jsonl`),
+      before = readFileSync(file, 'utf8');
+    assert.throws(() => second.append('user', 'from the second writer'), /Another process wrote .*nothing was written/);
+    assert.equal(readFileSync(file, 'utf8'), before);
+    assert.equal(second.root.length, 0);
+    assert.throws(() => second.append('user', 'a retry'), /Another process wrote/);
+  } finally {
+    await first.close();
+    await second.close();
+  }
+  const reopened = new Memory(dir, compress, () => {});
+  try {
+    assert.deepEqual(
+      reopened.root.map(e => e.text),
+      ['from the first writer'],
+    );
+  } finally {
+    await reopened.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a second writer that has seen today's file is refused after the other appends to it", async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-test-')),
+    compress = async () => 'summary';
+  const first = new Memory(dir, compress, () => {});
+  first.append('user', 'one');
+  const second = new Memory(dir, compress, () => {});
+  try {
+    first.append('user', 'two');
+    assert.throws(() => second.append('user', 'three'), /Another process wrote .*nothing was written/);
+  } finally {
+    await first.close();
+    await second.close();
+  }
+  const reopened = new Memory(dir, compress, () => {});
+  try {
+    assert.deepEqual(
+      reopened.root.map(e => e.text),
+      ['one', 'two'],
+    );
+  } finally {
+    await reopened.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a day file that another process created first is caught, and an ordinary midnight rollover is not', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-test-')),
+    compress = async () => 'summary';
+  mock.timers.enable({ apis: ['Date'], now: new Date(2026, 0, 1, 23, 59) });
+  const opened: Memory[] = [];
+  try {
+    const lone = new Memory(dir, compress, () => {});
+    opened.push(lone);
+    lone.append('user', 'before midnight');
+    mock.timers.setTime(new Date(2026, 0, 2, 0, 1).getTime());
+    lone.append('user', 'after midnight');
+    const a = new Memory(dir, compress, () => {}),
+      b = new Memory(dir, compress, () => {});
+    opened.push(a, b);
+    mock.timers.setTime(new Date(2026, 0, 3, 0, 1).getTime());
+    b.append('user', 'b on the third');
+    assert.throws(() => a.append('user', 'a on the third'), /Another process wrote .*2026-01-03\.jsonl/);
+    b.append('user', 'b again');
+  } finally {
+    mock.timers.reset();
+    await Promise.all(opened.map(m => m.close()));
+  }
+  const reopened = new Memory(dir, compress, () => {});
+  try {
+    assert.deepEqual(
+      reopened.root.map(e => e.text),
+      ['before midnight', 'after midnight', 'b on the third', 'b again'],
+    );
+  } finally {
+    await reopened.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a second writer whose first write starts a new day file is refused when the other wrote an older day file', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-test-')),
+    compress = async () => 'summary';
+  mock.timers.enable({ apis: ['Date'], now: new Date(2026, 0, 1, 12) });
+  const opened: Memory[] = [];
+  try {
+    const a = new Memory(dir, compress, () => {}),
+      b = new Memory(dir, compress, () => {});
+    opened.push(a, b);
+    a.append('user', 'a on the first');
+    mock.timers.setTime(new Date(2026, 0, 2, 12).getTime());
+    assert.throws(() => b.append('user', 'b on the second'), /Another process wrote .*2026-01-02\.jsonl.*nothing was written/);
+    assert.equal(b.root.length, 0);
+  } finally {
+    mock.timers.reset();
+    await Promise.all(opened.map(m => m.close()));
+  }
+  const reopened = new Memory(dir, compress, () => {});
+  try {
+    assert.deepEqual(
+      reopened.root.map(e => e.text),
+      ['a on the first'],
+    );
+  } finally {
+    await reopened.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('appendJson appends without a size, and with one it refuses a file of any other size', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-test-')),
+    file = join(dir, 'log.jsonl');
+  try {
+    const one = appendJson(file, { n: 1 });
+    assert.equal(one, readFileSync(file).length);
+    const two = appendJson(file, { n: 2 }, one);
+    assert.equal(two, readFileSync(file).length);
+    assert.throws(() => appendJson(file, { n: 3 }, one), /nothing was written/);
+    assert.equal(readFileSync(file, 'utf8'), '{"n":1}\n{"n":2}\n');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('two writers that each summarize the same log leave a tree that still loads', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-test-')),
+    compress = async () => 'summary';
+  const log = new Memory(dir, compress, () => {});
+  for (let i = 0; i < 3; i++) log.append('user', `message ${i}`);
+  await log.close();
+  const a = new Memory(dir, compress, () => {}),
+    b = new Memory(dir, compress, () => {});
+  await Promise.all([a.settle(AbortSignal.timeout(5000), true), b.settle(AbortSignal.timeout(5000), true)]);
+  await Promise.all([a.close(), b.close()]);
+  const tree = readFileSync(join(dir, 'tree', `${localDay()}.jsonl`), 'utf8')
+    .trim()
+    .split('\n');
+  assert.ok(tree.length > a.tree.size, 'both writers saved the same nodes');
+  const reopened = new Memory(dir, compress, () => {});
+  try {
+    await reopened.settle(AbortSignal.timeout(5000), true);
+    assert.equal(reopened.root.length, 3);
+    assert.equal(reopened.tree.size, a.tree.size);
+  } finally {
+    await reopened.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a live profile cannot be opened by a second writer; other profiles can run', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-test-'));
+  const unlock = await lockProfile(dir, 'test owner');
+  try {
+    await assert.rejects(lockProfile(dir, 'second writer'), /test owner/);
+    mkdirSync(dir + '-other');
+    const other = await lockProfile(dir + '-other', 'other profile');
+    await other();
+    rmSync(dir + '-other', { recursive: true, force: true });
+  } finally {
+    await unlock();
+  }
+  const again = await lockProfile(dir, 'after close');
+  await again();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('next turn excludes old conversation; current tool loop and reasoning remain verbatim', async () => {
+  const system: SystemMessage = { role: 'system', content: 'old system', timestamp: 0 };
+  const old: UserMessage = { role: 'user', content: 'OLD FULL CONVERSATION', timestamp: 1 };
+  const current: UserMessage = { role: 'user', content: 'new question', timestamp: 2 };
+  const assistant: AssistantMessage = {
+    role: 'assistant',
+    content: [
+      { type: 'thinking', thinking: 'private thoughts', thinkingSignature: 'signed' },
+      { type: 'text', text: 'visible reply' },
+    ],
+    api: 'anthropic-messages',
+    provider: 'anthropic',
+    model: 'fixture',
+    stopReason: 'stop',
+    timestamp: 3,
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+  };
+  const projected = buildContext([system, old, current, assistant], [current, assistant], '<chat>\n0+1|old summary\n</chat>', 'new system');
+  assert.ok(!JSON.stringify(projected).includes('OLD FULL CONVERSATION'));
+  assert.equal(projected[2], assistant);
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-test-'));
+  const memory = new Memory(dir, async () => 'summary');
+  try {
+    logMessage(memory, assistant);
+    assert.equal(memory.root.length, 1);
+    assert.equal(memory.root[0].text, 'visible reply');
+  } finally {
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('tool images survive active-context truncation while text is bounded', () => {
+  const image = { type: 'image' as const, mimeType: 'image/png', data: 'example-base64' };
+  const message: ToolResultMessage = {
+    role: 'toolResult',
+    toolCallId: 'read-1',
+    toolName: 'read',
+    isError: false,
+    timestamp: 1,
+    content: [{ type: 'text', text: 'x'.repeat(40_000) }, image],
+  };
+  const bounded = boundedMessage(message);
+  assert.equal(bounded.role, 'toolResult');
+  if (bounded.role !== 'toolResult') throw new Error('unexpected role');
+  assert.ok(bounded.content.includes(image));
+  assert.ok(bounded.content.filter(c => c.type === 'text').reduce((n, c) => n + c.text.length, 0) <= CAP);
+});
+
+test('crash recovery saves unconsumed inputs once, including append-before-ack crash', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-test-'));
+  const memory = new Memory(dir, async () => 'summary');
+  try {
+    let inbox = new Inbox(dir);
+    inbox.record('queued while the agent was working');
+    assert.equal(inbox.claim('unrelated extension message'), undefined);
+    const delivered = inbox.record('delivered, but crashed before the journal acknowledgment');
+    memory.append('user', 'delivered, but crashed before the journal acknowledgment', new Date().toISOString(), delivered);
+    inbox = new Inbox(dir);
+    assert.equal(inbox.recover(memory), 1);
+    assert.equal(memory.root.length, 2);
+    assert.equal(new Inbox(dir).recover(memory), 0);
+    assert.equal(memory.root.length, 2);
+  } finally {
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('incremental view size and pending count match the rendered view across failures and restart', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-size-'));
+  let failures = 3;
+  const compress = async (input: Compression) => {
+    if (failures-- > 0) throw new Error('transient');
+    return input.source.slice(0, 120 + (input.source.length % 200));
+  };
+  const measured = (memory: Memory) =>
+    memory
+      .render()
+      .split('\n')
+      .slice(1, -1)
+      .reduce((n, line) => n + bytes(line.slice(line.indexOf('|') + 1)), 0);
+  let memory = new Memory(dir, compress, () => {}, 4000, 8, 10);
+  try {
+    for (let i = 0; i < 120; i++) {
+      memory.append(i % 3 ? 'echo' : 'user', `${i} ${'detail '.repeat(i % 7 ? 90 : 2)}`);
+      assert.equal(memory.size, measured(memory), `size after append ${i}`);
+    }
+    await memory.settle(AbortSignal.timeout(5000), true);
+    assert.equal(memory.pending, 0);
+    assert.equal(memory.size, measured(memory));
+    await memory.close();
+    memory = new Memory(dir, compress, () => {}, 4000, 8, 10);
+    assert.equal(memory.pending, 0);
+    assert.equal(memory.size, measured(memory));
+  } finally {
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Work counters, not timings: the old code re-measured the whole view on every fit and rescanned every level from 0 on every pump.
+function longProfile(count: number) {
+  // Written directly: one fsync per append would make the fixture slow. Short entries are their own summaries.
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-scale-'));
+  mkdirSync(join(dir, 'main'));
+  mkdirSync(join(dir, 'tree'));
+  const date = new Date().toISOString(),
+    lines: string[] = [],
+    nodes: string[] = [];
+  for (let i = 0; i < count; i++) lines.push(JSON.stringify({ i, kind: 'user', text: `m${i}`, date }));
+  for (let l = 0, n = count; n > 0; l++, n = Math.floor(n / 2))
+    for (let i = 0; i < n; i++) nodes.push(JSON.stringify({ l, i, text: `summary ${l}:${i}` }));
+  writeFileSync(join(dir, 'main', `${localDay()}.jsonl`), lines.join('\n') + '\n');
+  writeFileSync(join(dir, 'tree', `${localDay()}.jsonl`), nodes.join('\n') + '\n');
+  return dir;
+}
+
+test('loading a long profile does not re-measure the whole view for every message', async () => {
+  const count = 2048,
+    dir = longProfile(count);
+  const get = Map.prototype.get;
+  let lookups = 0;
+  Map.prototype.get = function (this: Map<unknown, unknown>, key: unknown) {
+    lookups++;
+    return get.call(this, key);
+  };
+  let memory: Memory | undefined;
+  try {
+    memory = new Memory(
+      dir,
+      async () => 'unused',
+      () => {},
+    );
+  } finally {
+    Map.prototype.get = get;
+  }
+  try {
+    assert.equal(memory.view.length, count);
+    assert.ok(lookups < 10 * count, `${lookups} lookups to load ${count} messages`);
+  } finally {
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a new message is summarized without rescanning every built node', async () => {
+  const count = 2048,
+    dir = longProfile(count);
+  // A small budget keeps the view short, as in a real profile, so the tree is far larger than the view.
+  const memory = new Memory(
+    dir,
+    async () => 'unused',
+    () => {},
+    1000,
+  );
+  try {
+    assert.ok(memory.view.length < 100);
+    await memory.settle(AbortSignal.timeout(10000), true); // the first pump after load finds each level's frontier
+    const get = memory.tree.get;
+    let lookups = 0;
+    memory.tree.get = function (this: typeof memory.tree, key) {
+      lookups++;
+      return get.call(this, key);
+    };
+    memory.append('user', 'one more');
+    await memory.settle(AbortSignal.timeout(10000), true);
+    assert.equal(memory.pending, 0);
+    assert.ok(lookups < count / 2, `${lookups} tree lookups for one new message over ${count}`);
+  } finally {
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an expanded /skill: command claims the input it came from, and only that one', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-inbox-'));
+  try {
+    const inbox = new Inbox(dir);
+    const plain = inbox.record('/skill:demox');
+    const skill = inbox.record('/skill:demox  go');
+    assert.equal(inbox.claimSkill('demo', 'go'), undefined, 'a skill name must match whole');
+    assert.equal(inbox.claimSkill('demox', 'other'), undefined, 'arguments must match');
+    assert.equal(inbox.claimSkill('demox', 'go'), skill);
+    assert.equal(inbox.claimSkill('demox', 'go'), undefined, 'an input is claimed once');
+    assert.equal(inbox.claimSkill('demox'), plain);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('rebuilding a leaf that a saved parent already hides does not inflate the view size', async () => {
+  // A damaged tree file can lose a leaf while its parent survives; loading then merges the unbuilt leaf away.
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-hidden-'));
+  mkdirSync(join(dir, 'main'));
+  mkdirSync(join(dir, 'tree'));
+  const date = new Date().toISOString();
+  const texts = ['x'.repeat(400), 'b', 'c', 'd'];
+  writeFileSync(
+    join(dir, 'main', `${localDay()}.jsonl`),
+    texts.map((text, i) => JSON.stringify({ i, kind: 'user', text, date })).join('\n') + '\n',
+  );
+  const nodes = [
+    { l: 0, i: 1 },
+    { l: 0, i: 2 },
+    { l: 0, i: 3 },
+    { l: 1, i: 0 },
+    { l: 1, i: 1 },
+  ];
+  writeFileSync(
+    join(dir, 'tree', `${localDay()}.jsonl`),
+    nodes.map(n => JSON.stringify({ ...n, text: `summary ${n.l}:${n.i} padded to twenty` })).join('\n') + '\n{damaged\n',
+  );
+  const measured = (memory: Memory) =>
+    memory
+      .render()
+      .split('\n')
+      .slice(1, -1)
+      .reduce((n, line) => n + bytes(line.slice(line.indexOf('|') + 1)), 0);
+  const memory = new Memory(
+    dir,
+    async () => 'top',
+    () => {},
+    80,
+  );
+  try {
+    assert.ok(
+      memory.view.every(p => p.l > 0),
+      'the unbuilt leaf 0 is hidden by its saved parent',
+    );
+    assert.equal(memory.pending, 1);
+    await memory.settle(AbortSignal.timeout(3000), true);
+    assert.equal(memory.pending, 0);
+    assert.equal(memory.size, measured(memory));
+    assert.ok(memory.size <= 80);
+  } finally {
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a log whose day files sort against the order of the entries still opens, and a broken one does not', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-order-')),
+    compress = async () => 'summary';
+  const home = process.env.TZ;
+  mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-05T17:00:00Z') });
+  const opened: Memory[] = [];
+  try {
+    process.env.TZ = 'Asia/Tokyo';
+    let memory = new Memory(dir, compress, () => {});
+    opened.push(memory);
+    memory.append('user', 'a');
+    memory.append('user', 'b');
+    await memory.close();
+    process.env.TZ = 'America/Sao_Paulo';
+    memory = new Memory(dir, compress, () => {});
+    opened.push(memory);
+    memory.append('user', 'c');
+    await memory.close();
+    assert.deepEqual(readdirSync(join(dir, 'main')).sort(), ['2026-10-05.jsonl', '2026-10-06.jsonl']);
+    memory = new Memory(dir, compress, () => {});
+    opened.push(memory);
+    assert.deepEqual(
+      memory.root.map(e => e.text),
+      ['a', 'b', 'c'],
+    );
+    await memory.close();
+  } finally {
+    mock.timers.reset();
+    if (home === undefined) delete process.env.TZ;
+    else process.env.TZ = home;
+    await Promise.all(opened.map(m => m.close()));
+  }
+  const entry = (i: number) => JSON.stringify({ i, kind: 'user', text: `m${i}`, date: new Date().toISOString() }) + '\n';
+  try {
+    writeFileSync(join(dir, 'main', '2026-10-05.jsonl'), entry(2) + entry(2));
+    assert.throws(() => new Memory(dir, compress, () => {}), /noncontiguous/);
+    writeFileSync(join(dir, 'main', '2026-10-05.jsonl'), entry(2));
+    writeFileSync(join(dir, 'main', '2026-10-06.jsonl'), entry(0) + entry(3));
+    assert.throws(() => new Memory(dir, compress, () => {}), /noncontiguous/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an append ends an unterminated last line, in every file, and counts the byte it wrote', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-torn-')),
+    file = join(dir, 'log.jsonl');
+  try {
+    appendJson(file, { n: 1 });
+    appendFileSync(file, '{"n":');
+    const size = appendJson(file, { n: 2 });
+    assert.equal(readFileSync(file, 'utf8'), '{"n":1}\n{"n":\n{"n":2}\n');
+    assert.equal(size, readFileSync(file).length);
+    assert.equal(appendJson(file, { n: 3 }, size), readFileSync(file).length);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a torn tail that Memory loaded is repaired by its next append without tripping the write guard', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-torn-')),
+    compress = async () => 'summary',
+    warnings: string[] = [];
+  let memory = new Memory(dir, compress, () => {});
+  memory.append('user', 'first');
+  await memory.close();
+  const file = join(dir, 'main', `${localDay()}.jsonl`);
+  appendFileSync(file, '{"i":1,"kind":"user","te');
+  const torn = readFileSync(file, 'utf8');
+  memory = new Memory(dir, compress, text => warnings.push(text));
+  try {
+    assert.equal(readFileSync(file, 'utf8'), torn, 'opening a profile writes nothing');
+    memory.append('user', 'second');
+    memory.append('user', 'third');
+    assert.equal(warnings.length, 1);
+  } finally {
+    await memory.close();
+  }
+  memory = new Memory(dir, compress, () => {});
+  try {
+    assert.deepEqual(
+      memory.root.map(e => e.text),
+      ['first', 'second', 'third'],
+    );
+  } finally {
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a torn tail that another process wrote is refused, not repaired', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-torn-')),
+    memory = new Memory(
+      dir,
+      async () => 'summary',
+      () => {},
+    );
+  try {
+    memory.append('user', 'first');
+    const file = join(dir, 'main', `${localDay()}.jsonl`);
+    appendFileSync(file, '{"i":1,"kind":"user","te');
+    const before = readFileSync(file, 'utf8');
+    assert.throws(() => memory.append('user', 'second'), /Another process wrote .*nothing was written/);
+    assert.equal(readFileSync(file, 'utf8'), before);
+  } finally {
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const wellFormed = (text: string) => Buffer.from(text).toString() === text;
+const pieces = (out: string) => {
+  const notice = out.match(/\n\[(\d+) characters omitted; head and tail retained\]\n/)!;
+  return { claimed: Number(notice[1]), head: out.slice(0, notice.index), tail: out.slice(notice.index! + notice[0].length) };
+};
+
+test('cap states exactly how many characters it omitted and stays within the limit', () => {
+  assert.equal(cap('x'.repeat(CAP)), 'x'.repeat(CAP));
+  for (const text of ['x'.repeat(CAP + 1), 'x'.repeat(CAP + 49), 'x'.repeat(250_000)]) {
+    const out = cap(text),
+      { claimed, head, tail } = pieces(out);
+    assert.ok(out.length <= CAP, `${out.length} units`);
+    assert.ok(text.startsWith(head) && text.endsWith(tail));
+    assert.equal(claimed, text.length - head.length - tail.length);
+  }
+});
+
+test('cap never cuts a surrogate pair in half', () => {
+  const emoji = '\u{1F600}'.repeat(CAP);
+  for (const text of ['a' + emoji, emoji, 'ab' + emoji, emoji + 'a']) {
+    const out = cap(text),
+      { claimed, head, tail } = pieces(out);
+    assert.ok(wellFormed(out), `lone surrogate in the cap of a ${text.length} unit text`);
+    assert.ok(out.length <= CAP && text.startsWith(head) && text.endsWith(tail));
+    assert.equal(claimed, text.length - head.length - tail.length);
+  }
+});
+
+test('view size counts the flattened text that render emits, for new and reloaded summaries', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-flat-'));
+  const measured = (memory: Memory) =>
+    memory
+      .render()
+      .split('\n')
+      .slice(1, -1)
+      .reduce((n, line) => n + bytes(line.slice(line.indexOf('|') + 1)), 0);
+  let memory = new Memory(dir, async () => 'x');
+  try {
+    memory.append('user', 'a\r\n\r\n\r\nb\n\n\nc');
+    assert.equal(memory.size, measured(memory), 'built from the entry');
+    await memory.settle(AbortSignal.timeout(2000), true);
+    assert.equal(memory.size, measured(memory));
+    await memory.close();
+    memory = new Memory(dir, async () => 'x');
+    assert.equal(memory.size, measured(memory), 'loaded from the tree');
+  } finally {
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('every merge is built once its two halves are, while the view stays whole lines under budget', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-test-'));
+  const calls: Compression[] = [];
+  // 300-byte lines: merging two of them goes past 512 bytes, so every merge needs the compactor.
+  const memory = new Memory(
+    dir,
+    async input => {
+      calls.push(input);
+      return input.source.slice(0, 300);
+    },
+    () => {},
+    128_000,
+  );
+  try {
+    for (let i = 0; i < 16; i++) memory.append('user', `Message ${i}: ${'detail '.repeat(100)}`);
+    await memory.settle(AbortSignal.timeout(5000), true);
+    assert.equal(calls.filter(c => c.merge).length, 15, 'the 15 parents of a full tree of 16, built ahead of any batch');
+    assert.equal(calls.length, 31);
+    assert.ok(
+      memory.view.every(p => p.l === 0),
+      'the view merges nothing until it passes its budget',
+    );
+  } finally {
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('one batch starts past the budget and merges down to half of it, most due first, then the view only grows', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-test-'));
+  const merges: Compression[] = [];
+  // 300-byte lines against a 4500-byte budget: the 16th line starts a batch down to 2250 bytes.
+  const memory = new Memory(
+    dir,
+    async input => {
+      if (input.merge) merges.push(input);
+      return input.source.slice(0, 300);
+    },
+    () => {},
+    4500,
+  );
+  try {
+    const sizes: number[] = [];
+    for (let i = 0; i < 24; i++) {
+      memory.append('user', `Message ${i}: ${'detail '.repeat(100)}`);
+      await memory.settle(AbortSignal.timeout(5000), true);
+      sizes.push(memory.size);
+    }
+    // The batch runs when a message is logged, while its own line is still a 29-byte placeholder.
+    const drops = sizes.flatMap((size, i) => (i > 0 && size < sizes[i - 1] ? [i] : []));
+    assert.deepEqual(drops, [15, 23], `a sawtooth: ${sizes}`);
+    for (const i of drops) assert.ok(sizes[i - 1] === 4500 && sizes[i] <= 2250 + 300, `drop at ${i}: ${sizes}`);
+    for (let i = 1; i < sizes.length; i++)
+      if (!drops.includes(i)) assert.equal(sizes[i], sizes[i - 1] + 300, 'between batches the view only grows');
+    assert.ok(memory.view.some(p => p.l > 0));
+    assert.equal(memory.view[0].l > 0, true, 'the oldest pair is merged first');
+    assert.equal(memory.view.at(-1)!.l, 0, 'the newest messages stay whole');
+    for (const part of memory.view.filter(p => p.l > 0)) assert.doesNotThrow(() => memory.zoom(start(part), 2 ** part.l));
+  } finally {
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('search finds originals by every term, newest first, with ids for zoom', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-test-'));
+  const memory = new Memory(
+    dir,
+    async input => input.source.slice(0, 100),
+    () => {},
+  );
+  try {
+    memory.append('user', 'We picked the e-ink display from Waveshare.');
+    memory.append('talk', 'Noted: Waveshare 7.5 inch e-ink, SPI.');
+    memory.append('user', 'Unrelated: the buzzer is too loud.');
+    memory.append('tool', 'read {"path":"notes/display.md"}');
+    const found = memory.search('waveshare E-INK');
+    assert.match(found, /^1\+0\|talk .*Waveshare 7\.5 inch e-ink/m);
+    assert.match(found, /^0\+0\|user .*picked the e-ink display/m);
+    assert.ok(found.indexOf('1+0|') < found.indexOf('0+0|'), 'newest first');
+    assert.doesNotMatch(found, /buzzer/);
+    assert.match(memory.search('buzzer'), /2\+0\|user/);
+    assert.match(memory.search('nothing like this'), /No messages match/);
+    for (let i = 0; i < 30; i++) memory.append('user', `repeat ${i}`);
+    const limited = memory.search('repeat', 5);
+    assert.equal(limited.split('\n').filter(l => /^\d+\+0\|/.test(l)).length, 5);
+    assert.match(limited, /25 more matches/);
+    const long = 'x'.repeat(2000) + ' needle ' + 'y'.repeat(2000);
+    memory.append('echo', long);
+    const line = memory.search('needle').split('\n')[0];
+    assert.ok(line.length < 400 && line.includes('needle'), 'long messages are shown as a snippet around the match');
+    assert.throws(() => memory.search('  '), /search terms/);
+  } finally {
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const envelope = (from: string, id = '01M4CTXYSMJK7QSYZFX8E970Z0') =>
+  `[dm ${id} from ${from} to tmp-optchat-smoke kind=request hop=1 re=-]`;
+
+test('a user message headed by a bot-dm envelope is tagged dm:<from>, never user:', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-test-'));
+  const calls: Compression[] = [];
+  const memory = new Memory(
+    dir,
+    async input => {
+      calls.push(input);
+      return input.source.slice(0, 100);
+    },
+    () => {},
+  );
+  try {
+    memory.append('user', `${envelope('flint')}\nPlease check the build.`);
+    memory.append('user', `${envelope('bitzer')}\n${'long body '.repeat(80)}`);
+    memory.append('user', 'Sam here: what did flint ask?');
+    memory.append('user', `quoting: ${envelope('flint')}`);
+    memory.append('talk', `${envelope('flint')} is how a DM starts.`);
+    await memory.settle(AbortSignal.timeout(5000), true);
+    // A short DM is its own line, word for word, under the dm tag.
+    assert.equal(memory.node({ l: 0, i: 0 })?.text, `dm:flint: ${envelope('flint')}\nPlease check the build.`);
+    // A long DM reaches the compactor under the dm tag.
+    assert.equal(calls.length, 1);
+    assert.ok(calls[0].source.startsWith(`dm:bitzer: ${envelope('bitzer')}`));
+    // Only a leading envelope on a user message counts.
+    assert.match(memory.node({ l: 0, i: 2 })!.text, /^user: Sam here/);
+    assert.match(memory.node({ l: 0, i: 3 })!.text, /^user: quoting/);
+    assert.match(memory.node({ l: 0, i: 4 })!.text, /^talk: \[dm /);
+    assert.match(memory.zoom(0, 1), /^0\+0\|dm:flint: \[dm /);
+    assert.match(memory.search('check the build'), /^0\+0\|dm:flint 20\d\d-/m);
+    assert.match(memory.render(), /\n0\+1\|dm:flint: \[dm /);
+  } finally {
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

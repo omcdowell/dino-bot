@@ -1,0 +1,218 @@
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { createConnection, createServer } from 'node:net';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
+import type { ModelChoice } from './compactor.ts';
+import { record } from './cache.ts';
+import { DEFAULT_SETTINGS, readSettings, type Settings } from './settings.ts';
+import { atomicWrite } from './memory.ts';
+
+export { atomicWrite };
+
+export const dataHome = () => resolve(process.env.OPTCHAT_HOME ?? join(homedir(), '.optchat'));
+/** Keys this fork doesn't use (upstream's `subagent`, `subagentLevels`, `maxAgents`) are kept as-is, so upstream pi-optchat can still open the profile. */
+export interface ProfileConfig extends Settings {
+  compactor: ModelChoice;
+  [key: string]: unknown;
+}
+export const defaults: ProfileConfig = {
+  compactor: { provider: 'anthropic', model: 'claude-sonnet-5-5', thinking: 'medium' },
+  // Unused here; upstream requires it in config.json.
+  subagent: { provider: 'anthropic', model: 'claude-opus-5-5', thinking: 'high' },
+  ...DEFAULT_SETTINGS,
+};
+export const THINKING = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export function profilePath(name: string) {
+  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) throw new Error('Profile names: 1–64 lowercase letters, digits, hyphens, or underscores.');
+  return join(dataHome(), 'profiles', name);
+}
+/** A folder can name its profile in this file, so a launcher that only sets the working directory (such as Paseo) needs no flag. */
+export const PROFILE_FILE = '.optchat-profile';
+/** The profile a session asks for without a picker: `--optchat-profile`, then `OPTCHAT_PROFILE`, then `<cwd>/.optchat-profile`. */
+export function requestedProfile(flag: unknown, cwd: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (typeof flag === 'string' && flag.trim()) return flag.trim();
+  const fromEnv = env.OPTCHAT_PROFILE?.trim();
+  if (fromEnv) return fromEnv;
+  let fromFolder: string;
+  try {
+    fromFolder = readFileSync(join(cwd, PROFILE_FILE), 'utf8').trim();
+  } catch {
+    return undefined;
+  }
+  if (!fromFolder) return undefined;
+  profilePath(fromFolder); // validates the name
+  return fromFolder;
+}
+export function listProfiles() {
+  const root = join(dataHome(), 'profiles');
+  return existsSync(root)
+    ? readdirSync(root, { withFileTypes: true })
+        .filter(f => f.isDirectory() && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(f.name))
+        .map(f => f.name)
+        .sort()
+    : [];
+}
+export function createProfile(name: string) {
+  const dir = profilePath(name);
+  if (existsSync(dir)) throw new Error(`Profile already exists: ${name}`);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  saveConfig(dir, defaults);
+  atomicWrite(join(dir, 'AGENTS.md'), `# ${name}\n\nThis is the ${name} profile.\nAdd your personal instructions here.\n`);
+}
+export function saveConfig(dir: string, config: ProfileConfig) {
+  atomicWrite(join(dir, 'config.json'), JSON.stringify(config, null, 2) + '\n');
+}
+function modelChoice(value: unknown): value is ModelChoice {
+  return (
+    record(value) &&
+    typeof value.provider === 'string' &&
+    typeof value.model === 'string' &&
+    THINKING.some(level => level === value.thinking)
+  );
+}
+/** Shown when a bot is opened before its models were chosen (a new bot's setup writes config.json then). */
+export const NO_MODELS_YET =
+  'This bot has no models chosen yet. Finish "Choose models" in the app (or run setup again on the computer), then send your message again.';
+export function loadConfig(dir: string): ProfileConfig {
+  if (!existsSync(join(dir, 'config.json'))) throw new Error(NO_MODELS_YET);
+  const value: unknown = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'));
+  if (!record(value) || !modelChoice(value.compactor)) throw new Error(`Invalid profile config: ${dir}/config.json`);
+  try {
+    return { ...value, compactor: value.compactor, ...readSettings(value) };
+  } catch (error) {
+    throw new Error(`Invalid profile config: ${dir}/config.json: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+/**
+ * The compactor as config.json has it now. Another writer (the Paseo bots plugin's "Compaction
+ * model" setting) may change the file while the profile is open, so each summary re-reads it when
+ * its mtime or size moved, and copies the new choice into `config` (the settings page shows it).
+ * A file that is missing or invalid keeps the last good choice.
+ */
+export function liveCompactor(dir: string, config: ProfileConfig): () => ModelChoice {
+  const path = join(dir, 'config.json');
+  const stamp = () => {
+    try {
+      const info = statSync(path);
+      return `${info.mtimeMs}:${info.size}`;
+    } catch {
+      return undefined;
+    }
+  };
+  let seen = stamp();
+  return () => {
+    const now = stamp();
+    if (now !== undefined && now !== seen) {
+      seen = now;
+      try {
+        config.compactor = loadConfig(dir).compactor;
+      } catch {
+        // keep the last good compactor
+      }
+    }
+    return config.compactor;
+  };
+}
+export function instructions(dir: string) {
+  return readFileSync(join(dir, 'AGENTS.md'), 'utf8');
+}
+export function lastProfile() {
+  try {
+    const name = readFileSync(join(dataHome(), 'last-profile'), 'utf8').trim();
+    return listProfiles().includes(name) ? name : undefined;
+  } catch {
+    return undefined;
+  }
+}
+export function rememberProfile(name: string) {
+  atomicWrite(join(dataHome(), 'last-profile'), name);
+}
+
+export class ProfileBusyError extends Error {
+  constructor(readonly owner: string) {
+    super(`Profile already running: ${owner}`);
+  }
+}
+/** Lives in the profile itself, so every Pi on this profile finds the same socket whatever its TMPDIR. Git skips sockets, so checkpoints never see it. */
+export const profileSocket = (dir: string) => join(dir, 'lock.sock');
+
+// sun_path is 104 bytes on macOS and 108 elsewhere, both including the NUL. Node 22 binds a truncated path instead of failing, so the length is checked before listen.
+export const SOCKET_PATH_LIMIT = process.platform === 'darwin' ? 103 : 107;
+export function checkSocketPath(path: string) {
+  const length = Buffer.byteLength(path);
+  if (length > SOCKET_PATH_LIMIT)
+    throw new Error(
+      `Cannot listen on the profile socket: its path is ${length} bytes, over this system's limit of ${SOCKET_PATH_LIMIT}. Set OPTCHAT_HOME to a shorter directory: ${path}`,
+    );
+}
+
+/** A socket that may be replaced; a file that only shares its name is refused, never deleted. */
+function existingSocket(path: string) {
+  let stat;
+  try {
+    stat = lstatSync(path);
+  } catch {
+    return undefined;
+  }
+  if (!stat.isSocket()) throw new Error(`${path} is not an OptChat socket. Move it out of the profile and try again.`);
+  return stat;
+}
+
+/** OS-owned socket lifetime, no timeout-based stealing of a busy profile. */
+export async function lockProfile(dir: string, description: string) {
+  const socketPath = profileSocket(dir);
+  checkSocketPath(socketPath);
+  const server = createServer(socket => {
+    socket.on('error', () => socket.destroy());
+    socket.end(description);
+  });
+  const listen = () =>
+    new Promise<void>((resolve, reject) => {
+      const failed = (error: Error) => {
+        server.off('listening', ready);
+        reject(error);
+      };
+      const ready = () => {
+        server.off('error', failed);
+        resolve();
+      };
+      server.once('error', failed);
+      server.once('listening', ready);
+      server.listen(socketPath);
+    });
+  try {
+    await listen();
+  } catch (error) {
+    if (!(error instanceof Error) || !('code' in error) || error.code !== 'EADDRINUSE') throw error;
+    const before = existingSocket(socketPath);
+    if (!before) throw new Error('Profile lock changed; try again.');
+    const owner = await new Promise<string | undefined>((resolve, reject) => {
+      const socket = createConnection(socketPath);
+      let message = '';
+      socket.setTimeout(1500, () => {
+        socket.destroy();
+        reject(new Error('Profile lock did not respond; refusing to steal it.'));
+      });
+      socket.on('data', data => {
+        message += data.toString();
+      });
+      socket.on('end', () => resolve(message || 'another Pi instance'));
+      socket.on('error', e => {
+        if ('code' in e && e.code === 'ECONNREFUSED') resolve(undefined);
+        else reject(e);
+      });
+    });
+    if (owner !== undefined) throw new ProfileBusyError(owner);
+    if (statSync(socketPath).ino !== before.ino) throw new Error('Profile lock changed; try again.');
+    unlinkSync(socketPath);
+    await listen();
+  }
+  const unlock = () => new Promise<void>(resolve => server.close(() => resolve()));
+  try {
+    chmodSync(socketPath, 0o600);
+  } catch (error) {
+    await unlock();
+    throw error;
+  }
+  return unlock;
+}

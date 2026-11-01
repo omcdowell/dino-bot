@@ -1,0 +1,22 @@
+name: Check
+# Manual only: the repo is private and nothing deploys from GitHub; tests run locally before merges.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # test/room-blocks.test.ts reads an old commit (99a152b)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - run: npm run format:check
+      - run: npm test
+      - run: npm pack --dry-run

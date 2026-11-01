@@ -1,0 +1,274 @@
+![Pi-OptChat: persistent memory for Pi](https://raw.githubusercontent.com/jonaslsaa/pi-optchat/main/docs/banner.jpg)
+
+# pi-optchat
+
+> **Local fork (`local` branch).** Differences from upstream 0.6.8:
+> - **No subagents or connected windows.** `spawn`, `tell`, `/complete`, `/tell-main`, the agents inspector and the window socket are removed. A second window on a busy profile can only pick another profile.
+> - **Tool digest** (setting, off by default): each turn's tool calls, short results and commentary can be logged as one `tool` entry instead of one entry per call and result: fewer compactor calls, but results are clipped to 400 characters. By default every call and result is logged in full, up to 30,000 characters.
+> - **UniiChat view** ([spec §3.2](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449)): a pair's age is measured from its last message, `(T + 1) / 2^l - i`; the view grows one line per message and, once past 128,000 bytes, one batch merges it down to 64,000. Every merge is built as soon as its two halves are, so a batch never waits for the compactor. The view is saved to `view.json` in the memory directory after each batch and loaded at start; it is rebuilt from the log only when the file is missing or invalid. Up to 8 messages are summarized at once, each with a view that stops at the first line not summarized yet.
+> - **Shared prompt for compactions** (spec §4): on Anthropic, a compaction sends the last turn's system prompt and tools byte for byte (the compaction instructions are part of that prompt), so all calls share one cached prefix. Before the first turn of a session, compactions send only the OptChat prompt, with no tools. Their context is a compaction view of 16-32 KB (the chat view merged further, and again whenever the chat view merges), shown with `id+n|` heads and ending at the node being built. Cache entries are per model, so turns and compactions share them only when the compactor is the turn model.
+> - **Compactor failures** are appended to `compactor-errors.jsonl` in the profile directory (time, node, error, HTTP status, Retry-After, next retry). A busy provider (429, 503, 529) pauses the whole compactor for its `Retry-After` (at most an hour), or without one for 10 s, 20 s, 40 s… up to 15 minutes; then one call goes first. A network error, `terminated` or other 5xx retries its node after 10 s, 20 s, 40 s… up to 15 minutes. A node the provider refuses (another 4xx except 401, 403 and 408, a Terms of Service block or refusal with or without a status, or no line from the model) is tried twice more, 10 s and 20 s apart, then built without the model from a fallback line marked `not summarised` that holds only facts, never any of the refused text, which would otherwise be re-sent in every later turn and compaction: `kind (date, n bytes, not summarised: reason)` for a message, `(not summarised: reason) messages a-b, n bytes, date to date, kinds: …` for a merge; zoom still shows the originals; that failure is logged with `fallback: true`. A turn waits through one failed attempt at a line in its view; once that line has failed twice, the turn goes ahead and shows it as `(not summarized yet: zoom it)`.
+> - **Escalating and replacing fallback lines.** A merge with a fallback line as a half is not built until the half is replaced, so the hand-written line, not the fallback, goes into the parent; the view keeps those lines finer meanwhile, about one extra line per level. A bot (a Pi run by Paseo, with `PASEO_AGENT_ID` set) sends one `bot-dm the-fat-controller --kind escalate` per fallback line, holding only the profile, the line's id, the ids, kinds, sizes and dates of its messages and the failure's reason, never their text; `compactor-errors.jsonl` then records `escalated: true` for the line, so a restart does not send again (a send that failed is retried at the next start). Replace a fallback line with a hand-written one, of at most 512 bytes, with
+>   `npm run cli -- resummarise <profile> <id+n> --text "<line>"` (or `--file <path|->`; `--force` replaces a line that is not a fallback).
+>   The line is queued in the memory directory's `resummarise/` folder. If the profile is free, the command takes its lock and applies the line; if a bot holds it, the bot applies it before its next turn, and the command says it is queued. Applying copies the tree files to `backups/tree-<time>/`, appends the new line to today's tree file as the compactor does, and lets the held merges go ahead; lines already merged from the old one keep its words.
+> - **`search_memory` tool**: finds original messages by terms, newest first, with ids for `zoom`. The prompt and the tool describe it as a last resort, once zooming has failed.
+> - **One system prompt** (`src/prompts.ts`) after the UniiChat §5 prompt: turn rules and compaction rules together, with OptChat's kinds and the bot-DM rules.
+> - **One settings page** for models (`/optchat model` opens it); `/optchat usage` is a usage-only panel.
+> - `index.ts` is wiring only; run state lives in `src/controller.ts`. Code is Prettier-formatted (`npm run format`).
+> - Profiles stay compatible with upstream: unknown config keys (upstream's `subagent`, `subagentLevels`, `maxAgents`) are preserved.
+>
+> Run it with `pi -e ~/Code/pi-optchat/src/index.ts` (the `optchat` shell alias). The sections below describe upstream; ignore the subagent and connected-window parts.
+
+
+A Pi extension that implements [Victor Taelin's OptChat recipe](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449): one endless chat per profile, remembered through a summary tree instead of compaction.
+
+- **Memory**: every message is logged and summarized into a binary tree. Each turn starts from a fresh context holding a bounded memory view; the agent uses `zoom` and `date` to read originals.
+- **Profiles**: separate memories and instructions, such as `work` and `personal`.
+- **Subagents**: delegate tasks to background agents, inspect them live, and send them guidance.
+- **Import**: bring in history from Claude Code (conversations and memories), Codex, or ChatGPT.
+- **Connected windows**: a second Pi window on the same profile becomes a subagent you talk to directly.
+
+It runs inside ordinary Pi, with no fork or separate launcher.
+
+## Install
+
+```sh
+pi install npm:pi-optchat
+pi install npm:pi-web-access   # optional, for web search and page fetching
+```
+
+Or from GitHub: `pi install git:github.com/jonaslsaa/pi-optchat`.
+
+Requirements: Pi 1.0.2 or compatible, Node.js 22.19+, and Git. Tested on macOS; the offline tests also run on Linux.
+
+Web access is not bundled. Subagents load the Pi extensions you have installed (except pi-optchat itself), so installing `pi-web-access` gives web tools to the main agent and every subagent.
+
+To uninstall, run `pi remove git:github.com/jonaslsaa/pi-optchat`. Profile data is kept.
+
+## Quick start
+
+1. Restart Pi.
+2. Choose **+ Create profile** and name it, for example `work`.
+3. Chat normally.
+
+The footer shows the active profile. Memory follows the profile across directories and Pi sessions. New sessions show the profile picker with the last-used profile first; resumed sessions restore their profile.
+
+For headless use, pass `--optchat-profile work`.
+
+## Commands
+
+| Command | Action |
+| --- | --- |
+| `/optchat` | Status and actions menu. |
+| `/optchat profile` | Select or create a profile. Switching starts a fresh Pi session. |
+| `/optchat settings` | This profile's settings: models, subagent levels and limits, previous exchange, summary size tolerance. |
+| `/optchat model` | Compactor model and effort for this profile. |
+| `/optchat agents` | Live agent tree and saved run history. |
+| `/optchat agents model` | Subagent model and effort for this profile. |
+| `/optchat usage` | Token usage and cost estimates. |
+| `/optchat instructions` | Edit this profile's `AGENTS.md`. |
+| `/optchat browse` | Open a readable snapshot of memory: the shape of what the model sees, summaries you can open down to the original messages, and search that shows where each message is folded. Run again to refresh. |
+| `/optchat import` | Import history, or resume/discard a paused import. |
+| `/complete` | In a connected window: end the conversation and hand off to the main agent. |
+| `/tell-main <message>` | In a connected window: message the main agent. |
+
+## Models
+
+| Role | Default | Change with |
+| --- | --- | --- |
+| Main agent | Whatever is selected in Pi | `/model` |
+| Subagents | Anthropic Opus 5.5, high | `/optchat agents model` |
+| Compactor (summaries, imports, handoffs) | Anthropic Sonnet 5.5, medium | `/optchat model` |
+
+Subagent and compactor settings are saved per profile and do not follow the main model. If you use other providers, change them before chatting. Authentication uses Pi's existing provider login.
+
+Compression and subagents make extra model requests with your provider credentials.
+
+## Settings
+
+`/optchat settings` opens this profile's settings. Each row shows its value and default, the selected row says what it does and when a change applies, and a change is saved right away to the profile's `config.json`. Defaults follow Victor's recipe, except Previous exchange and Summary size tolerance, which keep OptChat's earlier behaviour.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Compactor model | Sonnet 5.5, medium | Same as `/optchat model`. Applies to the next summary. |
+| Subagent model | Opus 5.5, high | Same as `/optchat agents model`. Applies to new subagents. |
+| Subagent levels | 1 | 1: only the main agent starts subagents (the recipe). 2 or more: subagents may start their own, that many levels deep. Applies to subagents started or resumed after the change. |
+| Max active agents | 8 | Subagents running at once in the profile, all levels together, so it also caps how deep a chain can go. |
+| Previous exchange | on | Replays your last request and answer in full with the next turn (see below). Off is the recipe. |
+| Previous exchange limit | 16 KB | A larger last exchange is left out. |
+| Summary size tolerance | 640 bytes | The compactor is always asked for 512-byte lines; a longer line up to this size is kept instead of retried. 512 is the recipe's strict rule. |
+
+Numbers must be whole numbers of at least 1 (512 for the summary size tolerance). Missing keys in an older `config.json` take their defaults.
+
+**Upgrading from 0.6.x:** subagent levels used to be fixed at 3 and now default to 1, so subagents no longer start their own subagents until you set Subagent levels to 2 or 3.
+
+![Settings page](docs/screenshots/settings.png)
+
+## Subagents
+
+Ask in plain words, for example: "Spawn an agent to investigate this repository and report back."
+
+- Children get the profile's memory view (frozen at launch), its instructions, read-only `zoom`/`date`, and normal coding tools plus your installed extensions.
+- Children also get the Pi built-in extensions the main session loaded: MCP, codemode and tool search. Your MCP servers (`~/.pi/agent/mcp.json`, the project's `.pi/mcp.json`) work in subagents, with the sign-ins you made in Pi. If MCP is off in the main session (`--no-mcp`, `-builtin:mcp` in settings, or an extension that replaces `/mcp`), it is off in subagents too. Each subagent opens its own server connections (stdio servers start once per subagent) and closes them when it ends.
+- Each child reports back on its own when it finishes. The parent stays alive to receive reports; it never polls.
+- In the main chat, subagent messages and reports appear in a dark grey box labelled `↳ subagent <id> · still running` or `· report`, so they don't look like something you typed. The model still receives them as ordinary user messages. (One exception: reports recovered at startup, before your first message in the session, still show as plain user messages.)
+- The parent can send a running child guidance with `tell`, and the child can message its parent mid-run with `tell_parent` (a question, an early finding). It reaches the parent like a report, marked "still running": between tool calls if the parent is busy, or waking it if it's waiting.
+- `tell` to a finished child resumes it: the same agent (ID, parent, model, directory) reopens its saved transcript, gets the message as a new prompt, and sends a new report. This also works for children from earlier Pi sessions. Only the agent that started the child can resume it, and the resumed child takes one active slot. Connected windows can't be resumed, and a child whose transcript is missing must be spawned fresh.
+- By default only the main agent starts subagents. Set **Subagent levels** in `/optchat settings` to let them delegate further (3 means child, grandchild, great-grandchild).
+- **Max active agents** (8 by default) caps how many agents can be active per profile, including parents waiting on descendants. Going over a limit returns an error; there is no queue.
+- Stopping an agent stops its whole subtree. A failed parent stops its descendants.
+- Agents run inside the Pi process. Closing Pi stops them; there is no detached mode.
+
+## Agents and usage inspector
+
+An **Agents | Usage** bar sits below the input.
+
+| Key | Action |
+| --- | --- |
+| **Down** (empty input) | Focus the bar |
+| **Left/Right**, **Enter** | Pick and open a section |
+| **Escape**, **Up**, or typing | Back to the editor |
+| **F6** | Open Agents directly, keeping your draft |
+| **Tab** | Switch between Agents and Usage |
+
+Set a different shortcut with `OPTCHAT_INSPECT_KEY=ctrl+shift+a pi`. If another extension supplies a custom editor, OptChat leaves its Down key alone; use the shortcut or commands instead.
+
+**Agents** lists runs as a tree with state, elapsed time, current tool, and last activity. Navigate with **Up/Down**, **Page Up/Down**, **Home/End**, and press **M** to pick the subagent model.
+
+**Enter** swaps the screen to that agent's conversation, drawn with Pi's own chat components, so it reads like the main chat: its task, replies, and collapsed tool calls, following live output. Typing and **Enter** send it guidance. Guidance from the main agent and reports from the agent's own agents show in labelled boxes, so only your own messages look typed. **Escape** goes back to the main chat.
+
+| Key | Action |
+| --- | --- |
+| **Escape** or **Ctrl+C** | Clear a draft, else back to the main chat |
+| **Ctrl+X** twice | Stop this agent and the agents it started |
+| **Page Up/Down**, mouse wheel | Scroll; back at the bottom it follows again. The wheel needs Pi's default fullscreen mode |
+| **Ctrl+O** | Expand tool output (Pi's own toggle) |
+
+Guidance shows as queued until delivered, or undelivered if the child stops first. Guidance you send is also saved in main memory. Reasoning is not shown. Transcripts stay browsable after restart, and browsing them makes no model calls.
+
+**Usage** shows this session, last hour, today, last 7 days, or all time (**Left/Right**): one row per role and model (main agent, subagents, compactor, imports) with estimated cost, share of the total, output tokens, and how much input came from the cache. Costs are API prices, not your subscription bill.
+
+![Usage page](docs/screenshots/usage.png)
+
+- Costs are API-rate estimates, not your subscription bill. Unknown rates show zero.
+- Record counts are not request counts; retries and tool overhead can add records.
+- Main-agent tracking starts with v0.3.0 (resumed sessions are backfilled). Older records without a parent session are left out of **This session**.
+- All views are limited to the active profile.
+
+## Import history
+
+Pick the destination profile, then run `/optchat import`.
+
+1. **Source**: Claude Code (`~/.claude/projects`), Claude Code memories, Codex (`~/.codex/sessions`, `~/.codex/archived_sessions`), or a ChatGPT export (ZIP, folder, or `conversations.json`; ZIP needs `unzip`). Scanning is local and makes no model calls.
+2. **Select**: for Claude Code, its memories, and Codex, pick projects (busiest first), optionally filter by start date, then take all conversations or pick some. **Tab** toggles (and **Space** when the filter is empty), **Enter** continues, type to filter, **Ctrl+A**/**Ctrl+D** select/clear matches, **Esc** cancels. Nothing is classified as work or personal for you.
+3. **Mode** (only if the profile already has history):
+   - **Append**: keep existing summaries and add the import. Faster and cheaper.
+   - **Rebuild by conversation start date**: regenerate the whole tree, ordered by conversation start.
+4. **Preview**: destination, new and duplicate counts, text size, rough token estimate, and compactor. This is not a price quote.
+
+**What gets imported**: user messages and final assistant replies, with original dates and source labels, as in Victor's recipe. Tool calls and results, intermediate commentary, reasoning, subagent transcripts, replayed context, and image/audio/file bytes are left out. ChatGPT alternate branches are labelled as alternatives. Imported records are marked as historical so old requests are not treated as new instructions.
+
+**Claude Code memories**: the auto-memory topic files in `~/.claude/projects/*/memory/` (not `MEMORY.md`, which only indexes them), picked by project. Each file becomes one dated note in the memory tree, not part of the prompt. An edited file comes in again as a newer note.
+
+**Duplicates**: re-importing skips messages already present, even if titles or paths changed. Changed source messages can appear as a separate historical version.
+
+**Pausing**: **Pause import** (or Escape) saves progress, and so does restarting Pi. `/optchat import` then offers **Resume** or **Discard staged import**. While an import is pending, chat in that profile is blocked; other profiles still work. Imports need the main agent and its subagents to be idle.
+
+**Safety**: imports build a new memory generation and switch to it only when the whole tree is ready. The previous generation stays on disk. Source files are never modified.
+
+Damaged or unsupported records are listed before you start, so you can cancel or continue without them. Conversations that disappear during the scan are skipped with a warning.
+
+See OpenAI's guides on [exporting ChatGPT data](https://help.openai.com/en/articles/7260999-exporting-your-chatgpt-history-and-data) and the [conversation file format](https://help.openai.com/en/articles/9106926-transfer-exported-conversations-between-chatgpt-accounts).
+
+## Connected windows
+
+Each profile is locked to one Pi process. If you open the same profile in a second terminal, Pi offers to connect it to the original window as a subagent, or to go back to the profile picker.
+
+- Your first message starts a subagent in the second window's working directory. Later messages continue the same conversation.
+- The window looks like a normal Pi chat: replies, tool calls with their output and running time, the working spinner, and reports from the subagent's own agents in the dark box. Ctrl+O expands tool output.
+- The subagent runs inside the original process, which stays the only writer of memory. It appears in the original window's inspector and uses one of the 8 agent slots. While it is open, the original window can't switch profile or import.
+- The main agent is told when the conversation starts. Use `/tell-main <message>` to message it yourself; the subagent can use `tell_parent`, and the main agent replies with `tell`. Routine turns don't wake the main agent.
+- Run `/complete` when done. The window closes, remaining work stops, and the compactor writes a handoff for the main agent: decisions, changes, evidence, failures, unfinished work, and links to the transcripts.
+- Closing or force-quitting the window also produces a handoff, marked **interrupted**.
+- If the original window is closed cleanly, handoffs are delivered on next start. If it is killed, reopening the profile recovers unfinished handoffs (work is not restarted).
+- Text only. For images, give the agent a file path.
+- The connection is a local socket restricted to your OS user. No daemon or server.
+
+Handoff limits: the whole transcript is summarized in one call if it fits in about 128,000 input tokens (estimated at 4 bytes per token; less on smaller models), otherwise in chunks. Output is up to 16,000 tokens, with a 5-minute timeout per call. If summarizing fails, a labelled fallback still reports the task, last result, and transcript locations.
+
+## Storage
+
+Profile data lives in `~/.optchat/profiles/<name>/` (override the root with `OPTCHAT_HOME`):
+
+| Path | Contents |
+| --- | --- |
+| `main/` | The conversation log (dated JSONL, no reasoning) |
+| `tree/` | Summary nodes |
+| `active-memory.json`, `memories/<id>/` | After an import: pointer to the active `main/` and `tree/`. Older generations are kept. |
+| `imports/pending.json` | Resumable import state |
+| `AGENTS.md` | Profile instructions |
+| `config.json` | Compactor and subagent models |
+| `pending-inputs.json`, `pending-reports.json` | Recovery journals |
+| `runs/` | Subagent sessions and run metadata |
+| `usage.jsonl` | Usage ledger |
+| `memory.html` | Snapshot from `/optchat browse` |
+
+Each profile folder is a local Git repository, committed after each turn and on clean shutdown (memory and config; not runs, HTML, or usage). It has no remote, so it is not a backup. To back up, copy the folder while Pi is closed.
+
+To delete a profile, delete its folder. Your original Pi sessions are kept in Pi's normal session directory.
+
+## Good to know
+
+- **Profiles separate memory and instructions only.** Agents keep full filesystem access and share provider credentials.
+- **Tab title**: the terminal tab shows the profile and what it is doing: `π personal` while waiting for you, `● π personal` while the agent works, plus `· 2 agents` while subagents run. A connected window shows `↳ personal`, `● ↳ personal`, then `↳ personal · done` or `↳ personal · disconnected`. OptChat replaces Pi's default title and puts its own back when Pi resets it (new session, reload, rename).
+- **Use worktrees** when parallel agents edit the same repository; they share the filesystem.
+- **Instructions**: the main agent and subagents get Pi's usual global and repository `AGENTS.md` files and your skills, followed by the profile's `AGENTS.md`, which comes last and wins. OptChat replaces only Pi's opening prompt. Prompt templates work in the main session only.
+- **Images** are available during the current run but stored in memory as text placeholders.
+- **Pi's auto-compaction is off.** A single very long run can still hit the model's context limit; stop it and continue in a new turn.
+- **Restarts**: unsent inputs are recovered into memory, and pending subagent reports are delivered. Interrupted subagents are not restarted.
+- **Prompt-template inputs** can be saved twice: expanded, and later in their original form as an unanswered input, because Pi expands them after the input journal records them. Skill commands (`/skill:name`) are matched back to their journaled input and don't have this problem. Plain text chat is unaffected.
+
+## How it differs from the recipe
+
+The recipe's four prompts are kept verbatim in `src/prompts.ts`, along with its numbers: 512-byte summary nodes (by default summaries up to 640 bytes are accepted without a retry, as long as they are smaller than what they replace; see Summary size tolerance), a 128,000-byte memory view, binary merges, 8 compression workers, fixed retry delays, 5 shortening attempts, and a 30,000-character tool output cap. Anthropic requests get stable cache breakpoints on the view, and when that view is not cached yet, one compactor call goes first and the others wait until it starts answering, so they read the cache instead of each writing it. See `docs/victor-recipe.md` for notes.
+
+Each run's context is the memory view, the previous exchange, and your new message. Deliberate additions (the ones that change the recipe's behaviour are settings, see [Settings](#settings)):
+
+1. **Previous exchange kept verbatim.** Your last request (with any steering) and the final answer are included in full, so "why is that?" refers to what you actually read. Tool calls and reasoning are not carried over. It comes on top of the 128,000-byte view. If it is over 16,000 bytes (about 4,000 tokens, usually a big paste; Previous exchange limit) it is left out entirely, and the model relies on the view and zoom as in Victor's recipe. A new Pi session starts with the memory view only.
+2. **Subagents** are built in with Pi's SDK rather than a separate package. Children report individually instead of per batch, and with Subagent levels above 1 they can delegate further.
+3. **Profiles**, the **inspector**, the **usage ledger**, **import**, and **connected windows** are additions. Import adds historical-record guidance to the prompts.
+4. **Not done**: computer use and hosting on an always-on machine.
+
+## Development
+
+```sh
+git clone https://github.com/jonaslsaa/pi-optchat.git
+cd pi-optchat
+npm ci --ignore-scripts
+pi install .
+```
+
+Restart Pi after source changes. Use `OPTCHAT_HOME` to test against a throwaway data directory.
+
+```sh
+npm run check      # type check
+npm test           # offline tests, no paid model calls
+npm run test:live  # paid Anthropic calls on synthetic data in a disposable profile
+```
+
+### Publishing to npm
+
+Pi's [package directory](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md) lists npm packages with the `pi-package` keyword, which the manifest already has. GitHub alone is not enough.
+
+```sh
+npm ci --ignore-scripts
+npm run check && npm test
+npm pack --dry-run
+npm publish --access public
+```
+
+## Credits and license
+
+Based on [Victor Taelin's OptChat recipe](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449) and [OptMem](https://github.com/VictorTaelin/OptMem). This is an independent Pi implementation, not Victor's official OptChat.
+
+MIT licensed. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
