@@ -1,0 +1,9 @@
+dist/
+.test-tmp/
+e2e/
+.cache/
+.test-tmp2/
+.test-tmp3/
+.e2e-pub/
+.test-tmp-*/
+__pycache__/

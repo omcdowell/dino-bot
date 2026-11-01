@@ -1,0 +1,39 @@
+{
+  "node": "24.21.0",
+  "paseo": {
+    "repo": "omcdowell/dino-bot",
+    "commit": "9edaa23cda907e6fb2e8a4fbe3ebaa08bcc759c0"
+  },
+  "bots": {
+    "repo": "omcdowell/dino-bot",
+    "commit": "c6f493d4ae0b0f9a338acc680a4481371686d350"
+  },
+  "optchat": {
+    "repo": "omcdowell/dino-bot",
+    "commit": "096c6bf6adec8779ce3e69fe07fab66d33e4fc3b"
+  },
+  "pi": "1.4.0",
+  "herdr": {
+    "version": "v0.9.3",
+    "repo": "herdrdev/herdr",
+    "assets": {
+      "darwin-arm64": {
+        "name": "herdr-macos-aarch64",
+        "sha256": "5173a3e0ae42d5d1ab7ebfa5d5e6329f7c3d23f8e1a3677c7ce3231da2884157"
+      },
+      "darwin-x64": {
+        "name": "herdr-macos-x86_64",
+        "sha256": "db62d548ff3e832b087a96b1894a08d26be3905f1830309cd556783f215d4054"
+      },
+      "linux-arm64": {
+        "name": "herdr-linux-aarch64",
+        "sha256": "4de7aa3e25678812e92960de64f7c2aaa1bca1f0f80a3c5e559837e231e1f5c0"
+      },
+      "linux-x64": {
+        "name": "herdr-linux-x86_64",
+        "sha256": "18a8dc65f1c2fa485884344356dea1cfd911c6f06cf46fa78e193f4087f4dba7"
+      }
+    }
+  },
+  "_note": "What the release workflow (.github/workflows/release.yml -> build/ci-build.sh) builds from: exact commits, exact versions, pinned checksums, so a release tag says exactly what is inside (rel-security H3). paseo/bots/optchat are the fresh-history branches src/paseo, src/paseo-bots and src/pi-optchat of omcdowell/dino-bot (one commit each, made by build/prepare-sources.sh from the public/release trees; build/publish-public.sh SOURCES_GIT=<dir> pushes them). Because they live in the release repo itself, the workflow reads them with its own token: DINOBOT_SOURCES_TOKEN is not needed. Bump: re-run build/prepare-sources.sh, commit this file, push the branches, tag."
+}

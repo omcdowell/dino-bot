@@ -1,0 +1,18 @@
+{
+  "mode": "cosign",
+  "repo": "omcdowell/dino-bot",
+  "workflow": ".github/workflows/release.yml",
+  "tagPattern": "v[0-9]",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "bundleSuffix": ".sigstore.json",
+  "cosign": {
+    "version": "v3.1.4",
+    "sha256": {
+      "darwin-arm64": "9f9b8cd557cf2e5b3df3373a00baa005a86b02391e3e06dd0ce37b3a1533d3a4",
+      "darwin-x64": "9d1e4abe2b6be279ed0d2ff706fde1ccd738747c834e3e6d44039c238867334f",
+      "linux-arm64": "ade83b7aac62e131cacfe96d958948b2150cc9efec46a570a2649b8e27dedad2",
+      "linux-x64": "424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa"
+    }
+  },
+  "_note": "THE one place for release signing (27 Oct: keyless signing in GitHub Actions). mode: 'cosign' = every tarball must carry <tarball>.sigstore.json, a keyless Sigstore bundle made by `workflow` in `repo` for a tag matching `tagPattern` (certificate issuer `issuer`), checked with cosign before anything is unpacked; no bundle or a bad one = nothing installed/changed. 'off' = checksum only (do not ship with 'off'). DINOBOT_ALLOW_UNSIGNED=1 skips the signature for local dev builds (checksum still required). cosign: the verifier, pinned (version + sha256 of sigstore/cosign's release binary per platform), cached in ~/.<id>/tools/cosign; a cosign v3+ already on PATH is used instead. install.sh carries stamped copies (build/stamp-signing.mjs); test/signing.test.mjs fails on drift. repo must equal lib/product.json releaseRepo where that exists."
+}

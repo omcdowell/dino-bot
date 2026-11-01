@@ -1,0 +1,12 @@
+# Keeps the pinned action SHAs in .github/workflows current (security fixes arrive as PRs).
+# build/sources.json (Node, pi, herdr, cosign pin in lib/signing.json) is bumped by hand in a
+# reviewed commit: each bump changes what users run.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

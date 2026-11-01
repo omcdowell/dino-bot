@@ -1,0 +1,14 @@
+DinoBot installer
+Copyright 2026 omcdowell
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The DinoBot download it installs also contains: Node.js (MIT and others), a modified Paseo daemon
+(Apache-2.0, Copyright 2025-present Mohamed Boudra), pi (MIT, Copyright (c) 2025 Mario Zechner),
+pi-optchat (MIT, Copyright (c) 2026 Jonas Silva, 2026 omcdowell; its prompt is adapted, with
+permission, from Victor Taelin's OptChat/UniiChat recipe), the bots plugin (Apache-2.0,
+Copyright 2026 omcdowell), herdr (Apache-2.0) and npm packages under their own licences.
+Each release lists them all in THIRD_PARTY_NOTICES.txt.
+
+The DinoBot name and the dino artwork are not licensed under Apache-2.0 (no trademark rights
+are granted, Apache-2.0 section 6).

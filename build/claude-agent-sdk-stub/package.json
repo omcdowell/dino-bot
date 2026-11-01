@@ -1,0 +1,10 @@
+{
+  "name": "@anthropic-ai/claude-agent-sdk",
+  "version": "0.0.0-dinobot-stub",
+  "description": "Placeholder: __PRODUCT__ does not redistribute the Claude Agent SDK (proprietary). `__PRODUCT_ID__ claude-code install` fetches the real package from npm on this computer.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "sdk.mjs",
+  "exports": { ".": { "default": "./sdk.mjs" } },
+  "dinobot": { "replaces": "@anthropic-ai/claude-agent-sdk", "version": "__SDK_VERSION__" }
+}
