@@ -4,6 +4,9 @@
 <p align="center"><b>Your own team of AI bots, in your pocket.</b></p>
 <!-- DRAFT tagline: not confirmed yet. -->
 
+<p align="center">DinoBot is built on Paseo: it is a fork of <a href="https://github.com/getpaseo/paseo">Paseo</a> by Mohamed Boudra.
+Many thanks to the Paseo project.</p>
+
 <p align="center">
   <a href="LICENSE">Apache-2.0</a> ·
   <a href="docs/how-it-works.md">How it works</a> ·
