@@ -47,7 +47,7 @@ jobs:
         run: |
           case "$GITHUB_REF_NAME" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "tag $GITHUB_REF_NAME is not v<major>.<minor>.<patch>[-x]"; exit 1 ;; esac
       - name: unit tests (incl. fail-closed checksum + signature)
-        run: node --test test/unit.test.mjs test/wave2.test.mjs test/providers.test.mjs test/signing.test.mjs test/public-tree.test.mjs
+        run: node --test test/unit.test.mjs test/wave2.test.mjs test/providers.test.mjs test/signing.test.mjs test/public-tree.test.mjs test/push.test.mjs
 
   # Linux first; macOS (10x minutes) only once test and both Linux builds have passed.
   # Private repo runners: 2 CPU / 8 GB (Linux), 3 CPU / 7 GB (macOS arm64), not the 16 GB of public

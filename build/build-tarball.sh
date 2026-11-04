@@ -246,6 +246,19 @@ rm -rf "$STAGE/bots/test"
 mkdir -p "$STAGE/bots/node_modules"
 cp -a "$BOTS_ZOD_DIR" "$STAGE/bots/node_modules/zod"
 
+# The push add-on (paseo-apns, plugin id "apns"): its files only, from addons/paseo-apns in this
+# repo (no history, no tests). Shipped OFF: the installer never registers it, so a stock install
+# does not load it. `dinobot push enable` turns it on for people who build the iPhone app with
+# their own Apple developer account (lib/push.mjs, docs/live-activities.md). zod and the plugin
+# SDK come from the daemon at run time. APNS=0 leaves it out.
+if [ "${APNS:-1}" = 1 ]; then
+  say "apns     $HERE/addons/paseo-apns (off by default)"
+  mkdir -p "$STAGE/apns"
+  for f in $(node -p "require('$HERE/addons/paseo-apns/package.json').files.join(' ')") package.json; do
+    cp -a "$HERE/addons/paseo-apns/${f%/}" "$STAGE/apns/"
+  done
+fi
+
 if [ "$CROSS" = 1 ] && [ -n "$HERDR_BIN" ] && ! file "$HERDR_BIN" | grep -qi "$( [ "$OS" = darwin ] && echo Mach-O || echo ELF )"; then
   echo "HERDR_BIN $HERDR_BIN is not a $OS binary; set HERDR_BIN to the target's herdr or to empty" >&2; exit 1
 fi

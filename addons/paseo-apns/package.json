@@ -1,0 +1,30 @@
+{
+  "name": "paseo-apns",
+  "private": true,
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "author": "omcdowell",
+  "description": "Paseo plugin: send push notifications straight to Apple (APNs token auth) for a self-built iOS app.",
+  "files": [
+    "paseo-plugin.json",
+    "LICENSE",
+    "NOTICE",
+    "OVERVIEW.md",
+    "README.md",
+    "index.server.ts",
+    "server/",
+    "shared/",
+    "bin/"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "@getpaseo/plugin": "0.11.1",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3",
+    "zod": "^4.4.3"
+  }
+}

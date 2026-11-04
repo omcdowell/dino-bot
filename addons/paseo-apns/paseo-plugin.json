@@ -1,0 +1,7 @@
+{
+  "id": "apns",
+  "name": "APNs push",
+  "requirements": {
+    "paseo": ">=0.11.0"
+  }
+}

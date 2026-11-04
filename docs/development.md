@@ -22,6 +22,7 @@ outside the repo in `~/.config/dinobot/private-patterns.txt`).
 | `lib/product.json`, `lib/signing.json` | product names; release signing |
 | `lib/phone-signin.mjs` | phone onboarding, host side (loaded by the bots plugin through `DINOBOT_HOME`) |
 | `build/` | tarball build, CI build, notices, preflight, publish |
+| `addons/paseo-apns/` | the optional push add-on (plugin id `apns`), files only; shipped off, `dinobot push enable` turns it on (`lib/push.mjs`, [Live Activities and push](live-activities.md)) |
 | `test/` | `node --test` suites and end-to-end scripts |
 | `demo/` | end-to-end demo kit (not part of the published repo) |
 

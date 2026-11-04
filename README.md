@@ -13,8 +13,8 @@ Many thanks to the Paseo project.</p>
   <a href="SECURITY.md">Security</a>
 </p>
 
-- 📱 **Phone-first.** A real iPhone app with push notifications and Live Activities, so you see what
-  your bots are doing from the lock screen.
+- 📱 **Phone-first.** A real iPhone app: chat with your bots, follow their workers, and (with an
+  app you build yourself, see below) push notifications and a Live Activity on the lock screen.
 - 🎙️ **Private dictation.** Speech-to-text runs locally on your own GPU.
 - 🤝 **Bots that work together.** They manage their own subagents, message each other and work
   in group chats with you.
@@ -25,6 +25,12 @@ Many thanks to the Paseo project.</p>
 <p align="center">
   <img src="docs/screenshots.png" width="100%" alt="DinoBot on iPhone in dark mode: bots home with The Fat Controller pinned, a group chat, a research table, and the Live Activity on the lock screen showing a bot and its workers">
 </p>
+
+> **Push notifications and the Live Activity need your own Apple developer build.** Apple only
+> delivers pushes signed by the team that built the app, so they work when you build the iPhone
+> app with your own (paid) Apple developer account and give DinoBot your own push key. They are
+> off in a normal install, which works fully without them. How to set them up:
+> [Live Activities and push](docs/live-activities.md).
 
 ## Quick start
 
@@ -67,6 +73,7 @@ from the release page.
 ## Learn more
 
 - [How the installer works](docs/how-it-works.md): steps, commands, flags
+- [Live Activities and push](docs/live-activities.md): with your own Apple developer build
 - [Linux](docs/linux.md): packages, services, uninstall, desktop app
 - [Releases and verification](docs/releases.md): checksums, signatures, how releases are built
 - [Build and test](docs/development.md)

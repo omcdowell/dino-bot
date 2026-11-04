@@ -40,6 +40,10 @@ is up (20 minute limit).
 
 On Windows (WSL 2, [untested](windows.md)) also `wsl-autostart [--off]`.
 
+Push notifications and Live Activities are off unless you turn them on with
+`dinobot push enable` (they need an iPhone app you build with your own Apple developer account):
+`push [status] | enable | disable | test`, see [Live Activities and push](live-activities.md).
+
 - `doctor`: install, daemon service/listening/ready/password, herdr session, cleanup timer,
   sign-ins, `auth.json` mode, Tailscale, listen address, reach every QR address, macOS developer
   tools, versions. A plain `fix:` line under each problem; exit 1 on any FAIL.
