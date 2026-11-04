@@ -60,9 +60,43 @@ more per archive with the default).
    `build/sources.json` (`build/ci-build.sh`); adds the compressed cosign binaries
    (`build/cosign-assets.sh`); signs every file with `cosign sign-blob` (only the release job
    has `id-token: write`), re-verifies exactly as clients do, and creates the GitHub Release.
+   The `desktop` job builds the desktop app in the same run (below).
 
 Credit guards: no tag while a release run is going; every workflow is tag-only and cancels an
 older run of the same tag.
+
+## The desktop app (basic)
+
+Every release also carries the desktop app, built by the `desktop` job with
+`build/ci-desktop.sh` from the same pinned paseo commit (public flavour: DinoBot name,
+`dinobot://` links, no built-in daemon, no update feed; it is a client for a DinoBot host):
+
+- `DinoBot-<version>-arm64.dmg` (macOS, Apple silicon). Signed ad hoc, not with an Apple
+  Developer ID, and not notarised: the first open is right-click > Open (macOS 15 and later:
+  System Settings > Privacy & Security > Open Anyway).
+- `DinoBot-x86_64.AppImage` (Linux x64). The name has no version on purpose (a stable path for
+  shortcuts); the version is in the app's About page.
+
+`<version>` comes from the app's own `packages/desktop/package.json`. Each file has a `.sha256`,
+is listed in `SHA256SUMS` and has a `.sigstore.json` like the tarballs. `install.sh` and
+`dinobot update` do not touch them; updating the app means downloading it again.
+
+Cost: the job runs only after test and both Linux tarball builds have passed. Measured locally,
+the build takes 7 to 9 minutes on a Linux PC; on GitHub's small private-repo runners expect roughly
+15 Linux and 15 macOS minutes, about 165 billed minutes per release at the 10x macOS rate (the
+tarball jobs are about 105).
+
+Fallback, if the job is ever removed or too slow: build by hand on a Mac and a Linux PC
+(`build/ci-desktop.sh darwin-arm64|linux-x64 <dir holding paseo/ at the pinned commit>`), then
+attach both files and their checksums to the already published release:
+
+```sh
+sha256sum DinoBot-*.dmg DinoBot-*.AppImage   # compare with the .sha256 files ci-desktop.sh wrote
+gh release upload vX.Y.Z --repo omcdowell/dino-bot DinoBot-*.dmg DinoBot-*.dmg.sha256 \
+  DinoBot-*.AppImage DinoBot-*.AppImage.sha256
+```
+
+Hand-uploaded files have checksums but no Sigstore signature.
 
 ## Licences in the tarball
 
