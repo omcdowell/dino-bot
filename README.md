@@ -23,7 +23,7 @@ Many thanks to the Paseo project.</p>
 - 🔒 **Yours.** Runs on your own computer or VPS, reached over Tailscale. No account, no cloud relay.
 
 <p align="center">
-  <img src="docs/screenshots.png" width="100%" alt="DinoBot on iPhone: bots home, a group chat, a research table">
+  <img src="docs/screenshots.png" width="100%" alt="DinoBot on iPhone in dark mode: bots home with The Fat Controller pinned, a group chat, a research table, and the Live Activity on the lock screen showing a bot and its workers">
 </p>
 
 ## Quick start
