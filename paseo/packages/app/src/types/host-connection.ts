@@ -1,4 +1,4 @@
-import type { ConnectionOffer } from "@getpaseo/protocol/connection-offer";
+import type { ConnectionOffer, DirectConnectionOffer } from "@getpaseo/protocol/connection-offer";
 import {
   normalizeHostPort,
   normalizeLoopbackToLocalhost,
@@ -49,6 +49,12 @@ export interface RelayHostConnection {
   relayEndpoint: string;
   useTls?: boolean;
   daemonPublicKeyB64: string;
+  /**
+   * Pinned once this daemon identity has negotiated protected endpoint
+   * security, or when its pairing offer required it. Never cleared by a
+   * connection failure; a new daemon identity is a different connection.
+   */
+  minimumSecurityMode?: "protected";
 }
 
 export type HostConnection =
@@ -129,7 +135,7 @@ function hostConnectionEquals(left: HostConnection, right: HostConnection): bool
   }
 
   if (left.type === "directTcp" && right.type === "directTcp") {
-    return left.endpoint === right.endpoint && (left.useTls ?? false) === (right.useTls ?? false);
+    return directTcpConnectionEquals(left, right);
   }
   if (left.type === "directSocket" && right.type === "directSocket") {
     return left.path === right.path;
@@ -149,6 +155,17 @@ function hostConnectionEquals(left: HostConnection, right: HostConnection): bool
   }
 
   return false;
+}
+
+function directTcpConnectionEquals(
+  left: DirectTcpHostConnection,
+  right: DirectTcpHostConnection,
+): boolean {
+  return (
+    left.endpoint === right.endpoint &&
+    (left.useTls ?? false) === (right.useTls ?? false) &&
+    (left.daemonPublicKeyB64 ?? null) === (right.daemonPublicKeyB64 ?? null)
+  );
 }
 
 function remoteSshConnectionEquals(
@@ -183,7 +200,69 @@ function upsertHostConnectionById(
     replaced = true;
   }
   if (!replaced) next.push(connection);
-  return next;
+  // A pin is never lost: the replaced record counts as much as the incoming one.
+  return shareRelaySecurityPin(next, [...connections, connection]);
+}
+
+/**
+ * The security pin belongs to the daemon identity, not to one relay address.
+ * Once any relay route to a key is pinned, by a strict offer or a learned
+ * handshake, every route to that key is pinned.
+ */
+function shareRelaySecurityPin(
+  connections: HostConnection[],
+  pinSources: HostConnection[],
+): HostConnection[] {
+  const pinnedKeys = new Set<string>();
+  for (const connection of pinSources) {
+    if (connection.type === "relay" && connection.minimumSecurityMode === "protected") {
+      pinnedKeys.add(connection.daemonPublicKeyB64);
+    }
+  }
+  return connections.map((connection) =>
+    connection.type === "relay" &&
+    connection.minimumSecurityMode !== "protected" &&
+    pinnedKeys.has(connection.daemonPublicKeyB64)
+      ? { ...connection, minimumSecurityMode: "protected" as const }
+      : connection,
+  );
+}
+
+function relaySecurityPinEquals(left: HostConnection, right: HostConnection): boolean {
+  const pinOf = (connection: HostConnection) =>
+    connection.type === "relay" ? connection.minimumSecurityMode : undefined;
+  return pinOf(left) === pinOf(right);
+}
+
+/**
+ * Records that the relay daemon identity `daemonPublicKeyB64` negotiated
+ * protected endpoint security. Every relay route to that identity is pinned.
+ * Returns the same array when nothing changes.
+ */
+export function pinRelayProtectedSecurityInProfiles(input: {
+  profiles: HostProfile[];
+  serverId: string;
+  daemonPublicKeyB64: string;
+  now?: string;
+}): HostProfile[] {
+  const now = input.now ?? new Date().toISOString();
+  let changed = false;
+  const next = input.profiles.map((host) => {
+    if (host.serverId !== input.serverId) return host;
+    const connections = host.connections.map((connection) => {
+      if (
+        connection.type !== "relay" ||
+        connection.daemonPublicKeyB64 !== input.daemonPublicKeyB64 ||
+        connection.minimumSecurityMode === "protected"
+      ) {
+        return connection;
+      }
+      changed = true;
+      return { ...connection, minimumSecurityMode: "protected" as const };
+    });
+    return changed ? { ...host, connections, updatedAt: now } : host;
+  });
+  return changed ? next : input.profiles;
 }
 
 function hasProfileChanged(input: {
@@ -209,7 +288,10 @@ function hasProfileChanged(input: {
     connections.length !== previous.connections.length ||
     connections.some((candidate, index) => {
       const old = previous.connections[index];
-      return !old || !hostConnectionEquals(candidate, old);
+      // Identity equality decides profile matching; the pin is policy on top of it.
+      return (
+        !old || !hostConnectionEquals(candidate, old) || !relaySecurityPinEquals(candidate, old)
+      );
     })
   );
 }
@@ -356,6 +438,37 @@ export function connectionFromListen(listen: string): HostConnection | null {
   }
 }
 
+/**
+ * The direct connections a v3 (relay-free) offer describes, in the offer's order (best first).
+ * Bad endpoints are skipped; duplicates collapse.
+ */
+export function directConnectionsFromOffer(
+  offer: DirectConnectionOffer,
+): DirectTcpHostConnection[] {
+  const out: DirectTcpHostConnection[] = [];
+  const seen = new Set<string>();
+  for (const raw of offer.endpoints) {
+    let endpoint: string;
+    try {
+      endpoint = normalizeHostPort(raw);
+    } catch {
+      continue;
+    }
+    if (seen.has(endpoint)) continue;
+    seen.add(endpoint);
+    out.push({
+      id: `direct:${endpoint}`,
+      type: "directTcp",
+      endpoint,
+      useTls: offer.useTls ?? false,
+      // Pins the daemon key: the socket runs the encrypted channel and sends the password only
+      // after the daemon has proved this key (utils/direct-e2ee.ts).
+      daemonPublicKeyB64: offer.daemonPublicKeyB64.trim(),
+    });
+  }
+  return out;
+}
+
 export function relayConnectionFromOffer(offer: ConnectionOffer): RelayHostConnection {
   // COMPAT(oldRelayOfferTls): added in v0.1.73, remove after 2026-11-10.
   const useTls = offer.relay.useTls ?? shouldUseTlsForDefaultHostedRelay(offer.relay.endpoint);
@@ -366,6 +479,7 @@ export function relayConnectionFromOffer(offer: ConnectionOffer): RelayHostConne
     relayEndpoint,
     useTls,
     daemonPublicKeyB64: offer.daemonPublicKeyB64.trim(),
+    ...(offer.minimumSecurityMode ? { minimumSecurityMode: offer.minimumSecurityMode } : {}),
   };
 }
 
@@ -405,6 +519,7 @@ const StoredHostConnectionSchema = z.discriminatedUnion("type", [
     endpoint: z.string(),
     useTls: z.boolean().optional(),
     password: z.string().optional(),
+    daemonPublicKeyB64: z.string().optional(),
   }),
   z.strictObject({
     id: z.string().optional(),
@@ -429,6 +544,7 @@ const StoredHostConnectionSchema = z.discriminatedUnion("type", [
     relayEndpoint: z.string(),
     useTls: z.boolean().optional(),
     daemonPublicKeyB64: z.string(),
+    minimumSecurityMode: z.literal("protected").optional(),
   }),
 ]);
 const StoredHostProfileSchema = z.strictObject({
@@ -455,7 +571,14 @@ function normalizeStoredConnection(connection: StoredHostConnection): HostConnec
         endpoint,
         useTls: connection.useTls,
       });
-      return { id: parsed.id, type: parsed.type, endpoint: parsed.endpoint, useTls: parsed.useTls };
+      const daemonPublicKeyB64 = connection.daemonPublicKeyB64?.trim();
+      return {
+        id: parsed.id,
+        type: parsed.type,
+        endpoint: parsed.endpoint,
+        useTls: parsed.useTls,
+        ...(daemonPublicKeyB64 ? { daemonPublicKeyB64 } : {}),
+      };
     } catch {
       return null;
     }
@@ -491,6 +614,9 @@ function normalizeStoredConnection(connection: StoredHostConnection): HostConnec
         relayEndpoint,
         ...(useTls !== undefined ? { useTls } : {}),
         daemonPublicKeyB64,
+        ...(connection.minimumSecurityMode
+          ? { minimumSecurityMode: connection.minimumSecurityMode }
+          : {}),
       };
     } catch {
       return null;

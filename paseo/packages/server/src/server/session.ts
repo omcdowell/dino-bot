@@ -11,7 +11,9 @@ import { relative } from "node:path";
 import { isAbsolute } from "node:path";
 import { CreationService, type CreatedAgent } from "./creation/index.js";
 import type { CreationSnapshot, AgentCreateRequest } from "@getpaseo/protocol/messages";
-import type { MessageReceipts } from "./message-receipts/index.js";
+import { runProviderTest, runSpeedTest } from "./network-diagnostics.js";
+import { MessageCancelledError, type MessageReceipts } from "./message-receipts/index.js";
+import type { AgentMessageQueue } from "./agent-queue/index.js";
 import equal from "fast-deep-equal";
 import { SessionDelivery, type OwnedSubscription } from "./session/owned-subscriptions/index.js";
 import { v4 as uuidv4 } from "uuid";
@@ -59,6 +61,8 @@ import {
 } from "./persistence-hooks.js";
 import { ensureAgentLoaded, ensureUnarchivedAgentLoaded } from "./agent/agent-loading.js";
 import {
+  type PromptDispatchDisposition,
+  type RunActiveTurnBehavior,
   sendPromptToAgent,
   waitForAgentRunStartWithTimeout,
   unarchiveAgentState,
@@ -101,6 +105,7 @@ import {
 } from "./workspace-labels/index.js";
 
 import { AgentManager, AgentRunCancellationError } from "./agent/agent-manager.js";
+import { getChatImageStore } from "./agent/chat-images/store.js";
 import { buildTimelinePromptIndex } from "./agent/timeline-prompt-index.js";
 import { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
 import type {
@@ -126,13 +131,16 @@ import {
   emitLiveTimelineItemIfAgentKnown,
 } from "./agent/timeline-append.js";
 import { assertPluginTimelineDataSize } from "./agent/agent-timeline-content.js";
+import { compactTimelineItem, leanTimelineItem } from "./agent/timeline-compact.js";
 import { parsePluginClientId } from "./plugins/plugin-session-identity.js";
+import { pluginCatalogForClient } from "./plugins/catalog-bundles.js";
 import { buildAgentForkContextAttachment } from "./agent/activity-curator.js";
 import { buildAgentPrompt } from "./agent/prompt-attachments.js";
 import type { StructuredGenerationDaemonConfig } from "./agent/structured-generation-providers.js";
 import {
   getAgentStreamEventTurnId,
   type AgentPersistenceHandle,
+  type AgentTimelineItem,
   type AgentPermissionResponse,
   type AgentRunOptions,
   type AgentSessionConfig,
@@ -224,6 +232,7 @@ import type { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import type { Resolvable } from "./speech/provider-resolver.js";
 import type { SpeechReadinessSnapshot } from "./speech/speech-runtime.js";
 import type pino from "pino";
+import { ModelScopeService, type ModelScopeView } from "./agent/model-scope/model-scope-service.js";
 import { ScheduleService } from "./schedule/service.js";
 import {
   createGitHubService,
@@ -461,7 +470,9 @@ export interface SessionOptions {
   worktreesRoot?: string;
   agentManager: AgentManager;
   agentStorage: AgentStorage;
-  messageReceipts: Pick<MessageReceipts, "send">;
+  messageReceipts: Pick<MessageReceipts, "send" | "cancel">;
+  /** Daemon-held message queue (agentMessageQueue); absent in tests that don't exercise it. */
+  agentQueue?: Pick<AgentMessageQueue, "enqueue" | "holds" | "wouldHold" | "force" | "withdraw">;
   creationService: Pick<CreationService, "create" | "subscribe">;
   projectRegistry: ProjectRegistry;
   workspaceRegistry: WorkspaceRegistry;
@@ -512,6 +523,8 @@ export interface SessionOptions {
     removePlugin(pluginId: string): Promise<void>;
     subscribe(listener: (pluginId: string) => void): () => void;
     subscribeSettings?(listener: (pluginId: string, settingsId: string) => void): () => void;
+    /** pluginEvents: events a plugin's server emits for its clients. */
+    subscribeEvents?(listener: (pluginId: string, name: string, data: unknown) => void): () => void;
     catalog(): Array<{ id: string; clientBundle: string }>;
     invokePluginRpc(pluginId: string, method: string, input: unknown): Promise<unknown>;
     listUsageReports(options?: {
@@ -743,6 +756,7 @@ export class Session {
   private unsubscribeAgentEvents: (() => void) | null = null;
   private unsubscribeProjectMutations: (() => void) | null = null;
   private unsubscribePluginChanges: (() => void) | null = null;
+  private unsubscribePluginEvents: (() => void) | null = null;
   private unsubscribeWorkspaceMutations: (() => void) | null = null;
   private registryMutationQueue: Promise<void> = Promise.resolve();
   private projectUpdateQueue: Promise<void> = Promise.resolve();
@@ -798,7 +812,8 @@ export class Session {
   private readonly daemonSession: DaemonSession;
   private readonly hubExecutionController: HubExecutionController | null;
   private readonly workspaceScripts: WorkspaceScriptsService;
-  private readonly messageReceipts: Pick<MessageReceipts, "send">;
+  private readonly messageReceipts: Pick<MessageReceipts, "send" | "cancel">;
+  private readonly agentQueue: SessionOptions["agentQueue"];
   private readonly createAgentLifecycleDispatch: CreateAgentLifecycleDispatch;
   private readonly creationService: Pick<CreationService, "create" | "subscribe">;
 
@@ -875,6 +890,7 @@ export class Session {
     this.pushNotifications = pushNotifications;
     this.paseoHome = paseoHome;
     this.messageReceipts = options.messageReceipts;
+    this.agentQueue = options.agentQueue;
     this.creationService = options.creationService;
     this.projectIcons = new ProjectIconReader(paseoHome);
     this.worktreesRoot = worktreesRoot;
@@ -1053,6 +1069,7 @@ export class Session {
           this.unsubscribeProjectMutations,
           this.unsubscribeWorkspaceMutations,
           this.unsubscribePluginChanges,
+          this.unsubscribePluginEvents,
           this.unsubscribeTerminalWorkspaceContributionEvents,
           this.providerCatalogSession.isObserving,
           this.hubExecutionController?.isObserving,
@@ -1713,6 +1730,15 @@ export class Session {
     else {
       this.unsubscribePluginChanges?.();
       this.unsubscribePluginChanges = null;
+    }
+    if (this.wantsEvent("plugin.event"))
+      this.unsubscribePluginEvents ??=
+        this.pluginRuntime?.subscribeEvents?.((pluginId, name, data) =>
+          this.emit({ type: "plugin.event", payload: { pluginId, name, data } }),
+        ) ?? null;
+    else {
+      this.unsubscribePluginEvents?.();
+      this.unsubscribePluginEvents = null;
     }
   }
 
@@ -2475,7 +2501,7 @@ export class Session {
         type: "plugin.catalog.get.response",
         payload: {
           requestId: msg.requestId,
-          plugins: this.pluginRuntime?.catalog() ?? [],
+          plugins: pluginCatalogForClient(this.pluginRuntime?.catalog() ?? [], msg.knownBundles),
         },
       });
       return undefined;
@@ -2645,13 +2671,40 @@ export class Session {
     }
   }
 
+  private dispatchNetworkDiagnosticsMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (msg.type === "diagnostics.provider_test.request") {
+      return this.handleProviderTestRequest(msg);
+    }
+    if (msg.type === "diagnostics.speed_test.request") {
+      this.emit({ type: "diagnostics.speed_test.response", payload: runSpeedTest(msg) });
+      return Promise.resolve();
+    }
+    return undefined;
+  }
+
   private dispatchAgentRelationshipMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     switch (msg.type) {
       case "agent.detach.request":
         return this.handleDetachAgentRequest(msg.agentId, msg.requestId);
+      case "agent.queue.force.request":
+        return this.handleAgentQueueForceRequest(msg);
+      case "agent.message.cancel.request":
+        return this.handleAgentMessageCancelRequest(msg);
       default:
-        return undefined;
+        return this.dispatchNetworkDiagnosticsMessage(msg);
     }
+  }
+
+  /** agent_patches: the client lost a patch base; send the agent in full on every subscription. */
+  private async handleAgentPatchResync(agentId: string): Promise<void> {
+    this.agentUpdates.forgetSent(agentId);
+    const live = this.agentManager.getAgent(agentId);
+    if (live) {
+      await this.agentUpdates.forwardLiveAgent(live);
+      return;
+    }
+    const record = await this.agentStorage.get(agentId);
+    if (record) await this.agentUpdates.emitStoredRecord(record);
   }
 
   private dispatchAgentTimelineMessage(
@@ -2665,6 +2718,12 @@ export class Session {
         return this.handleAgentTimelineAppendRequest(msg);
       case "agent.timeline.search.request":
         return this.handleAgentTimelineSearchRequest(msg, source);
+      case "agent.timeline.item.request":
+        return this.handleAgentTimelineItemRequest(msg, source);
+      case "agent_patch.resync":
+        return this.handleAgentPatchResync(msg.agentId);
+      case "agent.image.thumbnail.request":
+        return this.handleAgentImageThumbnailRequest(msg, source);
       case "agent.timeline.list_prompts.request":
         return this.handleAgentTimelineListPromptsRequest(msg, source);
       case "agent.provider_subagents.list.request":
@@ -3044,6 +3103,14 @@ export class Session {
         return this.providerCatalogSession.handleRefreshProvidersSnapshotRequest(msg);
       case "provider_diagnostic_request":
         return this.providerCatalogSession.handleProviderDiagnosticRequest(msg);
+      case "provider.model_scope.get.request":
+        return this.handleModelScopeRequest(msg.type, msg.provider, msg.requestId, () =>
+          this.modelScope.get(msg.provider),
+        );
+      case "provider.model_scope.set.request":
+        return this.handleModelScopeRequest(msg.type, msg.provider, msg.requestId, () =>
+          this.modelScope.set(msg.provider, msg.modelId, msg.scoped),
+        );
       case "provider.usage.list.request":
         return this.usageSession.handleLegacyList(msg);
       case "usage.list_reports.request":
@@ -3587,6 +3654,39 @@ export class Session {
           accepted: false,
           error: getErrorMessageOr(error, "Failed to update project icon"),
         },
+      });
+    }
+  }
+
+  private modelScopeService: ModelScopeService | null = null;
+
+  private get modelScope(): ModelScopeService {
+    this.modelScopeService ??= new ModelScopeService({
+      getProviderBaseId: (provider) => this.providerSnapshotManager.getProviderBaseId(provider),
+      getProviderConfigEnv: (provider) =>
+        this.providerSnapshotManager.getProviderConfigEnv(provider),
+      listModels: (provider) => this.providerSnapshotManager.listModels({ provider, wait: true }),
+    });
+    return this.modelScopeService;
+  }
+
+  private async handleModelScopeRequest(
+    type: "provider.model_scope.get.request" | "provider.model_scope.set.request",
+    provider: string,
+    requestId: string,
+    run: () => Promise<ModelScopeView>,
+  ): Promise<void> {
+    const responseType =
+      type === "provider.model_scope.get.request"
+        ? ("provider.model_scope.get.response" as const)
+        : ("provider.model_scope.set.response" as const);
+    try {
+      const scope = await run();
+      this.emit({ type: responseType, payload: { provider, scope, error: null, requestId } });
+    } catch (error) {
+      this.emit({
+        type: responseType,
+        payload: { provider, scope: null, error: getErrorMessage(error), requestId },
       });
     }
   }
@@ -6204,8 +6304,10 @@ export class Session {
             ...(request.includeBackground ? { includeBackground: true } : {}),
           },
           syncEnabled: Boolean(request.sync),
+          patches: this.supportsForSource(CLIENT_CAPS.agentPatches, owner.source),
           emit: (message) => {
-            if (message.type === "agent_update") owner.emit(message);
+            if (message.type === "agent_update" || message.type === "agent_patch")
+              owner.emit(message);
           },
         });
         this.refreshObservationProducers();
@@ -7740,6 +7842,36 @@ export class Session {
       : undefined;
 
     try {
+      if (msg.ifLoaded === true && !this.agentManager.getAgent(msg.agentId)) {
+        // A background fetch must never resume a stored agent (one provider process each).
+        this.emitForSource(
+          {
+            type: "fetch_agent_timeline_response",
+            payload: {
+              requestId: msg.requestId,
+              agentId: msg.agentId,
+              agent: null,
+              direction,
+              projection,
+              epoch: "",
+              reset: false,
+              staleCursor: false,
+              gap: false,
+              window: { minSeq: 0, maxSeq: 0, nextSeq: 0 },
+              startCursor: null,
+              endCursor: null,
+              hasOlder: false,
+              hasNewer: false,
+              ...(msg.mergeWindow === true ? { mergeWindow: true } : {}),
+              entries: [],
+              error: "Agent is not loaded",
+              notLoaded: true,
+            },
+          },
+          source,
+        );
+        return;
+      }
       const snapshot = await ensureAgentLoaded(msg.agentId, {
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
@@ -7768,9 +7900,13 @@ export class Session {
         selectedTimeline.endSeq !== null
           ? { epoch: selectedTimeline.timeline.epoch, seq: selectedTimeline.endSeq }
           : null;
-      const entries = selectedTimeline.entries.filter((entry) =>
-        this.supportsTimelineItem(entry.item, source),
-      );
+      const entries = selectedTimeline.entries.flatMap((entry) => {
+        if (!this.supportsTimelineItem(entry.item, source)) return [];
+        if (msg.lean !== true) return [entry];
+        // leanTimeline: a chat nobody is looking at; no reasoning, tool calls as stubs.
+        const item = leanTimelineItem(entry.item);
+        return item ? [{ ...entry, item }] : [];
+      });
 
       this.emitForSource(
         {
@@ -7794,7 +7930,7 @@ export class Session {
             entries: entries.map((entry) => {
               const payloadEntry = {
                 provider: snapshot.provider,
-                item: entry.item,
+                item: msg.compact === true ? compactTimelineItem(entry.item) : entry.item,
                 timestamp: entry.timestamp,
                 seqStart: entry.seqStart,
                 seqEnd: entry.seqEnd,
@@ -7863,6 +7999,118 @@ export class Session {
       type: "agent.timeline.append.response",
       payload: { requestId: msg.requestId, seq, epoch },
     });
+  }
+
+  private async handleAgentTimelineItemRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.timeline.item.request" }>,
+    source?: object,
+  ): Promise<void> {
+    const reply = (item: AgentTimelineItem | null, error: string | null) =>
+      this.emitForSource(
+        {
+          type: "agent.timeline.item.response",
+          payload: {
+            requestId: msg.requestId,
+            agentId: msg.agentId,
+            callId: msg.callId,
+            item,
+            error,
+          },
+        },
+        source,
+      );
+    try {
+      // Only answers for loaded agents: expanding a row must not resume anything.
+      if (!this.agentManager.getAgent(msg.agentId)) {
+        reply(null, "Agent is not loaded");
+        return;
+      }
+      const { rows } = this.agentManager.fetchTimeline(msg.agentId, {
+        direction: "tail",
+        limit: 0,
+      });
+      for (let index = rows.length - 1; index >= 0; index -= 1) {
+        const item = rows[index]?.item;
+        if (item?.type === "tool_call" && item.callId === msg.callId) {
+          reply(item, null);
+          return;
+        }
+      }
+      reply(null, "Item not found");
+    } catch (error) {
+      reply(null, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async handleAgentImageThumbnailRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.image.thumbnail.request" }>,
+    source?: object,
+  ): Promise<void> {
+    type ThumbnailPayload = Extract<
+      SessionOutboundMessage,
+      { type: "agent.image.thumbnail.response" }
+    >["payload"];
+    const reply = (fields: Partial<ThumbnailPayload>) =>
+      this.emitForSource(
+        {
+          type: "agent.image.thumbnail.response",
+          payload: {
+            requestId: msg.requestId,
+            imageId: msg.imageId,
+            data: null,
+            mimeType: null,
+            width: null,
+            height: null,
+            error: null,
+            ...fields,
+          },
+        },
+        source,
+      );
+    const store = getChatImageStore();
+    try {
+      switch (msg.variant ?? "thumbnail") {
+        case "placeholder": {
+          if (!store.resolve(msg.imageId)) throw new Error("Image not found");
+          const prepared = await store.prepare(msg.imageId);
+          reply({
+            thumbhash: prepared.thumbhash ?? null,
+            mimeType: prepared.display.mimeType,
+            width: prepared.display.width,
+            height: prepared.display.height,
+            byteSize: prepared.display.byteSize,
+          });
+          return;
+        }
+        case "display":
+        case "full": {
+          if (!store.resolve(msg.imageId)) throw new Error("Image not found");
+          const file =
+            msg.variant === "display"
+              ? (await store.prepare(msg.imageId)).display
+              : await store.full(msg.imageId, { acceptsHeic: msg.acceptsHeic });
+          reply({
+            path: file.path,
+            mimeType: file.mimeType,
+            width: file.width,
+            height: file.height,
+            byteSize: file.byteSize,
+          });
+          return;
+        }
+        default: {
+          const thumbnail = await store.thumbnail(msg.imageId, msg.maxEdge);
+          reply({
+            data: thumbnail.bytes.toString("base64"),
+            mimeType: thumbnail.mimeType,
+            width: thumbnail.width,
+            height: thumbnail.height,
+          });
+        }
+      }
+    } catch (error) {
+      reply({ error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   private async handleAgentTimelineSearchRequest(
@@ -8184,6 +8432,24 @@ export class Session {
       return;
     }
 
+    const wantsQueue = msg.activeTurnBehavior === "queue";
+    if (wantsQueue && (!msg.messageId || !this.agentQueue)) {
+      this.emit({
+        type: "send_agent_message_response",
+        payload: {
+          requestId: msg.requestId,
+          agentId: resolved.agentId,
+          accepted: false,
+          error: msg.messageId ? "This host cannot queue messages" : "Queued messages need an id",
+        },
+      });
+      return;
+    }
+    // A queued message that finds the agent idle starts at once. Steer, never interrupt, if a
+    // turn starts in between: a queued message must not cancel someone else's turn.
+    const runBehavior: RunActiveTurnBehavior =
+      msg.activeTurnBehavior === "queue" ? "steer" : (msg.activeTurnBehavior ?? "interrupt");
+
     try {
       const agentId = resolved.agentId;
 
@@ -8197,32 +8463,57 @@ export class Session {
         },
         "agent.session.send_agent_message",
       );
-      const send = async () => {
-        const result = await sendPromptToAgent({
-          agentManager: this.agentManager,
-          agentStorage: this.agentStorage,
-          agentId,
-          prompt,
-          source: msg.sourceAgentId
-            ? { kind: "agent-message", agentId: msg.sourceAgentId }
-            : undefined,
-          messageId: msg.messageId,
-          activeTurnBehavior: msg.activeTurnBehavior ?? "interrupt",
-          clearPendingPermissions: true,
-          logger: this.sessionLogger,
-        });
+      const send = async (): Promise<void | "held"> => {
+        if (wantsQueue && msg.messageId && this.agentQueue?.wouldHold(agentId)) {
+          await this.agentQueue.enqueue(agentId, {
+            messageId: msg.messageId,
+            text: msg.text,
+            ...(msg.images ? { images: msg.images } : {}),
+            ...(msg.attachments ? { attachments: msg.attachments } : {}),
+            ...(msg.sourceAgentId ? { sourceAgentId: msg.sourceAgentId } : {}),
+            createdAt: new Date().toISOString(),
+          });
+          disposition = "queued";
+          return "held";
+        }
+        let result: Awaited<ReturnType<typeof sendPromptToAgent>>;
+        try {
+          result = await sendPromptToAgent({
+            agentManager: this.agentManager,
+            agentStorage: this.agentStorage,
+            agentId,
+            prompt,
+            source: msg.sourceAgentId
+              ? { kind: "agent-message", agentId: msg.sourceAgentId }
+              : undefined,
+            messageId: msg.messageId,
+            activeTurnBehavior: runBehavior,
+            clearPendingPermissions: true,
+            logger: this.sessionLogger,
+          });
+          disposition = result.disposition;
+        } catch (error) {
+          dispatchFailed = true;
+          throw error;
+        }
         if (result.disposition === "turn_started") {
+          // A tracked message must not be stranded by its socket dropping mid-start: the receipt
+          // settles from the run itself, and a retry on a new socket finds it.
           await waitForAgentRunStartWithTimeout(
             this.agentManager,
             agentId,
-            this.delivery.requestSignal,
+            msg.messageId ? undefined : this.delivery.requestSignal,
           );
         }
       };
-      if (msg.messageId) {
+      let dispatchFailed = false;
+      // A duplicate of a message the agent already took has no fresh dispatch to report.
+      let disposition: PromptDispatchDisposition | "queued" | undefined;
+      const messageId = msg.messageId;
+      if (messageId) {
         await this.messageReceipts.send({
           agentId,
-          messageId: msg.messageId,
+          messageId,
           request: {
             prompt,
             sourceAgentId: msg.sourceAgentId,
@@ -8232,6 +8523,24 @@ export class Session {
             if (!msg.sourceAgentId) await this.prepareAgentMessage(agentId, msg.text);
           },
           send,
+          onRecorded: () => {
+            if (!this.supports(CLIENT_CAPS.messageReceivedAck)) return;
+            this.emit({
+              type: "send_agent_message_received",
+              payload: { requestId: msg.requestId, agentId, messageId },
+            });
+          },
+          resolve: (error) => {
+            if (this.agentQueue?.holds(agentId, messageId)) {
+              disposition = "queued";
+              return "held";
+            }
+            const outcome = this.agentManager.getSubmittedMessageOutcome(agentId, messageId);
+            if (outcome === "accepted") return "delivered";
+            if (outcome === "rejected") return "failed";
+            // Dispatch threw before any provider turn could exist (load failed, agent gone).
+            return error !== undefined && dispatchFailed ? "failed" : "unknown";
+          },
         });
       } else {
         await send();
@@ -8244,11 +8553,14 @@ export class Session {
           agentId,
           accepted: true,
           error: null,
+          ...(disposition ? { disposition } : {}),
         },
       });
     } catch (error) {
       if (this.delivery.requestSignal.aborted) return;
-      this.handleAgentRunError(resolved.agentId, error, "Failed to send agent message");
+      if (!(error instanceof MessageCancelledError)) {
+        this.handleAgentRunError(resolved.agentId, error, "Failed to send agent message");
+      }
       this.emit({
         type: "send_agent_message_response",
         payload: {
@@ -8258,6 +8570,83 @@ export class Session {
           error: errorToFriendlyMessage(error),
         },
       });
+    }
+  }
+
+  private async handleAgentQueueForceRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.queue.force.request" }>,
+  ): Promise<void> {
+    const resolved = await this.resolveAgentIdentifier(msg.agentId);
+    const agentId = resolved.ok ? resolved.agentId : msg.agentId;
+    const reply = (result: "forced" | "not_queued" | "failed", error: string | null) =>
+      this.emit({
+        type: "agent.queue.force.response",
+        payload: { requestId: msg.requestId, agentId, messageId: msg.messageId, result, error },
+      });
+    if (!resolved.ok || !this.agentQueue) {
+      reply("failed", resolved.ok ? "This host cannot queue messages" : resolved.error);
+      return;
+    }
+    try {
+      reply(await this.agentQueue.force(agentId, msg.messageId), null);
+    } catch (error) {
+      reply("failed", errorToFriendlyMessage(error));
+    }
+  }
+
+  private async handleProviderTestRequest(
+    msg: Extract<SessionInboundMessage, { type: "diagnostics.provider_test.request" }>,
+  ): Promise<void> {
+    const payload = await runProviderTest(msg, {
+      lastProviderError: () => this.findLastProviderError(),
+    });
+    this.emit({ type: "diagnostics.provider_test.response", payload });
+  }
+
+  /** The most recently updated agent that is in an error state, as a provider hint. */
+  private findLastProviderError(): {
+    agentId: string;
+    message: string;
+    at: string | null;
+  } | null {
+    let latest: { agentId: string; message: string; at: Date } | null = null;
+    for (const agent of this.agentManager.listAgents()) {
+      if (!agent.lastError) continue;
+      if (!latest || agent.updatedAt > latest.at) {
+        latest = { agentId: agent.id, message: agent.lastError, at: agent.updatedAt };
+      }
+    }
+    return latest
+      ? { agentId: latest.agentId, message: latest.message, at: latest.at.toISOString() }
+      : null;
+  }
+
+  private async handleAgentMessageCancelRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.message.cancel.request" }>,
+  ): Promise<void> {
+    const resolved = await this.resolveAgentIdentifier(msg.agentId);
+    const agentId = resolved.ok ? resolved.agentId : msg.agentId;
+    const reply = (result: "cancelled" | "too_late" | "failed", error: string | null) =>
+      this.emit({
+        type: "agent.message.cancel.response",
+        payload: { requestId: msg.requestId, agentId, messageId: msg.messageId, result, error },
+      });
+    if (!resolved.ok) {
+      reply("failed", resolved.error);
+      return;
+    }
+    try {
+      const queue = this.agentQueue;
+      reply(
+        await this.messageReceipts.cancel({
+          agentId,
+          messageId: msg.messageId,
+          withdraw: queue ? () => queue.withdraw(agentId, msg.messageId) : undefined,
+        }),
+        null,
+      );
+    } catch (error) {
+      reply("failed", errorToFriendlyMessage(error));
     }
   }
 
@@ -8562,6 +8951,8 @@ export class Session {
     this.unsubscribeProjectMutations = null;
     this.unsubscribePluginChanges?.();
     this.unsubscribePluginChanges = null;
+    this.unsubscribePluginEvents?.();
+    this.unsubscribePluginEvents = null;
     this.unsubscribeWorkspaceMutations?.();
     this.unsubscribeWorkspaceMutations = null;
     this.agentUpdates.dispose();
@@ -8646,6 +9037,7 @@ function sessionEventCategory(message: SessionOutboundMessage): SessionEventSubs
     case "activity_log":
     case "hub.execution.agent.update":
     case "hub.execution.agent.stream":
+    case "plugin.event":
       return message.type;
     case "status":
       switch (message.payload.status) {
@@ -8680,6 +9072,9 @@ function legacyWantsEvent(
       return !capabilities.has(CLIENT_CAPS.explicitEventSubscriptions);
     case "agent.provider_subagents.update":
       return capabilities.has(CLIENT_CAPS.providerSubagents);
+    // Plugin events only go to clients that ask for them.
+    case "plugin.event":
+      return false;
     default:
       return true;
   }

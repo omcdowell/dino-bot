@@ -428,6 +428,10 @@ export function buildSchedulesRoute() {
   return "/schedules" as const;
 }
 
+export function buildNetworkRoute(serverId?: string | null) {
+  return serverId ? (`/network?serverId=${encodeURIComponent(serverId)}` as const) : "/network";
+}
+
 export function buildOpenProjectRoute() {
   return "/open-project" as const;
 }

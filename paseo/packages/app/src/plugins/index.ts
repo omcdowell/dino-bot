@@ -1,4 +1,4 @@
-export { PluginCatalogSync } from "./catalog-sync";
+export { PluginCacheRestore, PluginCatalogSync } from "./catalog-sync";
 export { buildLegacyPluginSurfaceRedirectRoute } from "./routes";
 export { PluginSurfaceScreen } from "./surface-screen";
 export { usePluginAttachmentPicker } from "./attachments/picker";

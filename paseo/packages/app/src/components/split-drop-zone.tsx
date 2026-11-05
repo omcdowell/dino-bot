@@ -51,11 +51,11 @@ export function SplitDropZone({ paneId, active, preview }: SplitDropZoneProps) {
         styles.previewFrame,
         getPreviewFrameStyle(preview.position),
         {
-          borderColor: theme.colors.accent,
+          borderColor: theme.colors.accentText,
         },
       ],
     };
-  }, [paneId, preview, theme.colors.accent]);
+  }, [paneId, preview, theme.colors.accent, theme.colors.accentText]);
 
   if (!active) {
     return null;

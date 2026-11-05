@@ -1,4 +1,4 @@
-import { parseConnectionOfferFromUrl } from "@getpaseo/protocol/connection-offer";
+import { parsePairingOfferFromUrl } from "@getpaseo/protocol/connection-offer";
 import { parseRelayConnectionUri } from "@/utils/daemon-endpoints";
 
 function pairingTarget(url: string): string | null {
@@ -7,7 +7,7 @@ function pairingTarget(url: string): string | null {
     const offer =
       trimmed.startsWith("relay://") || trimmed.includes("#connect=")
         ? parseRelayConnectionUri(trimmed).offer
-        : parseConnectionOfferFromUrl(trimmed);
+        : parsePairingOfferFromUrl(trimmed)?.offer;
     return offer ? `${offer.serverId}:${offer.daemonPublicKeyB64}` : null;
   } catch {
     // Keep the last valid target while the user edits an incomplete URI.

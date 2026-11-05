@@ -879,6 +879,57 @@ test("retries provider history hydration after a stream failure", async () => {
   }
 });
 
+test("a close after failed history hydration lets the next resume hydrate again", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-history-close-retry-"));
+  let attempts = 0;
+  class FailingOnceHistorySession extends TestAgentSession {
+    override async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+      attempts += 1;
+      if (attempts === 1) throw new Error("Pi RPC request timed out phase=get_messages");
+      yield {
+        type: "timeline",
+        provider: "codex",
+        item: { type: "assistant_message", text: "provider history" },
+      };
+    }
+  }
+  const manager = new AgentManager({
+    clients: {
+      codex: new (class extends TestAgentClient {
+        override async resumeSession(
+          _handle: AgentPersistenceHandle,
+          config?: Partial<AgentSessionConfig>,
+        ): Promise<AgentSession> {
+          return new FailingOnceHistorySession({ provider: "codex", cwd: config?.cwd ?? workdir });
+        }
+      })(),
+    },
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000177",
+  });
+  const handle = { provider: "codex" as const, sessionId: "close-retry-history" };
+  let agentId: string | null = null;
+  try {
+    const first = await manager.resumeAgentFromPersistence(handle, { cwd: workdir });
+    agentId = first.id;
+    await expect(manager.hydrateTimelineFromProvider(first.id)).rejects.toThrow("timed out");
+    // An unarchive or a failed import closes the runtime that could not load its history.
+    await manager.closeAgent(first.id);
+
+    const second = await manager.resumeAgentFromPersistence(handle, { cwd: workdir }, first.id);
+    expect(manager.getAgent(second.id)?.historyPrimed).toBe(false);
+    await manager.hydrateTimelineFromProvider(second.id);
+    expect(attempts).toBe(2);
+    expect(manager.getTimeline(second.id)).toContainEqual({
+      type: "assistant_message",
+      text: "provider history",
+    });
+  } finally {
+    if (agentId) await manager.closeAgent(agentId).catch(() => undefined);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("unavailable steer interrupts once and starts one replacement turn", async () => {
   const session = new SteeringTestSession({ provider: "codex", cwd: process.cwd() });
   session.steerResult = "unavailable";

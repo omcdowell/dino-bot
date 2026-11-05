@@ -166,6 +166,8 @@ describe("startup blocking policy", () => {
   });
 });
 
+const HOME = { serverId: "server-home", route: "/h/server-home/plugin/bots/surface/home" };
+
 describe("resolveStartupRoute", () => {
   const baseIndexInput = {
     route: { kind: "index" as const, pathname: "/" },
@@ -184,6 +186,53 @@ describe("resolveStartupRoute", () => {
     hostRegistryStatus: "ready" as const,
     hosts: [],
   };
+
+  it("starts phones on the plugin home, via its host boundary, ahead of the last workspace", () => {
+    expect(
+      resolveStartupRoute({
+        ...baseIndexInput,
+        hosts: [{ serverId: "server-1" }, { serverId: "server-home" }],
+        workspaceSelection: { serverId: "server-1", workspaceId: "workspace-a" },
+        workspaceSelectionStatus: "exists",
+        mobileHome: HOME,
+      }),
+    ).toEqual({ kind: "redirect", href: "/h/server-home" });
+  });
+
+  it("ignores a plugin home whose host is no longer saved", () => {
+    expect(
+      resolveStartupRoute({
+        ...baseIndexInput,
+        hosts: [{ serverId: "server-1" }],
+        workspaceSelection: { serverId: "server-1", workspaceId: "workspace-a" },
+        workspaceSelectionStatus: "exists",
+        mobileHome: HOME,
+      }),
+    ).toEqual({ kind: "redirect", href: "/h/server-1" });
+  });
+
+  it("waits on the splash until the persisted plugin home has been read", () => {
+    expect(
+      resolveStartupRoute({
+        ...baseIndexInput,
+        hosts: [{ serverId: "server-1" }],
+        workspaceSelection: { serverId: "server-1", workspaceId: "workspace-a" },
+        workspaceSelectionStatus: "exists",
+        isMobileHomeLoaded: false,
+      }),
+    ).toEqual({ kind: "splash" });
+  });
+
+  it("lets startup blockers win over the plugin home", () => {
+    expect(
+      resolveStartupRoute({
+        ...baseIndexInput,
+        startupBlocker: { kind: "managed-daemon-starting" },
+        hosts: [{ serverId: "server-home" }],
+        mobileHome: HOME,
+      }),
+    ).toEqual({ kind: "splash" });
+  });
 
   it("renders non-index routes instead of making an index startup decision", () => {
     expect(
@@ -345,6 +394,28 @@ describe("resolveStartupRoute", () => {
 });
 
 describe("resolveHostIndexRoute", () => {
+  it("opens the plugin home on its own host, ahead of the remembered workspace", () => {
+    expect(
+      resolveHostIndexRoute({
+        serverId: "server-home",
+        workspaceSelection: { serverId: "server-home", workspaceId: "workspace-a" },
+        workspaceSelectionStatus: "exists",
+        mobileHome: HOME,
+      }),
+    ).toEqual(HOME.route);
+  });
+
+  it("ignores a plugin home on another host", () => {
+    expect(
+      resolveHostIndexRoute({
+        serverId: "server-saved",
+        workspaceSelection: { serverId: "server-saved", workspaceId: "workspace-a" },
+        workspaceSelectionStatus: "exists",
+        mobileHome: HOME,
+      }),
+    ).toEqual("/h/server-saved/workspace/workspace-a");
+  });
+
   it("restores the remembered workspace when the host index opens for the same host", () => {
     expect(
       resolveHostIndexRoute({

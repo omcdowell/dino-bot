@@ -30,6 +30,7 @@ import { getMarkdownListMarker, getMarkdownListSpacing } from "@/utils/markdown-
 import { markdownNodeContainsType } from "@/utils/markdown-ast";
 import { createMarkdownParser } from "@/utils/markdown-parser";
 import { createCompactMarkdownStyles, createMarkdownStyles } from "@/styles/markdown-styles";
+import { MARKDOWN_LIST_ITEM_CONTENT_FLEX } from "./list-item-content";
 import type { Theme } from "@/styles/theme";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { isNative } from "@/constants/platform";
@@ -74,7 +75,6 @@ function compactMarkdownStyleMapping(theme: Theme): Partial<MarkdownWithStableRe
 // own parser. The preview has to show the bytes on disk, so no typographer.
 const defaultMarkdownParser = createMarkdownParser({ linkify: true });
 const EMPTY_TEXT_STYLE: TextStyle = {};
-const MARKDOWN_LIST_ITEM_CONTENT_FLEX: ViewStyle = { flex: 1, flexShrink: 1, minWidth: 0 };
 export interface MarkdownRendererProps {
   text: string;
   compact?: boolean;

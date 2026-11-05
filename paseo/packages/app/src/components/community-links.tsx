@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { GitHubIcon } from "@/components/icons/github-icon";
 import { DiscordIcon } from "@/components/icons/discord-icon";
 import { openExternalUrl } from "@/utils/open-external-url";
+import { RELEASE_POLICY } from "@/constants/flavour";
 
 const renderGitHubIcon = (color: string) => <GitHubIcon color={color} size={14} />;
 const renderDiscordIcon = (color: string) => <DiscordIcon color={color} size={14} />;
@@ -22,6 +23,9 @@ export function CommunityLinks() {
   const handleOpenDiscord = useCallback(() => {
     void openExternalUrl("https://discord.gg/jz8T2uahpH");
   }, []);
+
+  // Upstream Paseo's GitHub, sponsor page and Discord: not linked from the public app (as paseo.sh).
+  if (RELEASE_POLICY.debrand) return null;
 
   return (
     <View style={styles.row}>

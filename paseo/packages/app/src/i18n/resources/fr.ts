@@ -346,6 +346,7 @@ export const fr: TranslationResources = {
       closeImage: "Fermer l’image",
       imageLoadFailed: "Impossible de charger l’image",
       imageUnavailable: "Image indisponible",
+      downloadImage: "Télécharger l'image",
       imagePreviewUnavailable: "Aperçu de l’image indisponible.",
       imagePreviewLoadFailed: "Impossible de charger l’aperçu de l’image.",
       review: "Revue",
@@ -632,6 +633,8 @@ export const fr: TranslationResources = {
         trigger: "Changer d’onglet ({{count}} ouverts)",
         title: "Changer d’onglet",
         searchPlaceholder: "Rechercher des onglets",
+        groupLabel: "Onglets",
+        groupCount: "{{count}} ouverts",
       },
       menu: {
         openFor: "Ouvrir le menu de {{label}}",
@@ -1685,6 +1688,11 @@ export const fr: TranslationResources = {
     retrying: "Nouvelle tentative…",
     noMatches: "Aucun modèle ne correspond à votre recherche",
     noMatchesForQuery: "Aucun modèle ne correspond à « {{query}} »",
+    scopeScoped: "Sélection",
+    scopeAll: "Tous",
+    scopeAdd: "Ajouter à la sélection",
+    scopeRemove: "Retirer de la sélection",
+    scopeEmpty: "La sélection est vide. Cochez des modèles dans Tous.",
     searchAllPlaceholder: "Rechercher dans tous les modèles…",
     searchPlaceholder: "Rechercher des modèles…",
     openProviderSettings: "Ouvrir les paramètres de {{provider}}",
@@ -2148,6 +2156,8 @@ export const fr: TranslationResources = {
     general: {
       title: "Général",
       sending: "Envoi",
+      network: en.settings.general.network,
+      meteredNetwork: en.settings.general.meteredNetwork,
       browserData: {
         title: "Données du navigateur",
         siteData: "Cookies et données des sites",
@@ -2876,4 +2886,6 @@ export const fr: TranslationResources = {
       },
     },
   },
+  delivery: en.delivery,
+  network: en.network,
 };

@@ -1,3 +1,4 @@
+import type { PluginEventHub } from "./events";
 import type { PaseoApi } from "@getpaseo/client";
 import type { QueryClient } from "@tanstack/react-query";
 import type { PluginRequirements } from "@getpaseo/protocol/messages";
@@ -54,6 +55,10 @@ export interface InstalledPlugin extends EvaluatedPlugin {
   requirements?: PluginRequirements;
   clientBundle: string;
   queryClient: QueryClient;
+  /** "cache": started from the device cache before the host answered; the live catalog confirms it. */
+  source?: "live" | "cache";
+  /** pluginEvents: what the plugin's server pushes; fed by PluginCatalogSync. */
+  events?: PluginEventHub;
 }
 
 export type {

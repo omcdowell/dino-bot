@@ -12,7 +12,11 @@ import type {
   TextToSpeechProvider,
 } from "../../speech-provider.js";
 import type { TurnDetectionProvider, TurnDetectionSession } from "../../turn-detection-provider.js";
-import { applySherpaLoaderEnv } from "./sherpa/sherpa-runtime-env.js";
+import {
+  applySherpaLoaderEnv,
+  applySttCudaLibraryEnv,
+  type SttCudaLibraryEnvResult,
+} from "./sherpa/sherpa-runtime-env.js";
 import type {
   LocalSpeechCreateSessionResult,
   LocalSpeechSessionKind,
@@ -91,9 +95,23 @@ function resolveWorkerExecArgv(): string[] {
   ];
 }
 
-function forkLocalSpeechWorker(): LocalSpeechWorkerProcess {
+// The CUDA library check spawns a child, so run it once per daemon and log once.
+let sttCudaLibraryEnvResult: SttCudaLibraryEnvResult | null = null;
+
+function forkLocalSpeechWorker(logger: pino.Logger): LocalSpeechWorkerProcess {
   const env = { ...process.env };
   applySherpaLoaderEnv(env);
+  if (!sttCudaLibraryEnvResult) {
+    sttCudaLibraryEnvResult = applySttCudaLibraryEnv(env);
+    if (sttCudaLibraryEnvResult.reason) {
+      logger.warn(
+        { reason: sttCudaLibraryEnvResult.reason },
+        "Local STT CUDA libraries not applied",
+      );
+    }
+  } else if (sttCudaLibraryEnvResult.applied) {
+    applySttCudaLibraryEnv(env, { verify: () => ({ applied: true }) });
+  }
   return fork(fileURLToPath(resolveWorkerUrl()), [], {
     env,
     execArgv: resolveWorkerExecArgv(),
@@ -196,7 +214,7 @@ export class LocalSpeechWorkerClient {
     this.logger = options.logger.child({ component: "local-speech-worker-client" });
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.idleTtlMs = options.idleTtlMs ?? DEFAULT_IDLE_TTL_MS;
-    this.forkWorker = options.forkWorker ?? forkLocalSpeechWorker;
+    this.forkWorker = options.forkWorker ?? (() => forkLocalSpeechWorker(this.logger));
   }
 
   async synthesizeSpeech(text: string): Promise<SpeechStreamResult> {

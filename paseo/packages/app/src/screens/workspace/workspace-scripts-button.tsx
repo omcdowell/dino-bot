@@ -74,7 +74,7 @@ const blueColorMapping = (theme: Theme) => ({
   color: theme.colors.palette.blue[500],
 });
 const greenColorMapping = (theme: Theme) => ({
-  color: theme.colors.palette.green[500],
+  color: theme.colors.accentText,
 });
 const redColorMapping = (theme: Theme) => ({
   color: theme.colors.palette.red[500],

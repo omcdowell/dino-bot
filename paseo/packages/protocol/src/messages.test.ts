@@ -548,3 +548,29 @@ test("agent messages are an optional semantic payload on existing tool rows", ()
     }).success,
   ).toBe(false);
 });
+
+describe("server_info display version (DinoBot)", () => {
+  test("parses productName and displayVersion beside the engine version", () => {
+    const info = parseServerInfoStatusPayload({
+      status: "server_info",
+      serverId: "srv_1",
+      version: "0.11.2",
+      productName: "DinoBot",
+      displayVersion: " 0.1.3 ",
+    });
+    expect(info?.version).toBe("0.11.2");
+    expect(info?.productName).toBe("DinoBot");
+    expect(info?.displayVersion).toBe("0.1.3");
+  });
+
+  test("an older daemon without the fields still parses (fields absent)", () => {
+    const info = parseServerInfoStatusPayload({
+      status: "server_info",
+      serverId: "srv_1",
+      version: "0.11.2",
+    });
+    expect(info?.version).toBe("0.11.2");
+    expect(info?.displayVersion).toBeUndefined();
+    expect(info?.productName).toBeUndefined();
+  });
+});

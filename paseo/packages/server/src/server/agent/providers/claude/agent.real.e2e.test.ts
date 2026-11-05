@@ -18,7 +18,7 @@ import {
 } from "../../../daemon-e2e/real-provider-test-config.js";
 import { findExecutable } from "../../../../executable-resolution/executable-resolution.js";
 import { withTimeout } from "../../../../utils/promise-timeout.js";
-import { claudeQuery } from "./query.js";
+import { claudeQuery, loadClaudeSdk } from "./query.js";
 import { streamSession } from "../test-utils/session-stream-adapter.js";
 
 const logger = pino({ level: "silent" });
@@ -236,6 +236,7 @@ describe("ClaudeAgentSession integration", () => {
   test("supportedModels returns the current abstract Claude SDK model shape", async () => {
     const claudeBinary = await findExecutable("claude");
     if (!claudeBinary) throw new Error("claude binary required for this integration test");
+    await loadClaudeSdk();
     const query = claudeQuery(
       {
         prompt: createEmptyPrompt(),

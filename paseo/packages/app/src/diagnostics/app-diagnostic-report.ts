@@ -1,6 +1,7 @@
 import type { ServerInfoStatusPayload } from "@getpaseo/protocol/messages";
 import type { HostRuntimeSnapshot } from "@/runtime/host-runtime";
 import type { HostConnection, HostProfile } from "@/types/host-connection";
+import { APP_DISPLAY_NAME, RELEASE_POLICY, branded } from "@/constants/flavour";
 
 interface DiagnosticEntry {
   label: string;
@@ -16,13 +17,26 @@ export function formatDiagnosticSection(title: string, entries: DiagnosticEntry[
   return [title, ...entries.map((entry) => `  ${entry.label}: ${entry.value}`)].join("\n");
 }
 
+/**
+ * The daemon's report starts with "Paseo diagnostics" (the daemon is the same for every flavour).
+ * A debranded build shows it as "<app name> host diagnostics"; only that title line changes, the
+ * rest (paths, log lines) is the host's real text.
+ */
+export function brandDaemonDiagnostic(
+  text: string,
+  appName: string | null = RELEASE_POLICY.debrand ? APP_DISPLAY_NAME : null,
+): string {
+  if (!appName) return text;
+  return text.replace(/^Paseo diagnostics(?=\n|$)/, `${appName} host diagnostics`);
+}
+
 export function formatAppDiagnosticHeader(input: {
   appVersion: string | null;
   platform: string;
   isDesktopApp: boolean;
   hostCount: number;
 }): string {
-  return formatDiagnosticSection("Paseo app diagnostics", [
+  return formatDiagnosticSection(branded("Paseo app diagnostics"), [
     { label: "Collected at", value: new Date().toISOString() },
     { label: "App version", value: input.appVersion ?? "unknown" },
     { label: "Platform", value: input.platform },

@@ -279,13 +279,13 @@ export function createControlGeometry(theme: Theme) {
     },
     controlActive: {
       borderColor: theme.colors.borderAccent,
-      outlineColor: theme.colors.accent,
+      outlineColor: theme.colors.accentText,
       outlineOffset: CONTROL_FOCUS_RING_OFFSET,
       outlineStyle: "solid" as const,
       outlineWidth: CONTROL_FOCUS_RING_WIDTH,
     },
     controlFocusRingColor: {
-      outlineColor: theme.colors.accent,
+      outlineColor: theme.colors.accentText,
     },
     controlDisabled: {
       opacity: theme.opacity[50],

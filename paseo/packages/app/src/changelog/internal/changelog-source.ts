@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { RELEASE_POLICY } from "@/constants/flavour";
 import { parseChangelog, type ChangelogRelease } from "./parse-changelog";
 
 const CHANGELOG_URL = "https://raw.githubusercontent.com/getpaseo/paseo/main/CHANGELOG.md";
@@ -34,7 +35,7 @@ export function useChangelog(enabled: boolean): Changelog {
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !RELEASE_POLICY.upstreamChangelog) return;
 
     const controller = new AbortController();
     setState(readCache());

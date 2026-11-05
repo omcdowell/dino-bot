@@ -30,7 +30,6 @@
     "packages/server",
     "packages/app",
     "packages/relay",
-    "packages/website",
     "packages/desktop",
     "packages/cli"
   ],
@@ -43,7 +42,6 @@
     "dev:app": "cross-env PASEO_LISTEN=127.0.0.1:6768 EXPO_PORT=8081 ./scripts/dev-app.sh",
     "test:e2e:mobile": "./scripts/test-mobile-agent-device.sh",
     "test:e2e:composer-keyboard:android": "./packages/app/e2e/mobile/composer-keyboard/android.sh",
-    "dev:website": "npm run dev --workspace=@getpaseo/website",
     "postinstall": "node scripts/postinstall-patches.mjs",
     "prepare": "lefthook install --force",
     "build": "npm run build --workspaces --if-present",
@@ -127,7 +125,7 @@
     "@vercel/nft": "^1.5.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "electron": "44.2.0",
+    "electron": "44.9.3",
     "get-port-cli": "^3.0.0",
     "js-yaml": "^4.1.1",
     "knip": "^5.82.1",
@@ -148,5 +146,14 @@
     "react-dom": "19.1.0",
     "react-native-reanimated": "4.3.1",
     "react-native-worklets": "0.8.3"
+  },
+  "allowScripts": {
+    "esbuild": true,
+    "node-pty": true,
+    "msgpackr-extract": true,
+    "unrs-resolver": true,
+    "lefthook": true,
+    "dtrace-provider": false,
+    "electron-winstaller": false
   }
 }

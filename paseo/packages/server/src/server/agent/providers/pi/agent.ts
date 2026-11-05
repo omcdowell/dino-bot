@@ -86,12 +86,14 @@ import type {
 } from "./rpc-types.js";
 import { PiUsagePoller, type PiUsagePollScheduler } from "./usage-poller.js";
 import {
+  extractToolResultImages,
   mapToolDetail,
   parseToolArgs,
   parseToolResult,
   type PiToolResult,
   type PiTrackedToolCall,
 } from "./tool-call-mapper.js";
+import { storeChatImages } from "../../chat-images/store.js";
 
 const PI_PROVIDER = "pi";
 const DEFAULT_PI_THINKING_LEVEL: PiThinkingLevel = "medium";
@@ -1642,9 +1644,20 @@ export class PiRpcAgentSession implements AgentSession {
       throw new Error(`Pi model id must include a provider: ${modelId}`);
     }
 
+    const previousThinkingLevel = this.state.thinkingLevel;
     const model = await this.runtimeSession.setModel(parsedReference.provider, parsedReference.id);
     await this.refreshState();
     this.config.model = `${model.provider}/${model.id}`;
+    // Pi moves to the new model's own thinking level (settings modelThinkingLevels, default,
+    // clamping). Without this event the manager keeps the old level, shows it in the app and
+    // restores it on the next reload.
+    if (this.state.thinkingLevel !== previousThinkingLevel) {
+      this.emit({
+        type: "thinking_option_changed",
+        provider: this.provider,
+        thinkingOptionId: this.state.thinkingLevel,
+      });
+    }
   }
 
   async setThinkingOption(thinkingOptionId: string | null): Promise<void> {
@@ -2407,11 +2420,13 @@ export class PiRpcAgentSession implements AgentSession {
     if (!detail) {
       return false;
     }
+    const images = status === "running" ? [] : storeChatImages(extractToolResultImages(result));
     const baseItem = {
       type: "tool_call" as const,
       callId: toolCallId,
       name: mapping?.name ?? toolCall.toolName,
       detail,
+      ...(images.length > 0 ? { images } : {}),
     };
     const item =
       status === "failed" ? { ...baseItem, status, error } : { ...baseItem, status, error: null };

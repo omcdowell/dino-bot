@@ -559,7 +559,7 @@ const foregroundMutedColorMapping = (theme: Theme) => ({
   color: theme.colors.foregroundMuted,
 });
 const greenColorMapping = (theme: Theme) => ({
-  color: theme.colors.palette.green[500],
+  color: theme.colors.accentText,
 });
 const redColorMapping = (theme: Theme) => ({
   color: theme.colors.palette.red[500],

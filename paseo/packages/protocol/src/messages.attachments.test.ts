@@ -3,12 +3,43 @@ import { describe, expect, it } from "vitest";
 import {
   AgentForkContextRequestMessageSchema,
   AgentForkContextResponseMessageSchema,
+  AgentTimelineItemPayloadSchema,
   CreateAgentRequestMessageSchema,
   CreatePaseoWorktreeRequestSchema,
   SendAgentMessageRequestSchema,
 } from "./messages.js";
 
 describe("shared messages attachments", () => {
+  it("keeps image references on user messages and tool calls (chatImages)", () => {
+    const image = {
+      id: "a".repeat(64),
+      mimeType: "image/png",
+      source: "/home/u/.paseo/chat-images/aaaa.png",
+      byteSize: 1234,
+      width: 800,
+      height: 600,
+    };
+    expect(
+      AgentTimelineItemPayloadSchema.parse({ type: "user_message", text: "", images: [image] }),
+    ).toEqual({ type: "user_message", text: "", images: [image] });
+    expect(
+      AgentTimelineItemPayloadSchema.parse({
+        type: "tool_call",
+        callId: "c1",
+        name: "read",
+        status: "completed",
+        error: null,
+        detail: { type: "read", filePath: "a.png" },
+        images: [image],
+      }),
+    ).toMatchObject({ images: [image] });
+    // Old rows without images still parse.
+    expect(AgentTimelineItemPayloadSchema.parse({ type: "user_message", text: "hi" })).toEqual({
+      type: "user_message",
+      text: "hi",
+    });
+  });
+
   it("preserves an optional timeline cursor on fork-context messages", () => {
     const boundaryCursor = { epoch: "timeline-1", seq: 42 };
     const request = AgentForkContextRequestMessageSchema.parse({

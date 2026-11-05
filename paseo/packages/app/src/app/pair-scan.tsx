@@ -13,6 +13,7 @@ import { isWeb } from "@/constants/platform";
 import { BackHeader } from "@/components/headers/back-header";
 import { PairLinkModal } from "@/components/pair-link-modal";
 import { Button } from "@/components/ui/button";
+import { routeAfterPairing } from "@/onboarding/setup-store";
 
 const styles = StyleSheet.create((theme) => ({
   container: {
@@ -128,7 +129,10 @@ export default function PairScanScreen() {
   const navigateToPairedHost = useCallback(
     (serverId: string) => {
       if (source === "onboarding") {
-        router.replace(buildHostRootRoute(serverId));
+        // Public flavour: the one-time setup step first (onboarding/setup-store.ts).
+        void routeAfterPairing(serverId)
+          .catch(() => buildHostRootRoute(serverId))
+          .then((route) => router.replace(route as Href));
         return;
       }
       router.replace(buildSettingsHostRoute(serverId));
@@ -174,6 +178,9 @@ export default function PairScanScreen() {
     ({ serverId }: { serverId: string }) => navigateToPairedHost(serverId),
     [navigateToPairedHost],
   );
+  const [isPasteOpen, setIsPasteOpen] = useState(false);
+  const openPaste = useCallback(() => setIsPasteOpen(true), []);
+  const closePaste = useCallback(() => setIsPasteOpen(false), []);
   const handleRequestPermission = useCallback(() => {
     void requestPermission();
   }, [requestPermission]);
@@ -218,6 +225,10 @@ export default function PairScanScreen() {
             <Pressable style={styles.permissionButton} onPress={handleRequestPermission}>
               <Text style={styles.permissionButtonText}>{t("pairing.scan.grantPermission")}</Text>
             </Pressable>
+            {/* Camera-less path: paste the link the setup printed under its QR code. */}
+            <Button variant="ghost" onPress={openPaste} testID="pair-scan-paste-link">
+              {t("pairing.connectionMethods.pasteLink.title")}
+            </Button>
           </View>
         ) : (
           <View style={styles.cameraWrap}>
@@ -261,6 +272,7 @@ export default function PairScanScreen() {
         onClose={scan.closePassword}
         onSaved={savePasswordPairing}
       />
+      <PairLinkModal visible={isPasteOpen} onClose={closePaste} onSaved={savePasswordPairing} />
     </View>
   );
 }

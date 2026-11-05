@@ -1,6 +1,7 @@
 import { createPaseoApi, type PaseoApi } from "@getpaseo/client";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { PluginHostSummary } from "@getpaseo/plugin/client";
+import { branded } from "@/constants/flavour";
 
 export interface PluginHostsSource {
   getHosts(): readonly { serverId: string; label: string }[];
@@ -30,11 +31,11 @@ export function createPluginHosts(source: PluginHostsSource, signal: AbortSignal
   function resolve(serverId: string): DaemonClient {
     if (signal.aborted) throw new Error("Plugin has stopped");
     if (!source.getHosts().some((host) => host.serverId === serverId)) {
-      throw new Error(`Unknown Paseo host: ${serverId}`);
+      throw new Error(branded(`Unknown Paseo host: ${serverId}`));
     }
     const host = source.getSnapshot(serverId);
     if (host?.connectionStatus !== "online" || !host.client) {
-      throw new Error(`Paseo host is disconnected: ${serverId}`);
+      throw new Error(branded(`Paseo host is disconnected: ${serverId}`));
     }
     return host.client;
   }

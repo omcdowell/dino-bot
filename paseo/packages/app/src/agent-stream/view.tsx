@@ -55,10 +55,12 @@ import { useSessionStore } from "@/stores/session-store";
 import { useRevealedText } from "@/hooks/use-revealed-text";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
+import { isCompactToolCall } from "@/timeline/compact-tool-call";
 import { resolveContentMaxWidth, useSettings } from "@/hooks/use-settings";
 import type { ToastApi } from "@/components/toast-host";
 import { returnToTimelineTail } from "./timeline-tail-navigation";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import { ToolCallImages } from "@/chat-images/tool-call-images";
 import { ToolCallDetailsContent } from "@/components/tool-call-details";
 import { QuestionFormCard } from "@/components/question-form-card";
 import { ToolCallSheetProvider } from "@/components/tool-call-sheet";
@@ -106,13 +108,20 @@ import { recordRenderProfileReasons } from "@/utils/render-profiler";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import { useStreamHistoryWindow } from "./use-stream-history-window";
 import { PluginTimelineItemView, useInstalledTimelineTransform } from "@/plugins/timeline";
+import { PinnedMessages, useHasPinnedMessages } from "./pinned-messages";
 
 function renderLiveAuxiliaryNode(input: {
   pendingPermissions: ReactNode;
   turnFooter: ReactNode;
+  pinnedMessages: ReactNode;
   bottomOverlayInset: number;
 }): ReactNode {
-  if (!input.pendingPermissions && !input.turnFooter && input.bottomOverlayInset === 0) {
+  if (
+    !input.pendingPermissions &&
+    !input.turnFooter &&
+    !input.pinnedMessages &&
+    input.bottomOverlayInset === 0
+  ) {
     return null;
   }
   return (
@@ -122,6 +131,9 @@ function renderLiveAuxiliaryNode(input: {
         <View style={stylesheet.contentWrapper}>
           <View style={stylesheet.listHeaderContent}>{input.pendingPermissions}</View>
         </View>
+      ) : null}
+      {input.pinnedMessages ? (
+        <View style={stylesheet.contentWrapper}>{input.pinnedMessages}</View>
       ) : null}
       {input.bottomOverlayInset > 0 ? (
         <BottomOverlayInset height={input.bottomOverlayInset} />
@@ -375,6 +387,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     // Get serverId (fallback to agent's serverId if not provided)
     const resolvedServerId = serverId ?? context.serverId ?? "";
     const transformTimelineItem = useInstalledTimelineTransform(resolvedServerId);
+    const hasPinnedMessages = useHasPinnedMessages(resolvedServerId, agentId);
 
     const client = useSessionStore((state) => state.sessions[resolvedServerId]?.client ?? null);
     const sessionStreamHead = useSessionStore((state) =>
@@ -707,6 +720,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               item.clientMessageId !== undefined &&
               pendingClientMessageIds.has(item.clientMessageId)
             }
+            deliveryState={item.messageId ? "taken" : undefined}
           />
         );
       },
@@ -782,7 +796,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             );
           }
 
-          return (
+          const toolCall = (
             <ToolCallSlot
               itemId={item.id}
               onInlineDetailsExpandedChangeByItemId={setInlineDetailsExpanded}
@@ -796,7 +810,17 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               isLastInSequence={isLastInSequence}
               onOpenFilePath={handleToolCallOpenFile}
               maxDetailHeight={maxDetailHeight}
+              compactServerId={resolvedServerId}
+              compactAgentId={agentId}
+              compactCallId={isCompactToolCall(data.metadata) ? data.callId : undefined}
             />
+          );
+          if (!data.images?.length) return toolCall;
+          return (
+            <View>
+              {toolCall}
+              <ToolCallImages images={data.images} serverId={resolvedServerId} client={client} />
+            </View>
           );
         }
 
@@ -815,7 +839,14 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           />
         );
       },
-      [context.cwd, setInlineDetailsExpanded, handleToolCallOpenFile],
+      [
+        context.cwd,
+        setInlineDetailsExpanded,
+        handleToolCallOpenFile,
+        resolvedServerId,
+        agentId,
+        client,
+      ],
     );
 
     // Read through a stable event so live group updates do not change the renderer identity
@@ -1062,9 +1093,21 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       return renderLiveAuxiliaryNode({
         pendingPermissions: auxiliary.pendingPermissions,
         turnFooter: auxiliary.turnFooter,
+        pinnedMessages:
+          readOnly || !hasPinnedMessages ? null : (
+            <PinnedMessages serverId={resolvedServerId} agentId={agentId} />
+          ),
         bottomOverlayInset,
       });
-    }, [auxiliary.pendingPermissions, auxiliary.turnFooter, bottomOverlayTailClearance]);
+    }, [
+      agentId,
+      auxiliary.pendingPermissions,
+      auxiliary.turnFooter,
+      bottomOverlayTailClearance,
+      hasPinnedMessages,
+      readOnly,
+      resolvedServerId,
+    ]);
 
     const renderers = useMemo<StreamSegmentRenderers>(
       () => ({

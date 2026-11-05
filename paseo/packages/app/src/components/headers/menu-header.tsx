@@ -2,7 +2,7 @@ import { useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { View, type StyleProp, type ViewStyle } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { PanelLeft } from "lucide-react-native";
+import { ChevronLeft, PanelLeft } from "lucide-react-native";
 import { ScreenHeader } from "./screen-header";
 import { ScreenTitle } from "./screen-title";
 import { HeaderToggleButton, headerIconSlotStyle } from "./header-toggle-button";
@@ -11,6 +11,39 @@ import { useIsCompactFormFactor } from "@/constants/layout";
 import { getShortcutOs } from "@/utils/shortcut-platform";
 import { useHasWindowChromeObstruction, useOwnsWindowChromeCorner } from "@/utils/desktop-window";
 import { iconButtonChromeGlyphSize } from "@/components/ui/icon-button-chrome";
+import { goToMobileHome, useMobileHome } from "@/plugins/mobile-home-runtime";
+import type { MobileHome } from "@/plugins/mobile-home";
+
+const NO_SHORTCUT: never[] = [];
+
+/** Phones with a plugin home: Back to it, in place of the main-menu (drawer) button. */
+function BackToHomeButton({
+  home,
+  resolvedStyle,
+}: {
+  home: MobileHome;
+  resolvedStyle: StyleProp<ViewStyle>;
+}) {
+  const { theme } = useUnistyles();
+  const { t } = useTranslation();
+  const handlePress = useCallback(() => goToMobileHome(home), [home]);
+  return (
+    <HeaderToggleButton
+      onPress={handlePress}
+      tooltipLabel={t("common.back")}
+      tooltipKeys={NO_SHORTCUT}
+      tooltipSide="right"
+      testID="back-to-home"
+      nativeID="back-to-home"
+      style={resolvedStyle}
+      accessible
+      accessibilityRole="button"
+      accessibilityLabel={t("common.back")}
+    >
+      <ChevronLeft size={24} strokeWidth={2} color={theme.colors.foreground} />
+    </HeaderToggleButton>
+  );
+}
 
 interface MenuHeaderProps {
   title?: string;
@@ -113,6 +146,11 @@ export function SidebarMenuToggle({ style, ...props }: SidebarMenuToggleProps = 
     () => [headerIconSlotStyle.slot, resolvedStyle],
     [resolvedStyle],
   );
+
+  const mobileHome = useMobileHome();
+  if (isMobile && mobileHome) {
+    return <BackToHomeButton home={mobileHome} resolvedStyle={resolvedStyle} />;
+  }
 
   if (!isMobile && !ownsTopLeft) {
     return null;

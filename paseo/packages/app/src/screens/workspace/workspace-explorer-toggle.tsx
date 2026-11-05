@@ -8,8 +8,15 @@ import {
   mutedIconColorMapping,
 } from "@/components/ui/icon-button-chrome";
 import type { ShortcutKey } from "@/utils/format-shortcut";
+import type { Theme } from "@/styles/theme";
 
 const ThemedPanelRight = withUnistyles(PanelRight);
+const foregroundIconColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
+
+function glassIconColorMapping(glass: boolean, mobile: boolean) {
+  if (glass) return foregroundIconColorMapping;
+  return mobile ? mutedIconColorMapping : extraMutedIconColorMapping;
+}
 
 interface WorkspaceExplorerToggleProps {
   onPress: () => void;
@@ -18,6 +25,8 @@ interface WorkspaceExplorerToggleProps {
   tooltipKeys: ShortcutKey[];
   accessibilityState: { expanded: boolean };
   mobile: boolean;
+  /** Inside the phone's floating glass pill: full-contrast glyph, the pill is the chrome. */
+  glass?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -41,6 +50,7 @@ export function WorkspaceExplorerToggle({
   tooltipKeys,
   accessibilityState,
   mobile,
+  glass = false,
   style,
 }: WorkspaceExplorerToggleProps) {
   return (
@@ -57,9 +67,9 @@ export function WorkspaceExplorerToggle({
       accessibilityState={accessibilityState}
     >
       <ThemedPanelRight
-        size={iconButtonChromeGlyphSize("large")}
-        strokeWidth={1.5}
-        uniProps={mobile ? mutedIconColorMapping : extraMutedIconColorMapping}
+        size={glass ? 18 : iconButtonChromeGlyphSize("large")}
+        strokeWidth={glass ? 1.75 : 1.5}
+        uniProps={glassIconColorMapping(glass, mobile)}
       />
     </HeaderToggleButton>
   );

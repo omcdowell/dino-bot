@@ -40,6 +40,12 @@ export interface PluginServerContext extends PluginLifecycleRegistration {
   ): void;
   registerProvider(provider: ProviderRegistration): void;
   registerUsageSource(source: UsageSourceRegistration): void;
+  /**
+   * Push a JSON event (at most 256 KiB) to this plugin's client on every app that is listening
+   * (`client.events`). Missing on hosts without server_info.features.pluginEvents: check first.
+   * Name: lowercase, `[a-z][a-z0-9._-]*`.
+   */
+  emit?(name: string, data: unknown): void;
 }
 
 export type PluginServerContribution = (server: PluginServerContext) => PluginCleanup;

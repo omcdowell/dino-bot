@@ -74,3 +74,99 @@ export declare function copyText(text: string): Promise<void>;
 export declare const TextInput: ForwardRefExoticComponent<
   TextInputProps & RefAttributes<NativeTextInput>
 >;
+
+/** Host dictation state. "uploading" = recording stopped, transcribing on the host. */
+export type PluginDictationStatus = "idle" | "recording" | "uploading" | "failed";
+
+export interface PluginDictationOptions {
+  /** The host that transcribes (the screen's `host.id`). */
+  serverId: string;
+  /** Called once per confirmed recording with the transcribed text. */
+  onTranscript(text: string): void;
+  /** Defaults to an error toast. */
+  onError?(error: Error): void;
+}
+
+export interface PluginDictation {
+  /** Connected and the host has dictation enabled. Hide or disable the mic when false. */
+  ready: boolean;
+  /** Why the host cannot dictate, when it says so; `start()` toasts it. */
+  unavailableMessage: string | null;
+  status: PluginDictationStatus;
+  /** 0..1 microphone level while recording. */
+  volume: number;
+  /** Seconds recorded. */
+  duration: number;
+  isRecording: boolean;
+  isProcessing: boolean;
+  error: string | null;
+  start(): Promise<void>;
+  cancel(): Promise<void>;
+  /** Stop recording and transcribe; the text arrives through `onTranscript`. */
+  confirm(): Promise<void>;
+  retry(): Promise<void>;
+  discard(): void;
+}
+
+export interface DictationOverlayProps {
+  volume: number;
+  duration: number;
+  isRecording: boolean;
+  isProcessing: boolean;
+  status: PluginDictationStatus;
+  /** Shown when `status` is "failed". */
+  errorText?: string;
+  onCancel(): void;
+  /** Insert the transcript. */
+  onAccept(): void;
+  /** Insert the transcript and send. */
+  onAcceptAndSend(): void;
+  onRetry?(): void;
+  onDiscard?(): void;
+}
+
+/**
+ * The app's dictation for a plugin composer. Missing on apps older than this API:
+ * feature-detect it on the module namespace and hide the mic when absent.
+ */
+export declare function usePluginDictation(options: PluginDictationOptions): PluginDictation;
+/** The agent composer's recording bar (cancel, level, timer, insert, insert + send). Renders nothing while idle. */
+export declare const DictationOverlay: ComponentType<DictationOverlayProps>;
+
+export interface PluginPickImageOptions {
+  /** Crop to a square in the picker (where the platform supports it). Default true. */
+  square?: boolean;
+  /** Longest side of the returned PNG, in pixels. Default 512. */
+  maxSize?: number;
+}
+
+export interface PluginPickedImage {
+  /** `data:image/png;base64,…` */
+  dataUri: string;
+  width: number;
+  height: number;
+}
+
+/**
+ * One image from the photo library, scaled down and re-encoded as PNG; null when cancelled. Throws
+ * when photo access is denied. Missing on apps older than this API: feature-detect it.
+ */
+export declare function pickImage(
+  options?: PluginPickImageOptions,
+): Promise<PluginPickedImage | null>;
+
+export type PluginHapticKind = "selection" | "light" | "medium" | "success" | "warning";
+/** A short haptic tap on phones; nothing elsewhere. Missing on older apps: feature-detect it. */
+export declare function haptic(kind?: PluginHapticKind): void;
+
+export interface PluginSvgXmlProps {
+  /** SVG markup. */
+  xml: string;
+  width?: number | string;
+  height?: number | string;
+}
+/**
+ * The app's react-native-svg `SvgXml` (plugins cannot bundle react-native-svg: its views are native and
+ * registered once by the app). Missing on older apps: feature-detect it.
+ */
+export declare const SvgXml: ComponentType<PluginSvgXmlProps>;

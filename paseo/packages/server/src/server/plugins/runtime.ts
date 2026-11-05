@@ -22,7 +22,7 @@ import {
   type ProviderInput,
 } from "@getpaseo/plugin/server/provider";
 import type { PluginLogEntry } from "@getpaseo/protocol/messages";
-import { compilePlugin } from "./compiler.js";
+import { createIsolatedPluginCompiler, type PluginCompiler } from "./isolated-compiler.js";
 import { readPluginManifest } from "./manifest.js";
 import type { PluginRequirements } from "@getpaseo/protocol/messages";
 import { assertPluginCompatibility } from "@getpaseo/protocol/plugin-requirements";
@@ -89,6 +89,10 @@ interface PluginSessionBinding {
   socket: PluginSessionSocket;
   reattaching: boolean;
   plugin: LoadedPlugin | null;
+  /** The highest child link the child has closed: its hellos and frames are stale. */
+  lastClosedLink: number;
+  /** The newest hello that arrived while a re-attach was in flight, handled once it settles. */
+  queuedHello: PluginFrameInput | null;
 }
 
 interface PluginFrameInput {
@@ -98,6 +102,7 @@ interface PluginFrameInput {
   sessionHost: PluginPaseoSessionHost;
   frame: string | Uint8Array;
   isBinary: boolean;
+  link: number | undefined;
 }
 
 interface PendingProviderSend {
@@ -124,8 +129,11 @@ interface RemoteProviderConnection {
 interface PluginRuntimeDependencies {
   settingsDirectory?: string;
   onSettingsChanged?: (pluginId: string, settingsId: string) => void;
+  /** pluginEvents: the plugin's server emitted an event for its clients. */
+  onPluginEvent?: (pluginId: string, name: string, data: unknown) => void;
   spawnChild?: () => PluginChild;
   sessionHost?: PluginPaseoSessionHost;
+  compiler?: PluginCompiler;
 }
 
 interface PluginLogTail {
@@ -300,6 +308,7 @@ export class PluginRuntime {
   private readonly logTails = new Map<string, PluginLogTail>();
   private readonly logger: pino.Logger;
   private readonly spawnChild: () => PluginChild;
+  private readonly compiler: PluginCompiler;
   private sessionHost: PluginPaseoSessionHost | null;
   private readonly listeners = new Set<(pluginId: string, error?: string) => void>();
 
@@ -311,6 +320,7 @@ export class PluginRuntime {
     this.logger = logger.child({ module: "plugins" });
     this.spawnChild = dependencies.spawnChild ?? spawnPluginChild;
     this.sessionHost = dependencies.sessionHost ?? null;
+    this.compiler = dependencies.compiler ?? createIsolatedPluginCompiler();
   }
 
   bindPaseoSessionHost(sessionHost: PluginPaseoSessionHost): void {
@@ -352,7 +362,7 @@ export class PluginRuntime {
       throw new Error(`Built-in plugin ${input.id} has manifest ID ${manifest.id}`);
     }
     assertPluginCompatibility({ ...manifest, version: this.daemonVersion, runtime: "daemon" });
-    const bundles = await compilePlugin(await resolveEntryPaths(directory));
+    const bundles = await this.compiler.compile(await resolveEntryPaths(directory));
     if (!bundles.serverBundle) throw new Error(`Built-in plugin ${input.id} needs a server entry`);
     const loaded = await this.launchPlugin({
       pluginId: input.id,
@@ -371,7 +381,7 @@ export class PluginRuntime {
     const manifest = await readPluginManifest(directory);
     assertPluginCompatibility({ ...manifest, version: this.daemonVersion, runtime: "daemon" });
     const entryPaths = await resolveEntryPaths(directory);
-    await compilePlugin(entryPaths);
+    await this.compiler.compile(entryPaths);
   }
 
   async stopPluginById(pluginId: string): Promise<boolean> {
@@ -636,7 +646,7 @@ export class PluginRuntime {
     const manifest = await readPluginManifest(directory);
     assertPluginCompatibility({ ...manifest, version: this.daemonVersion, runtime: "daemon" });
     const entryPaths = await resolveEntryPaths(directory);
-    const bundles = await compilePlugin(entryPaths);
+    const bundles = await this.compiler.compile(entryPaths);
     const serverBundle = bundles.serverBundle;
     if (!serverBundle) {
       return {
@@ -684,6 +694,8 @@ export class PluginRuntime {
       socket: new PluginSessionSocket(child),
       reattaching: false,
       plugin: null,
+      lastClosedLink: 0,
+      queuedHello: null,
     };
     const pending = new Map<string, PendingInvocation>();
     const sessionAttachment = await sessionHost
@@ -727,9 +739,10 @@ export class PluginRuntime {
                 sessionHost,
                 frame: message.data,
                 isBinary: message.isBinary,
+                link: message.link,
               });
             } else if (message.type === "paseo_close") {
-              session.socket.peerClosed();
+              this.closePluginLink(session, message.link);
             } else if (message.type === "ready") {
               if (settled) return;
               settled = true;
@@ -798,25 +811,61 @@ export class PluginRuntime {
    * timeout closed it, and that close would attach another.
    */
   private routePluginFrame(input: PluginFrameInput): void {
-    const { session, frame, isBinary } = input;
-    if (session.socket.readyState === 1) {
-      session.socket.receive(frame, isBinary);
+    const { session, frame, isBinary, link } = input;
+    const socket = session.socket;
+    // Tagged frames go only to the session of their own link (the first tagged frame names it).
+    // The daemon's socket compresses against its own history; so does the child's transport.
+    const sameLink = link === undefined || socket.link === undefined || socket.link === link;
+    if (socket.readyState === 1 && sameLink) {
+      if (link !== undefined) socket.link ??= link;
+      socket.receive(frame, isBinary);
       return;
     }
-    if (session.reattaching || !isSessionHelloFrame({ frame, isBinary })) return;
+    if (!isSessionHelloFrame({ frame, isBinary })) return;
+    if (link !== undefined) {
+      // A hello from a link the child has since closed, or one older than the current session.
+      if (link <= session.lastClosedLink) return;
+      if (socket.link !== undefined && link < socket.link) return;
+      if (session.reattaching) {
+        session.queuedHello = input;
+        return;
+      }
+    }
+    if (session.reattaching) return;
     if (!this.canReattachPluginSession(input)) return;
+    // The child redialled without our seeing its close (still queued, or lost): it has left this
+    // session, so end it here before the new one starts.
+    if (socket.readyState === 1) socket.close(1001, "Plugin client redialled");
     session.reattaching = true;
     void this.reattachPluginSession(input).finally(() => {
       session.reattaching = false;
+      const next = session.queuedHello;
+      session.queuedHello = null;
+      if (next) this.routePluginFrame(next);
     });
   }
 
+  /** The child closed one of its links. A close for any other link is not this session's. */
+  private closePluginLink(session: PluginSessionBinding, link: number | undefined): void {
+    if (link !== undefined) {
+      session.lastClosedLink = Math.max(session.lastClosedLink, link);
+      if (session.socket.link !== undefined && session.socket.link !== link) return;
+    }
+    session.socket.peerClosed();
+  }
+
   private async reattachPluginSession(input: PluginFrameInput): Promise<void> {
-    const { session, pluginId, sessionHost, child, frame, isBinary } = input;
+    const { session, pluginId, sessionHost, child, frame, isBinary, link } = input;
     const replacement = new PluginSessionSocket(child);
+    replacement.link = link;
     try {
       const attachment = await sessionHost.attachPluginSocket(pluginId, replacement);
       if (!this.canReattachPluginSession(input)) {
+        replacement.close();
+        return;
+      }
+      if (link !== undefined && link <= session.lastClosedLink) {
+        // The child gave up on this link while it was being attached.
         replacement.close();
         return;
       }
@@ -857,6 +906,10 @@ export class PluginRuntime {
     }
     if (message.type === "settings.changed") {
       this.dependencies.onSettingsChanged?.(loaded.id, message.settingsId);
+      return;
+    }
+    if (message.type === "event") {
+      this.dependencies.onPluginEvent?.(loaded.id, message.name, message.data);
       return;
     }
     if (message.type.startsWith("provider.")) {

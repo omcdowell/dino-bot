@@ -1,3 +1,4 @@
+import type { CaptureInterruptionPolicy } from "./capture-interruption";
 import { parsePcmSampleRate, resampleToPcm16 } from "./pcm";
 import { isElectronRuntime } from "@/desktop/host";
 import type { AudioEngine, AudioEngineCallbacks, AudioPlaybackSource } from "./audio-engine-types";
@@ -46,7 +47,8 @@ async function decodeAudioData(context: AudioContext, buffer: ArrayBuffer): Prom
 
 export function createAudioEngine(
   callbacks: AudioEngineCallbacks,
-  _options?: { traceLabel?: string },
+  // interruptionPolicy is native-only (iOS audio session interruptions); ignored on web.
+  _options?: { traceLabel?: string; interruptionPolicy?: CaptureInterruptionPolicy },
 ): AudioEngine {
   const refs: {
     playbackContext: AudioContext | null;

@@ -176,6 +176,25 @@ describe("JsonlRpcProcess", () => {
     }
   });
 
+  test("keeps a multi-byte character that a pipe read splits", async () => {
+    const child = createInMemoryChildProcess();
+    const transport = startProcess({ child });
+    const messages: Record<string, unknown>[] = [];
+    transport.onMessage((message) => messages.push(message));
+
+    try {
+      const bytes = Buffer.from(`${JSON.stringify({ type: "notice", text: "a\u2014b" })}\n`);
+      const split = bytes.indexOf(Buffer.from("\u2014")) + 1;
+      child.stdout.write(bytes.subarray(0, split));
+      child.stdout.write(bytes.subarray(split));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(messages).toEqual([{ type: "notice", text: "a\u2014b" }]);
+    } finally {
+      await transport.close();
+    }
+  });
+
   test("rejects unsuccessful responses", async () => {
     const transport = startProcess();
 

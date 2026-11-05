@@ -34,6 +34,21 @@ export function resolvePluginSurfaceContribution(
 }
 
 /**
+ * Whether the installed screen opens like a chat on phones: it registered `mobileFloatingHeader`,
+ * so it gets the floating header and, over the phone home, the chat's push and swipe back.
+ */
+export function pluginScreenOpensLikeChat(
+  plugins: readonly InstalledPlugin[],
+  screen: { serverId: string; pluginId: string; screenId: string },
+): boolean {
+  const plugin = plugins.find(
+    (candidate) => candidate.serverId === screen.serverId && candidate.id === screen.pluginId,
+  );
+  const surface = plugin?.surfaces.find((candidate) => candidate.id === screen.screenId);
+  return surface?.mobileFloatingHeader !== undefined;
+}
+
+/**
  * The screen header's title. A legacy `addSidebarItem` pointing at the screen lends its title, as
  * before screens had one. A title function that throws or returns an empty string falls back to the
  * screen id, so a bad title never takes the screen down.

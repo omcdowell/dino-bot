@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react";
-import { useHosts } from "@/runtime/host-runtime";
+import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { useDownloadStore } from "@/stores/download-store";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 
@@ -36,6 +36,7 @@ export function useFileDownload({
     workspaceRoot: normalizedWorkspaceRoot,
   });
   const startDownload = useDownloadStore((state) => state.startDownload);
+  const client = useHostRuntimeClient(serverId);
 
   return useCallback(
     ({ fileName, path }) => {
@@ -49,8 +50,29 @@ export function useFileDownload({
         path,
         daemonProfile,
         requestFileDownloadToken: (targetPath) => requestFileDownloadToken(targetPath),
+        // Over the host's socket, so the bytes ride the encrypted channel (fr-e2ee gap).
+        readFileOverSocket: client
+          ? async (targetPath, onProgress) => {
+              const file = await client.readFile(
+                normalizedWorkspaceRoot,
+                targetPath,
+                undefined,
+                undefined,
+                { onProgress },
+              );
+              return { bytes: file.bytes, mime: file.mime };
+            }
+          : undefined,
       });
     },
-    [daemonProfile, requestFileDownloadToken, serverId, startDownload, workspaceScopeId],
+    [
+      client,
+      daemonProfile,
+      normalizedWorkspaceRoot,
+      requestFileDownloadToken,
+      serverId,
+      startDownload,
+      workspaceScopeId,
+    ],
   );
 }

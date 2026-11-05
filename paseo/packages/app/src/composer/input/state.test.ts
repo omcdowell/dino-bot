@@ -3,6 +3,8 @@ import {
   applyDictationTranscript,
   computeCanStartDictation,
   resolveActiveSendBehavior,
+  resolveAgentSendBehavior,
+  resolveSubmitTurnBehavior,
   resolveComposerSurfacePresentation,
   runAlternateSendAction,
   runDefaultSendAction,
@@ -314,5 +316,41 @@ describe("stopRealtimeVoice", () => {
     });
 
     expect(calls).toEqual(["cancel agent", "stop voice"]);
+  });
+});
+
+describe("per-agent send behaviour", () => {
+  it("lets the paseo.send-behavior label override the setting", () => {
+    expect(resolveAgentSendBehavior("steer", "queue")).toBe("queue");
+    expect(resolveAgentSendBehavior("queue", "steer")).toBe("steer");
+    expect(resolveAgentSendBehavior("interrupt", undefined)).toBe("interrupt");
+    expect(resolveAgentSendBehavior("steer", "bogus")).toBe("steer");
+  });
+
+  it("sends a forced message as a steer, never an interrupt, in queue mode", () => {
+    expect(
+      resolveSubmitTurnBehavior({ sendBehavior: "queue", isAgentRunning: true, daemonQueue: true }),
+    ).toBe("steer");
+    expect(
+      resolveSubmitTurnBehavior({
+        sendBehavior: "queue",
+        isAgentRunning: false,
+        daemonQueue: true,
+      }),
+    ).toBe("queue");
+    expect(
+      resolveSubmitTurnBehavior({
+        sendBehavior: "queue",
+        isAgentRunning: false,
+        daemonQueue: false,
+      }),
+    ).toBe("steer");
+    expect(
+      resolveSubmitTurnBehavior({
+        sendBehavior: "interrupt",
+        isAgentRunning: true,
+        daemonQueue: true,
+      }),
+    ).toBe("interrupt");
   });
 });

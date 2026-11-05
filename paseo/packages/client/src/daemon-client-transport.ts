@@ -15,9 +15,13 @@ export {
   safeRandomId,
 } from "./daemon-client-transport-utils.js";
 export {
+  createDirectE2eeUpgradeTransportFactory,
   createEncryptedTransport,
   createRelayE2eeTransportFactory,
-  createRelayTransportFactory,
+  createRelayUpgradeTransportFactory,
+  DIRECT_E2EE_FAILED_MESSAGE,
+  describeDirectE2eeFailure,
+  describeEndpointSecurityClose,
 } from "./daemon-client-relay-e2ee-transport.js";
 export {
   bindWsHandler,

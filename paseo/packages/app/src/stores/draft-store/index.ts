@@ -9,6 +9,10 @@ import {
   persistAttachmentFromFileUri,
 } from "@/attachments/service";
 import { collectRetainedAttachmentIds } from "@/attachments/gc-retention";
+import {
+  collectSentChatImageAttachmentIds,
+  hydrateSentChatImages,
+} from "@/chat-images/sent-images";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
 import { useSessionStore, type SessionState } from "@/stores/session-store";
 import { useWorkspaceAttachmentsStore } from "@/attachments/workspace-attachments-store";
@@ -130,6 +134,8 @@ const migrateLegacyImages: MigrateLegacyImages = async (images) => {
 
 async function runAttachmentGc(): Promise<void> {
   gcScheduled = false;
+  // The list of photos this device sent must be loaded before anything is deleted.
+  await hydrateSentChatImages();
   const nowMs = Date.now();
 
   useDraftStore.setState((state) => {
@@ -148,6 +154,10 @@ async function runAttachmentGc(): Promise<void> {
     referencedIds.add(id);
   }
   for (const id of collectRetainedAttachmentIds()) {
+    referencedIds.add(id);
+  }
+  // Photos this device sent stay for its own bubbles.
+  for (const id of collectSentChatImageAttachmentIds()) {
     referencedIds.add(id);
   }
 

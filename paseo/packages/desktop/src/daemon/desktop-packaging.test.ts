@@ -20,23 +20,24 @@ function writeExecutable(filePath: string, contents: string): void {
   chmodSync(filePath, 0o755);
 }
 
-function createFakeMacBundle(options: { includeHelper: boolean }): {
+function createFakeMacBundle(options: { includeHelper: boolean; name?: string }): {
   root: string;
   shimPath: string;
 } {
+  const name = options.name ?? "Paseo";
   const root = mkdtempSync(join(tmpdir(), "paseo-cli-shim-test-"));
-  const appPath = join(root, "Paseo.app");
+  const appPath = join(root, `${name}.app`);
   const contentsPath = join(appPath, "Contents");
   const resourcesPath = join(contentsPath, "Resources");
   const shimPath = join(resourcesPath, "bin", "paseo");
-  const mainPath = join(contentsPath, "MacOS", "Paseo");
+  const mainPath = join(contentsPath, "MacOS", name);
   const helperPath = join(
     contentsPath,
     "Frameworks",
-    "Paseo Helper.app",
+    `${name} Helper.app`,
     "Contents",
     "MacOS",
-    "Paseo Helper",
+    `${name} Helper`,
   );
 
   mkdirSync(dirname(shimPath), { recursive: true });
@@ -156,6 +157,21 @@ describe("desktop packaging", () => {
       expect(result.stdout).toContain("node-script");
       expect(result.stdout).toContain("@getpaseo/cli/dist/index.js");
       expect(result.stdout).toContain("--version");
+      expect(result.stdout).not.toContain("main-executable");
+    } finally {
+      rmSync(bundle.root, { recursive: true, force: true });
+    }
+  });
+
+  it("finds the Helper of a bundle with another name (the public DinoBot build)", () => {
+    if (process.platform === "win32") return;
+
+    const bundle = createFakeMacBundle({ includeHelper: true, name: "DinoBot" });
+    try {
+      const result = spawnSync(bundle.shimPath, ["--version"], { encoding: "utf8" });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(`helper env=1/production cli=${bundle.shimPath}`);
       expect(result.stdout).not.toContain("main-executable");
     } finally {
       rmSync(bundle.root, { recursive: true, force: true });

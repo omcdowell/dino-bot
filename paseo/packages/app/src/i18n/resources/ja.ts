@@ -346,6 +346,7 @@ export const ja: TranslationResources = {
       closeImage: "画像を閉じる",
       imageLoadFailed: "画像を読み込めませんでした",
       imageUnavailable: "画像が利用できません",
+      downloadImage: "画像をダウンロード",
       imagePreviewUnavailable: "画像プレビューは利用できません。",
       imagePreviewLoadFailed: "画像プレビューを読み込めません。",
       review: "レビュー",
@@ -633,6 +634,8 @@ export const ja: TranslationResources = {
         trigger: "タブを切り替え（{{count}}件開いています）",
         title: "タブを切り替え",
         searchPlaceholder: "タブを検索",
+        groupLabel: "タブ",
+        groupCount: "{{count}}件",
       },
       menu: {
         openFor: "{{label}}のメニューを開く",
@@ -1660,6 +1663,11 @@ export const ja: TranslationResources = {
     retrying: "再試行中...",
     noMatches: "検索に一致するモデルがありません",
     noMatchesForQuery: "「{{query}}」に一致するモデルがありません",
+    scopeScoped: "スコープ",
+    scopeAll: "すべて",
+    scopeAdd: "スコープに追加",
+    scopeRemove: "スコープから削除",
+    scopeEmpty: "スコープは空です。「すべて」でチェックを付けてください。",
     searchAllPlaceholder: "すべてのモデルを検索...",
     searchPlaceholder: "モデルを検索...",
     openProviderSettings: "{{provider}}の設定を開く",
@@ -2123,6 +2131,8 @@ export const ja: TranslationResources = {
     general: {
       title: "一般",
       sending: "送信",
+      network: en.settings.general.network,
+      meteredNetwork: en.settings.general.meteredNetwork,
       browserData: {
         title: "ブラウザーデータ",
         siteData: "Cookie とサイトデータ",
@@ -2837,4 +2847,6 @@ export const ja: TranslationResources = {
       },
     },
   },
+  delivery: en.delivery,
+  network: en.network,
 } as const;

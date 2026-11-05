@@ -702,3 +702,58 @@ test("an idle session skips agent hydration while preserving workspace updates",
   expect(h.agentUpdates()).toEqual([]);
   expect(h.workspaceUpdates).toEqual([agent.workspaceId]);
 });
+
+describe("agent_patches", () => {
+  test("first send is full, later ones carry only changed fields, unchanged repeats are dropped", async () => {
+    const h = buildHarness();
+    h.service.beginSubscription({ subscriptionId: "sub", filter: {}, patches: true });
+    h.service.flushBootstrapped("sub");
+    const idle = h.register(makeAgentPayload({ id: "a", workspaceId: "ws-1", status: "idle" }));
+    await h.service.emitStoredRecord(h.stored("a"));
+    await h.service.emitStoredRecord(h.stored("a"));
+    h.register({ ...idle, status: "running", updatedAt: "2026-03-01T12:00:01.000Z" });
+    await h.service.emitStoredRecord(h.stored("a"));
+
+    expect(h.emitted.map((message) => message.type)).toEqual(["agent_update", "agent_patch"]);
+    expect(h.emitted[0]).toMatchObject({ payload: { kind: "upsert", rev: 1 } });
+    expect(h.emitted[1]).toEqual({
+      type: "agent_patch",
+      payload: {
+        agentId: "a",
+        rev: 2,
+        baseRev: 1,
+        set: { status: "running", updatedAt: "2026-03-01T12:00:01.000Z" },
+      },
+    });
+  });
+
+  test("subscriptions without the capability keep full snapshots, repeats included", async () => {
+    const h = buildHarness();
+    h.service.beginSubscription({ subscriptionId: "sub", filter: {} });
+    h.service.flushBootstrapped("sub");
+    h.register(makeAgentPayload({ id: "a", workspaceId: "ws-1", status: "idle" }));
+    await h.service.emitStoredRecord(h.stored("a"));
+    await h.service.emitStoredRecord(h.stored("a"));
+
+    expect(h.emitted.map((message) => message.type)).toEqual(["agent_update", "agent_update"]);
+    expect(h.emitted[0]).not.toMatchObject({ payload: { rev: expect.anything() } });
+  });
+
+  test("after a remove or a resync the agent goes out in full again", async () => {
+    const h = buildHarness();
+    h.service.beginSubscription({ subscriptionId: "sub", filter: {}, patches: true });
+    h.service.flushBootstrapped("sub");
+    h.register(makeAgentPayload({ id: "a", workspaceId: "ws-1", status: "idle" }));
+    await h.service.emitStoredRecord(h.stored("a"));
+    h.service.forgetSent("a");
+    await h.service.emitStoredRecord(h.stored("a"));
+    await h.service.removeAgent("a");
+    await h.service.emitStoredRecord(h.stored("a"));
+
+    expect(
+      h.emitted.map((message) =>
+        message.type === "agent_update" ? `${message.payload.kind}` : message.type,
+      ),
+    ).toEqual(["upsert", "upsert", "remove", "upsert"]);
+  });
+});

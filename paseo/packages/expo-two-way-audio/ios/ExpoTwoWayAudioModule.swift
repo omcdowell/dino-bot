@@ -8,6 +8,11 @@ let ON_AUDIO_INTERRUPTION_EVENT_NAME = "onAudioInterruption"
 
 public class ExpoTwoWayAudioModule: Module {
     private var audioEngine: AudioEngine?
+    // Dictation Opus encoders by handle. JS owns the lifetime (create -> encode* -> flush ->
+    // release); tearDown drops any left over.
+    private var opusEncoders: [Int: OpusPacketEncoder] = [:]
+    private var nextOpusEncoderId = 1
+    private let opusEncodersLock = NSLock()
     public func definition() -> ModuleDefinition {
         Name("ExpoTwoWayAudio")
 
@@ -106,6 +111,37 @@ public class ExpoTwoWayAudioModule: Module {
         Function("tearDown") {
             self.audioEngine?.tearDown()
             self.audioEngine = nil
+            self.opusEncodersLock.lock()
+            self.opusEncoders.removeAll()
+            self.opusEncodersLock.unlock()
+        }
+
+        // MARK: Dictation Opus (16 kHz mono PCM16 in, len16-framed Opus packets out).
+        // See OpusPacketEncoder.swift for the framing. Returns -1 when the system codec is missing.
+        Function("createOpusEncoder") { (bitRate: Int) -> Int in
+            guard let encoder = try? OpusPacketEncoder(sampleRate: 16000, bitRate: bitRate) else {
+                return -1
+            }
+            self.opusEncodersLock.lock()
+            defer { self.opusEncodersLock.unlock() }
+            let id = self.nextOpusEncoderId
+            self.nextOpusEncoderId += 1
+            self.opusEncoders[id] = encoder
+            return id
+        }
+
+        Function("opusEncode") { (id: Int, pcm: Data) -> Data in
+            return self.opusEncoder(id)?.encode(pcm) ?? Data()
+        }
+
+        Function("flushOpusEncoder") { (id: Int) -> Data in
+            return self.opusEncoder(id)?.flush() ?? Data()
+        }
+
+        Function("releaseOpusEncoder") { (id: Int) in
+            self.opusEncodersLock.lock()
+            self.opusEncoders.removeValue(forKey: id)
+            self.opusEncodersLock.unlock()
         }
 
         Function("restart") {
@@ -168,6 +204,12 @@ public class ExpoTwoWayAudioModule: Module {
             ON_RECORDING_CHANGE_EVENT_NAME,
             ON_AUDIO_INTERRUPTION_EVENT_NAME,
         ])
+    }
+
+    private func opusEncoder(_ id: Int) -> OpusPacketEncoder? {
+        opusEncodersLock.lock()
+        defer { opusEncodersLock.unlock() }
+        return opusEncoders[id]
     }
 
     private func setupMicrophoneCallback() {

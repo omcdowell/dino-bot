@@ -9,7 +9,14 @@ import type { StreamItem } from "@/types/stream";
 import { normalizeAgentSnapshot } from "@/utils/agent-snapshots";
 import { ReplicaCache } from ".";
 import type { DirectoryCheckpoint } from "@/runtime/replica-cache";
-import type { ReplicaHostRows, ReplicaRow, ReplicaRowChanges, ReplicaRowStore } from "./row-store";
+import type {
+  ReplicaHostRows,
+  ReplicaRow,
+  ReplicaRowChanges,
+  ReplicaRowIndexEntry,
+  ReplicaRowKey,
+  ReplicaRowStore,
+} from "./row-store";
 
 const SERVER_ID = "cached-host";
 
@@ -75,6 +82,22 @@ class MemoryStorage implements ReplicaRowStore {
       hosts.set(row.serverId, rows);
     }
     return [...hosts].map(([serverId, rows]) => ({ serverId, rows }));
+  }
+
+  readonly touched = new Map<string, number>();
+
+  async readIndex(): Promise<ReplicaRowIndexEntry[]> {
+    return [...this.rows.values()].map((row) => ({
+      serverId: row.serverId,
+      kind: row.kind,
+      id: row.id,
+      bytes: Buffer.byteLength(row.payload, "utf8"),
+      touchedAt: this.touched.get(this.key(row)) ?? 0,
+    }));
+  }
+
+  async touch(keys: readonly ReplicaRowKey[], at: number): Promise<void> {
+    for (const key of keys) this.touched.set(this.key(key), at);
   }
 
   async apply(changes: ReplicaRowChanges): Promise<void> {
@@ -559,6 +582,66 @@ describe("ReplicaCache", () => {
     expect((await reader.readTimeline(SERVER_ID, "agent-1"))?.items).toEqual([pluginItem]);
   });
 
+  it("round-trips chat image references and drops the local preview copy", async () => {
+    const storage = new MemoryStorage();
+    const writer = createCache(storage);
+    const image = {
+      id: "a".repeat(64),
+      mimeType: "image/png",
+      source: "/home/u/.paseo/chat-images/aa/" + "a".repeat(64) + ".png",
+      byteSize: 1200,
+      width: 900,
+      height: 600,
+    };
+    const local = {
+      id: "local-1",
+      mimeType: "image/png",
+      storageType: "web-indexeddb" as const,
+      storageKey: "local-1",
+      createdAt: 1,
+    };
+    const user: StreamItem = {
+      kind: "user_message",
+      id: "user-1",
+      text: "look",
+      images: [{ ...image, local }],
+      timestamp: new Date("2026-10-10T08:00:00.000Z"),
+      timelineCursor: { epoch: "epoch-1", seq: 1 },
+    };
+    const tool: StreamItem = {
+      kind: "tool_call",
+      id: "tool-1",
+      payload: {
+        source: "agent",
+        data: {
+          provider: "pi",
+          callId: "call-1",
+          name: "read",
+          status: "completed",
+          error: null,
+          detail: { type: "read", filePath: "/tmp/a.png" },
+          images: [image],
+        },
+      },
+      timestamp: new Date("2026-10-10T08:00:01.000Z"),
+      timelineCursor: { epoch: "epoch-1", seq: 2 },
+    };
+    writer.commitTimeline(SERVER_ID, "agent-1", {
+      agentId: "agent-1",
+      items: [user, tool],
+      range: { epoch: "epoch-1", startSeq: 1, endSeq: 2 },
+      hasOlder: false,
+    });
+    await writer.flush();
+
+    const cached = await createCache(storage).readTimeline(SERVER_ID, "agent-1");
+    expect(cached?.range).toEqual({ epoch: "epoch-1", startSeq: 1, endSeq: 2 });
+    const items = cached?.items ?? [];
+    expect(items[0]).toMatchObject({ kind: "user_message", images: [image] });
+    expect(items[0]?.kind === "user_message" && items[0].images?.[0]).not.toHaveProperty("local");
+    expect(items[1]).toMatchObject({ payload: { data: { images: [image] } } });
+  });
+
   it("drops cached plugin timeline items without a plugin-local id", async () => {
     const storage = new MemoryStorage();
     const writer = createCache(storage);
@@ -891,4 +974,137 @@ it("retains semantic agent messages across disk-cache reconstruction", async () 
   writer.commitTimeline(SERVER_ID, "agent-1", value);
   await writer.flush();
   expect(await createCache(storage).readTimeline(SERVER_ID, "agent-1")).toEqual(value);
+});
+
+function longTimeline(
+  count: number,
+  options: { epoch?: string; start?: number; hasOlder?: boolean } = {},
+) {
+  const epoch = options.epoch ?? "epoch-1";
+  const start = options.start ?? 1;
+  const items: StreamItem[] = Array.from({ length: count }, (_, index) => ({
+    kind: "assistant_message",
+    id: `message-${start + index}`,
+    text: `row ${start + index} ${"x".repeat(200)}`,
+    timestamp: new Date("2026-07-18T08:02:00.000Z"),
+    timelineCursor: { epoch, seq: start + index },
+  }));
+  return {
+    agentId: "agent-1",
+    items,
+    range: { epoch, startSeq: start, endSeq: start + count - 1 },
+    hasOlder: options.hasOlder ?? false,
+  };
+}
+
+describe("chat history on disk", () => {
+  it("keeps a trimmed range past 50 items so a cold start resumes after endSeq", async () => {
+    const storage = new MemoryStorage();
+    const writer = createCache(storage);
+    writer.commitTimeline(SERVER_ID, "agent-1", longTimeline(80));
+    await writer.flush();
+    const cached = await createCache(storage).readTimeline(SERVER_ID, "agent-1");
+    expect(cached?.range).toEqual({ epoch: "epoch-1", startSeq: 1, endSeq: 80 });
+    expect(cached?.items).toHaveLength(80);
+  });
+
+  it("seals older items into pages and pages them back in order", async () => {
+    const storage = new MemoryStorage();
+    const writer = createCache(storage);
+    writer.commitTimeline(SERVER_ID, "agent-1", longTimeline(250, { hasOlder: true }));
+    await writer.flush();
+    const reader = createCache(storage);
+    const head = await reader.readTimeline(SERVER_ID, "agent-1");
+    expect(head?.items).toHaveLength(50);
+    expect(head?.range).toEqual({ epoch: "epoch-1", startSeq: 201, endSeq: 250 });
+    expect(head?.hasOlder).toBe(true);
+
+    const second = await reader.readTimelinePageBefore(SERVER_ID, "agent-1", {
+      epoch: "epoch-1",
+      beforeSeq: 201,
+    });
+    expect(second?.range).toEqual({ epoch: "epoch-1", startSeq: 101, endSeq: 200 });
+    expect(second?.items[0]?.id).toBe("message-101");
+    const first = await reader.readTimelinePageBefore(SERVER_ID, "agent-1", {
+      epoch: "epoch-1",
+      beforeSeq: 101,
+    });
+    expect(first?.range.startSeq).toBe(1);
+    expect(first?.hasOlder).toBe(true);
+    expect(
+      await reader.readTimelinePageBefore(SERVER_ID, "agent-1", { epoch: "epoch-1", beforeSeq: 1 }),
+    ).toBeUndefined();
+    expect(
+      await reader.readTimelinePageBefore(SERVER_ID, "agent-1", { epoch: "other", beforeSeq: 201 }),
+    ).toBeUndefined();
+    expect(reader.archivedThrough(SERVER_ID, "agent-1", { epoch: "epoch-1", fromSeq: 1 })).toBe(
+      200,
+    );
+  });
+
+  it("writes each page once as the chat grows", async () => {
+    const storage = new MemoryStorage();
+    const cache = createCache(storage);
+    cache.commitTimeline(SERVER_ID, "agent-1", longTimeline(150));
+    await cache.flush();
+    expect(storage.changes.at(-1)?.upserts.map((row) => row.kind)).toEqual([
+      "timeline",
+      "timeline_page",
+    ]);
+    cache.commitTimeline(SERVER_ID, "agent-1", longTimeline(160));
+    await cache.flush();
+    expect(storage.changes.at(-1)?.upserts.map((row) => row.kind)).toEqual(["timeline"]);
+    const head = await cache.readTimeline(SERVER_ID, "agent-1");
+    expect(head?.range?.startSeq).toBe(101);
+    expect(head?.items).toHaveLength(60);
+  });
+
+  it("drops pages of an older epoch when the chat is rewound", async () => {
+    const storage = new MemoryStorage();
+    const cache = createCache(storage);
+    cache.commitTimeline(SERVER_ID, "agent-1", longTimeline(150));
+    await cache.flush();
+    cache.commitTimeline(SERVER_ID, "agent-1", longTimeline(20, { epoch: "epoch-2" }));
+    await cache.flush();
+    expect([...storage.rows.values()].filter((row) => row.kind === "timeline_page")).toEqual([]);
+  });
+
+  it("evicts least recently used pages first and keeps the directory", async () => {
+    const storage = new MemoryStorage();
+    const writer = createCache(storage);
+    commitDirectory(writer, SERVER_ID, directory());
+    for (const agentId of ["agent-1", "agent-2", "agent-3"]) {
+      writer.commitTimeline(SERVER_ID, agentId, { ...longTimeline(250), agentId });
+      await writer.flush();
+    }
+    const pageBytes = [...storage.rows.values()]
+      .filter((row) => row.kind === "timeline_page")
+      .reduce((sum, row) => sum + Buffer.byteLength(row.payload), 0);
+    const total = [...storage.rows.values()].reduce(
+      (sum, row) => sum + Buffer.byteLength(row.payload),
+      0,
+    );
+    // agent-1's newest page was read most recently: it must survive.
+    let at = 1;
+    for (const row of storage.rows.values())
+      storage.touched.set(`${row.serverId}:${row.kind}:${row.id}`, at++);
+    const reader = createCache(storage, Math.floor(total - pageBytes / 3));
+    expect(
+      await reader.readTimelinePageBefore(SERVER_ID, "agent-1", {
+        epoch: "epoch-1",
+        beforeSeq: 201,
+      }),
+    ).toBeDefined();
+    reader.commitTimeline(SERVER_ID, "agent-4", { ...longTimeline(60), agentId: "agent-4" });
+    await reader.flush();
+    const remaining = [...storage.rows.values()];
+    expect(remaining.some((row) => row.kind === "agent")).toBe(true);
+    expect(remaining.some((row) => row.kind === "timeline" && row.id === "agent-4")).toBe(true);
+    const pages = remaining.filter((row) => row.kind === "timeline_page").map((row) => row.id);
+    expect(pages.length).toBeLessThan(6);
+    expect(pages.some((id) => id.startsWith("agent-1|epoch-1|000000000101"))).toBe(true);
+    expect(
+      remaining.reduce((sum, row) => sum + Buffer.byteLength(row.payload), 0),
+    ).toBeLessThanOrEqual(Math.floor(total - pageBytes / 3));
+  });
 });

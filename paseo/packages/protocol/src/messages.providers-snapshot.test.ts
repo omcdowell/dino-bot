@@ -110,4 +110,6 @@ test("accepts a bodyless announcement with separate discovery freshness", async 
   expect(ProvidersSnapshotUpdateMessageSchema.parse(message)).toEqual(message);
   const result = validateWSOutboundMessage({ type: "session", message });
   expect(result.success).toBe(true);
-});
+  // The first import of the generated validator (ws-outbound.aot.js, ~13 MB) takes over the 5 s
+  // default when the machine is busy.
+}, 30_000);

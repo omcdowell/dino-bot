@@ -167,6 +167,68 @@ export function runReplicaRowStoreContract(
       ]);
     });
 
+    it("indexes rows by size and access time without payloads", async () => {
+      const before = Date.now();
+      await store.apply({
+        upserts: [
+          row("server-a", "timeline_page", "agent-1|e|1|50", "x".repeat(1000)),
+          row("server-a", "timeline", "agent-1", "é"),
+        ],
+        deletes: [],
+      });
+      const index = await store.readIndex();
+      const page = index.find((entry) => entry.kind === "timeline_page");
+      const head = index.find((entry) => entry.kind === "timeline");
+      expect(page).toMatchObject({ serverId: "server-a", id: "agent-1|e|1|50", bytes: 1000 });
+      expect(head?.bytes).toBe(2);
+      expect(page?.touchedAt).toBeGreaterThanOrEqual(before);
+      expect(page).not.toHaveProperty("payload");
+
+      await store.touch(
+        [{ serverId: "server-a", kind: "timeline_page", id: "agent-1|e|1|50" }],
+        42,
+      );
+      const touched = (await store.readIndex()).find((entry) => entry.kind === "timeline_page");
+      expect(touched?.touchedAt).toBe(42);
+      expect(await store.read("server-a", ["timeline_page"])).toEqual([
+        row("server-a", "timeline_page", "agent-1|e|1|50", "x".repeat(1000)),
+      ]);
+    });
+
+    it("keeps the index in step with deletes, host deletes, renames and clear", async () => {
+      const ids = async () =>
+        (await store.readIndex())
+          .map((entry) => `${entry.serverId}/${entry.kind}/${entry.id}`)
+          .sort();
+      await store.apply({
+        upserts: [
+          row("server-a", "agent", "agent-1", "a"),
+          row("server-a", "timeline", "agent-1", "t"),
+          row("server-b", "agent", "agent-2", "b"),
+          row("temporary", "agent", "agent-3", "c"),
+        ],
+        deletes: [],
+      });
+      await store.apply({
+        upserts: [],
+        deletes: [{ serverId: "server-a", kind: "timeline", id: "agent-1" }],
+      });
+      expect(await ids()).toEqual([
+        "server-a/agent/agent-1",
+        "server-b/agent/agent-2",
+        "temporary/agent/agent-3",
+      ]);
+      await store.deleteHost("server-b");
+      await store.renameHost("temporary", "server-a");
+      expect(await ids()).toEqual(["server-a/agent/agent-1", "server-a/agent/agent-3"]);
+      await store.clear();
+      expect(await store.readIndex()).toEqual([]);
+
+      await store.apply({ upserts: [row("server-a", "agent", "agent-1", "a")], deletes: [] });
+      const upgradedStore = await harness.openWithSchemaVersion(2);
+      expect(await upgradedStore.readIndex()).toEqual([]);
+    });
+
     it("clears all cached rows", async () => {
       await store.apply({
         upserts: [

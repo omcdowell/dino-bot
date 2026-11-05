@@ -9,6 +9,7 @@ import {
   type DesktopAppUpdateInstallResult,
 } from "@/desktop/updates/desktop-updates";
 import { useDesktopSettings } from "@/desktop/settings/desktop-settings";
+import { RELEASE_POLICY } from "@/constants/flavour";
 import { useDesktopIpcErrorReporter } from "@/desktop/hooks/desktop-ipc-error";
 import {
   PENDING_RECHECK_MS,
@@ -37,7 +38,8 @@ export interface UseDesktopAppUpdaterReturn {
 }
 
 export function useDesktopAppUpdater(): UseDesktopAppUpdaterReturn {
-  const isDesktopApp = shouldShowDesktopUpdateSection();
+  // Updates come from upstream Paseo's GitHub releases; the public flavour never checks.
+  const isDesktopApp = shouldShowDesktopUpdateSection() && RELEASE_POLICY.desktopAppUpdates;
   const { settings: desktopSettings } = useDesktopSettings();
   const releaseChannel = desktopSettings.releaseChannel;
   const reportError = useDesktopIpcErrorReporter();

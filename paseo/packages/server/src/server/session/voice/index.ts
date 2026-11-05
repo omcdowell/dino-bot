@@ -1,6 +1,7 @@
 import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
 import type { OwnedOperation, SessionDelivery } from "../owned-subscriptions/index.js";
 import { VoiceSession, type VoiceSessionOptions } from "./voice-session.js";
+import { createDictationStreamRegistry } from "../../dictation/dictation-stream-manager.js";
 
 type VoiceMessage = Extract<
   SessionInboundMessage,
@@ -27,6 +28,9 @@ interface ActiveVoiceSource {
 /** Audio conversations belong to their requesting socket, including bootstrap and finalization. */
 export class VoiceSessions {
   private readonly sources = new Map<object, ActiveVoiceSource>();
+  // One per client session: a dictation stream outlives the socket that started it, so the
+  // next socket of the same session can resume it (dictation_stream_start.resume).
+  private readonly dictationStreams = createDictationStreamRegistry();
 
   constructor(
     private readonly options: VoiceSessionOptions,
@@ -82,6 +86,7 @@ export class VoiceSessions {
       closing: false,
       voice: new VoiceSession({
         ...this.options,
+        dictation: { ...this.options.dictation, streams: this.dictationStreams },
         host: { ...this.options.host, emit: (message) => owner.emit(message) },
         onIdle: () => this.releaseIdle(active),
       }),

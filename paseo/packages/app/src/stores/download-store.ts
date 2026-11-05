@@ -43,6 +43,8 @@ interface DownloadState {
       mimeType: string | null;
       error: string | null;
     }>;
+    /** Reads the file over the host's socket (encrypted when the connection is). */
+    readFileOverSocket?: SocketFileReader;
   }) => Promise<void>;
 
   updateProgress: (id: string, progress: DownloadProgress) => void;
@@ -50,6 +52,24 @@ interface DownloadState {
   failDownload: (id: string, message: string) => void;
   dismissDownload: (id: string) => void;
   dismissAllCompleted: () => void;
+}
+
+export type SocketFileReader = (
+  path: string,
+  onProgress: (receivedBytes: number, totalBytes: number) => void,
+) => Promise<{ bytes: Uint8Array; mime: string }>;
+
+/**
+ * How a file download travels:
+ * - "socket": over the host's WebSocket (file_explorer binary frames), which runs the encrypted
+ *   channel for relay hosts and for direct hosts paired with a daemon key. Never plain HTTP.
+ * - "http": the upstream /api/files/download URL, only for a direct host without a daemon key
+ *   (its socket is plaintext anyway, e.g. a host typed in by hand in the own build).
+ */
+export function downloadRoute(daemon: HostProfile | undefined): "socket" | "http" {
+  const direct = daemon?.connections.find((conn) => conn.type === "directTcp");
+  if (direct && direct.type === "directTcp" && !direct.daemonPublicKeyB64?.trim()) return "http";
+  return "socket";
 }
 
 function generateDownloadId(): string {
@@ -67,6 +87,7 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
     path,
     daemonProfile,
     requestFileDownloadToken,
+    readFileOverSocket,
   }) => {
     const id = generateDownloadId();
     const download: Download = {
@@ -82,6 +103,11 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
       downloads: new Map(state.downloads).set(id, download),
       activeDownloadId: id,
     }));
+
+    if (readFileOverSocket && downloadRoute(daemonProfile) === "socket") {
+      await downloadOverSocket({ id, fileName, path, readFileOverSocket, get });
+      return;
+    }
 
     try {
       const tokenResponse = await requestFileDownloadToken(path);
@@ -227,6 +253,63 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
     });
   },
 }));
+
+async function downloadOverSocket(input: {
+  id: string;
+  fileName: string;
+  path: string;
+  readFileOverSocket: SocketFileReader;
+  get: () => DownloadState;
+}): Promise<void> {
+  const { id, fileName, path, readFileOverSocket, get } = input;
+  const startedAt = Date.now();
+  try {
+    const file = await readFileOverSocket(path, (receivedBytes, totalBytes) => {
+      if (totalBytes <= 0) return;
+      const elapsed = (Date.now() - startedAt) / 1000;
+      const speed = elapsed > 0 ? receivedBytes / elapsed : 0;
+      get().updateProgress(id, {
+        percent: receivedBytes / totalBytes,
+        bytesWritten: receivedBytes,
+        totalBytes,
+        speed,
+        eta: speed > 0 ? (totalBytes - receivedBytes) / speed : 0,
+      });
+    });
+    if (isWeb) {
+      triggerBlobDownload(file.bytes, file.mime, fileName);
+      get().completeDownload(id);
+      return;
+    }
+    const targetFile = resolveDownloadTargetFile(fileName);
+    targetFile.create();
+    targetFile.write(file.bytes);
+    get().completeDownload(id);
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(targetFile.uri, {
+        mimeType: file.mime || undefined,
+        dialogTitle: fileName
+          ? i18n.t("downloads.shareFileNamed", { fileName })
+          : i18n.t("downloads.shareFile"),
+      });
+    }
+  } catch (error) {
+    get().failDownload(id, error instanceof Error ? error.message : i18n.t("downloads.failed"));
+  }
+}
+
+function triggerBlobDownload(bytes: Uint8Array, mime: string, fileName: string): void {
+  if (typeof document === "undefined" || typeof URL.createObjectURL !== "function") {
+    throw new Error(i18n.t("downloads.failed"));
+  }
+  const blob = new Blob([bytes as BlobPart], { type: mime || "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  try {
+    triggerBrowserDownload(url, fileName);
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+}
 
 function findMostRecentDownloadId(downloads: Map<string, Download>): string | null {
   let mostRecent: Download | null = null;

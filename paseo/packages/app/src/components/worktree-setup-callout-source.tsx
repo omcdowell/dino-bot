@@ -6,6 +6,8 @@ import { useStableEvent } from "@/hooks/use-stable-event";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useWorkspaceFields } from "@/stores/session-store-hooks";
+import { isPublicDesktopApp } from "@/desktop/public-desktop";
+import { useWorkspaceBot } from "@/screens/workspace/use-workspace-bot";
 import {
   buildWorktreeSetupCalloutPolicy,
   selectActiveGitWorkspaceProject,
@@ -19,7 +21,13 @@ export function WorktreeSetupCalloutSource() {
     selection?.workspaceId ?? null,
     (workspace) => selectActiveGitWorkspaceProject(selection?.serverId ?? "", workspace),
   );
-  const activeProject = selectedWorkspaceProject;
+  // DinoBot desktop app: a bot's folder is not a coding project, so no worktree scripts nudge.
+  const workspaceBot = useWorkspaceBot({
+    serverId: selectedWorkspaceProject?.serverId ?? "",
+    workspaceDirectory: selectedWorkspaceProject?.repoRoot ?? null,
+    enabled: isPublicDesktopApp() && selectedWorkspaceProject !== null,
+  });
+  const activeProject = workspaceBot ? null : selectedWorkspaceProject;
   const client = useHostRuntimeClient(activeProject?.serverId ?? "");
   const callouts = useSidebarCallouts();
   const router = useRouter();

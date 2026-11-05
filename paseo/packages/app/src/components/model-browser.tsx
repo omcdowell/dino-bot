@@ -23,6 +23,8 @@ import {
   AlertTriangle,
   Check,
   ChevronRight,
+  Circle,
+  CircleCheck,
   Pencil,
   Plus,
   Search,
@@ -53,6 +55,17 @@ import {
   type ProviderSelectorProvider,
 } from "@/provider-selection/provider-selection";
 import { useProviderSettingsStore } from "@/stores/provider-settings-store";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { useModelScope } from "@/hooks/use-model-scope";
+import { useToast } from "@/contexts/toast-context";
+import { toErrorMessage } from "@/utils/error-messages";
+import {
+  initialModelScopeTab,
+  modelScopeMark,
+  rowsForModelScopeTab,
+  type ModelScopeMark,
+  type ModelScopeTab,
+} from "@/provider-selection/model-scope";
 import { useCurrentOverlayLayer } from "@/lib/overlay-root";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
 import {
@@ -61,6 +74,8 @@ import {
   resolveModelBrowserAllView,
   type ModelBrowserView,
 } from "@/components/model-browser-view";
+import { isPublicFlavour } from "@/constants/flavour";
+import { displayModelLabel } from "@/utils/model-label";
 
 const DESKTOP_PROVIDER_VIEW_MIN_HEIGHT = 220;
 const DESKTOP_PROVIDER_VIEW_MAX_HEIGHT = 400;
@@ -70,6 +85,8 @@ const DESKTOP_MODEL_ROW_HEIGHT = 40;
 const ThemedAlertTriangle = withUnistyles(AlertTriangle);
 const ThemedCheck = withUnistyles(Check);
 const ThemedChevronRight = withUnistyles(ChevronRight);
+const ThemedCircle = withUnistyles(Circle);
+const ThemedCircleCheck = withUnistyles(CircleCheck);
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 const ThemedPencil = withUnistyles(Pencil);
 const ThemedPlus = withUnistyles(Plus);
@@ -747,7 +764,9 @@ function ModelRow({
       <ModelRowProfileAction
         hovered={isHovered}
         onPress={handleEditProfiles}
-        label={t("modelSelector.editProfilesCount", { count: profiledRows.length })}
+        label={t("modelSelector.editProfilesCount", {
+          count: profiledRows.length,
+        })}
         testID={`model-edit-profiles-${row.provider}-${row.modelId}`}
       >
         <AgentProfileGlyph icon={primary.icon} color={primary.color} size={ICON_SIZE.xs} />
@@ -793,7 +812,7 @@ function ModelRow({
           <View style={styles.browserRowLeading}>{leadingSlot}</View>
           <View style={[styles.browserRowText, description && styles.browserRowTextInline]}>
             <Text numberOfLines={1} style={styles.browserRowLabel}>
-              {row.modelLabel}
+              {displayModelLabel(row.modelLabel, isPublicFlavour)}
             </Text>
             {description ? (
               <Text numberOfLines={1} style={styles.browserRowDescription}>
@@ -822,6 +841,55 @@ function ModelRow({
   );
 }
 
+const tickOnMapping = (theme: Theme) => ({ color: theme.colors.accent });
+const tickPatternMapping = (theme: Theme) => ({
+  color: theme.colors.foregroundMuted,
+});
+const tickOffMapping = (theme: Theme) => ({
+  color: theme.colors.foregroundMuted,
+});
+const TICK_MAPPINGS: Record<ModelScopeMark, typeof tickOffMapping> = {
+  scoped: tickOnMapping,
+  scopedByPattern: tickPatternMapping,
+  unscoped: tickOffMapping,
+};
+
+/**
+ * The row's Scoped tick: a ticked circle when in Scoped (accent, or muted when a glob entry brings
+ * it in), an empty circle when not. A circle keeps it apart from the plain check on the selected row.
+ */
+function ModelScopeTick({
+  mark,
+  modelId,
+  onToggle,
+}: {
+  mark: ModelScopeMark;
+  modelId: string;
+  onToggle: (modelId: string, scoped: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const scoped = mark !== "unscoped";
+  const handlePress = useCallback(() => onToggle(modelId, !scoped), [modelId, onToggle, scoped]);
+  const accessibilityState = useMemo(() => ({ checked: scoped }), [scoped]);
+  return (
+    <Pressable
+      onPress={handlePress}
+      hitSlop={8}
+      style={iconButtonStyle}
+      accessibilityRole="checkbox"
+      accessibilityState={accessibilityState}
+      accessibilityLabel={scoped ? t("modelSelector.scopeRemove") : t("modelSelector.scopeAdd")}
+      testID={`model-scope-tick-${modelId}`}
+    >
+      {scoped ? (
+        <ThemedCircleCheck size={ICON_SIZE.sm} uniProps={TICK_MAPPINGS[mark]} />
+      ) : (
+        <ThemedCircle size={ICON_SIZE.sm} uniProps={TICK_MAPPINGS[mark]} />
+      )}
+    </Pressable>
+  );
+}
+
 function SelectableModelRow({
   row,
   serverId,
@@ -832,6 +900,8 @@ function SelectableModelRow({
   onCreateProfile,
   onEditProfile,
   onEditProfiles,
+  scopeMark,
+  onToggleScope,
 }: {
   row: ProviderSelectionModelRow;
   serverId: string | null;
@@ -842,10 +912,32 @@ function SelectableModelRow({
   onCreateProfile?: (seed: AgentProfileSeed) => void;
   onEditProfile?: (profileId: string) => void;
   onEditProfiles?: () => void;
+  scopeMark?: ModelScopeMark;
+  onToggleScope?: (modelId: string, scoped: boolean) => void;
 }) {
   const handlePress = useCallback(() => {
     onSelect(row.provider, row.modelId);
   }, [onSelect, row.modelId, row.provider]);
+  if (scopeMark && onToggleScope) {
+    return (
+      <View style={styles.scopeRow}>
+        <View style={styles.scopeRowMain}>
+          <ModelRow
+            row={row}
+            serverId={serverId}
+            isSelected={isSelected}
+            showProviderLabel={showProviderLabel}
+            onPress={handlePress}
+            profiledRows={profiledRows}
+            onCreateProfile={onCreateProfile}
+            onEditProfile={onEditProfile}
+            onEditProfiles={onEditProfiles}
+          />
+        </View>
+        <ModelScopeTick mark={scopeMark} modelId={row.modelId} onToggle={onToggleScope} />
+      </View>
+    );
+  }
   return (
     <ModelRow
       row={row}
@@ -1143,6 +1235,8 @@ function ModelRowList({
   onCreateProfile,
   onEditProfile,
   onEditProfiles,
+  scopeMarkFor,
+  onToggleScope,
 }: {
   rows: ProviderSelectionModelRow[];
   serverId: string | null;
@@ -1156,6 +1250,8 @@ function ModelRowList({
   onCreateProfile?: (seed: AgentProfileSeed) => void;
   onEditProfile?: (profileId: string) => void;
   onEditProfiles?: () => void;
+  scopeMarkFor?: (modelId: string) => ModelScopeMark;
+  onToggleScope?: (modelId: string, scoped: boolean) => void;
 }) {
   const isCompact = useIsCompactFormFactor();
   const renderItem = useCallback(
@@ -1170,6 +1266,8 @@ function ModelRowList({
         onCreateProfile={onCreateProfile}
         onEditProfile={onEditProfile}
         onEditProfiles={onEditProfiles}
+        scopeMark={scopeMarkFor?.(item.modelId)}
+        onToggleScope={onToggleScope}
       />
     ),
     [
@@ -1177,6 +1275,8 @@ function ModelRowList({
       onEditProfiles,
       onCreateProfile,
       onSelect,
+      onToggleScope,
+      scopeMarkFor,
       profiledLookup,
       selectedModel,
       selectedProvider,
@@ -1291,32 +1391,85 @@ function ProviderModelBrowserContent({
   scrolling: "sheet" | "independent";
 }) {
   const { t } = useTranslation();
+  const toast = useToast();
+  const { scope, setScoped } = useModelScope({
+    serverId,
+    provider: view.providerId,
+  });
+  const [chosenTab, setChosenTab] = useState<ModelScopeTab | null>(null);
+  const tab = chosenTab ?? initialModelScopeTab(scope);
   const visibleRows = useMemo(
-    () => (provider ? filterAndRankModelRows(getProviderModelRows(provider), normalizedQuery) : []),
-    [normalizedQuery, provider],
+    () =>
+      provider
+        ? filterAndRankModelRows(
+            rowsForModelScopeTab(getProviderModelRows(provider), scope, tab),
+            normalizedQuery,
+          )
+        : [],
+    [normalizedQuery, provider, scope, tab],
+  );
+  const scopeMarkFor = useCallback((modelId: string) => modelScopeMark(scope, modelId), [scope]);
+  const handleToggleScope = useCallback(
+    (modelId: string, scoped: boolean) => {
+      setScoped(modelId, scoped).catch((error) => toast.error(toErrorMessage(error)));
+    },
+    [setScoped, toast],
+  );
+  const scopeTabs = useMemo(
+    () =>
+      scope ? (
+        <View style={styles.scopeTabs}>
+          <SegmentedControl<ModelScopeTab>
+            size="sm"
+            value={tab}
+            onValueChange={setChosenTab}
+            options={[
+              {
+                value: "scoped",
+                label: `${t("modelSelector.scopeScoped")} · ${scope.scopedModelIds.length}`,
+                testID: "model-scope-tab-scoped",
+              },
+              {
+                value: "all",
+                label: t("modelSelector.scopeAll"),
+                testID: "model-scope-tab-all",
+              },
+            ]}
+            testID="model-scope-tabs"
+          />
+        </View>
+      ) : null,
+    [scope, t, tab],
   );
   const providerProfileRows = useMemo(
     () => profiles?.rows.filter((row) => row.provider === view.providerId) ?? [],
     [profiles, view.providerId],
   );
-  const profileHeader = useMemo(
-    () =>
+  const profileHeader = useMemo(() => {
+    const profileSection =
       normalizedQuery.length === 0 && showProfilesSection && profiles ? (
         <AgentProfilesPickerContent
           rows={providerProfileRows}
           onApplyProfile={onApplyProfile}
           onEditProfiles={onEditProfiles}
         />
-      ) : undefined,
-    [
-      normalizedQuery,
-      onApplyProfile,
-      onEditProfiles,
-      profiles,
-      providerProfileRows,
-      showProfilesSection,
-    ],
-  );
+      ) : null;
+    if (!scopeTabs) return profileSection ?? undefined;
+    return (
+      <View>
+        {profileSection}
+        {scopeTabs}
+      </View>
+    );
+  }, [
+    normalizedQuery,
+    onApplyProfile,
+    onEditProfiles,
+    profiles,
+    providerProfileRows,
+    scopeTabs,
+    showProfilesSection,
+  ]);
 
   if (!provider) return <ModelSearchEmptyState />;
   const selection = provider.modelSelection;
@@ -1341,11 +1494,32 @@ function ProviderModelBrowserContent({
     );
   }
   if (visibleRows.length === 0) {
+    if (scope && tab === "scoped" && normalizedQuery.length === 0) {
+      return (
+        <View>
+          {profileHeader}
+          <View style={styles.emptyState}>
+            <ThemedCircleCheck size={ICON_SIZE.md} uniProps={foregroundMutedMapping} />
+            <Text style={styles.emptyStateText}>{t("modelSelector.scopeEmpty")}</Text>
+          </View>
+        </View>
+      );
+    }
+    if (scope) {
+      return (
+        <View>
+          {profileHeader}
+          <ModelSearchEmptyState />
+        </View>
+      );
+    }
     return profileHeader ?? <ModelSearchEmptyState />;
   }
   return (
     <ModelRowList
       serverId={serverId}
+      scopeMarkFor={scope ? scopeMarkFor : undefined}
+      onToggleScope={scope ? handleToggleScope : undefined}
       rows={visibleRows}
       selectedProvider={selectedProvider}
       selectedModel={selectedModel}
@@ -1547,6 +1721,20 @@ export function ModelBrowser({
 }
 
 const styles = StyleSheet.create((theme) => ({
+  scopeTabs: {
+    paddingHorizontal: theme.spacing[3],
+    paddingTop: theme.spacing[1],
+    paddingBottom: theme.spacing[2],
+  },
+  scopeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingRight: theme.spacing[2],
+  },
+  scopeRowMain: {
+    flex: 1,
+    minWidth: 0,
+  },
   headerActionRow: {
     flexDirection: "row",
     alignItems: "center",

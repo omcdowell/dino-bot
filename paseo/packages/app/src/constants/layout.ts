@@ -48,3 +48,14 @@ export function useIsCompactFormFactor(): boolean {
 export function supportsDesktopPaneSplits(): boolean {
   return isWeb;
 }
+
+/**
+ * Setup and pairing screens (welcome steps, sign-in, models, import, pair, provider link): a
+ * readable column on a wide desktop window; phones are narrower, so no change there.
+ */
+export const SETUP_CONTENT_MAX_WIDTH = 640;
+export const setupColumnStyle = {
+  width: "100%",
+  maxWidth: SETUP_CONTENT_MAX_WIDTH,
+  alignSelf: "center",
+} as const;

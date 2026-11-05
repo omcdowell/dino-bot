@@ -172,15 +172,15 @@ Communicates with the daemon via the same WebSocket protocol as the app.
 
 Enables remote access when the daemon is behind a firewall.
 
-- Curve25519 establishes the relay-session secret; NaCl `box` protects each payload with XSalsa20-Poly1305
+- Updated peers negotiate a Noise `NK` session with per-record counters; peers on either side that predate it fall back to the legacy NaCl `box` construction. [docs/relay-endpoint-security.md](relay-endpoint-security.md) owns the mapping, negotiation, and the `daemon.relay.requireProtectedSecurity` flag
 - The relay is zero-knowledge — it routes encrypted bytes and cannot read content
-- Client and daemon channels with identical API (`createClientChannel`, `createDaemonChannel`)
+- Client and daemon channels with identical API (`openClientSecureChannel`, `openDaemonSecureChannel`)
 - Pairing via QR code transfers the daemon's public key to the client
 - New homes keep relay disabled until pairing consent. `DaemonConfigStore` persists the desired state, while the relay runtime starts or stops the outbound transport live; pairing reads that current state instead of a startup snapshot.
 - Optional E2EE capability negotiation preserves application frame kind: text plaintext uses base64 ciphertext text frames, while binary plaintext uses raw ciphertext binary frames; mixed-version peers remain base64-only
 - Self-hosted relays opt into TLS with `daemon.relay.useTls` or `PASEO_RELAY_USE_TLS=true`; the public (client-facing) TLS setting can be overridden independently via `daemon.relay.publicUseTls` or `PASEO_RELAY_PUBLIC_USE_TLS`
 
-The production relay server lives in [getpaseo/paseo-relay](https://github.com/getpaseo/paseo-relay). It is a distributed Elixir service. The Cloudflare relay implementation in this monorepo is retained as legacy code and is not deployed.
+The production relay server lives in [getpaseo/paseo-relay](https://github.com/getpaseo/paseo-relay). It is a distributed Elixir service. The DinoBot fork keeps only the client/daemon side of the relay (E2EE channel and crypto); the legacy Cloudflare relay worker and its deploy tooling are removed, and DinoBot runs with the relay off.
 
 See [SECURITY.md](../SECURITY.md) for the full threat model.
 
@@ -224,10 +224,6 @@ Agent browser_keypress -> guest sendInputEvent(skipIfUnhandled)
   |-- guest handles ------------> page owns it
   `-- guest does not handle ----> stop; never redispatch to the host window
 ```
-
-### `packages/website` — Marketing site
-
-TanStack Router + Cloudflare Workers. Serves paseo.sh.
 
 ## WebSocket protocol
 

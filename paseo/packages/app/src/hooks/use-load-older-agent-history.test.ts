@@ -80,6 +80,36 @@ function createLogger(): FakeLogger {
 const someCursor: AgentTimelineCursorState = { epoch: "epoch-1", startSeq: 10, endSeq: 20 };
 
 describe("loadOlderAgentHistory", () => {
+  it("pages from disk first and skips the daemon when the page was there", async () => {
+    const client = createClient();
+    const inFlight = createInFlight();
+    const result = await loadOlderAgentHistory(agentId, {
+      client,
+      cursor: someCursor,
+      hasOlder: true,
+      isLoadingOlder: false,
+      setInFlight: inFlight.setInFlight,
+      loadFromDisk: async () => true,
+    });
+    expect(result).toBe(true);
+    expect(client.calls).toEqual([]);
+    expect(inFlight.values).toEqual([false, true, false]);
+  });
+
+  it("asks the daemon when disk has no adjacent page", async () => {
+    const client = createClient();
+    const inFlight = createInFlight();
+    await loadOlderAgentHistory(agentId, {
+      client,
+      cursor: someCursor,
+      hasOlder: true,
+      isLoadingOlder: false,
+      setInFlight: inFlight.setInFlight,
+      loadFromDisk: async () => false,
+    });
+    expect(client.calls).toHaveLength(1);
+  });
+
   it("no-ops without a cursor", async () => {
     const client = createClient();
     const inFlight = createInFlight();

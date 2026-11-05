@@ -64,7 +64,11 @@ describe("plugin scaffold", () => {
     const { stdout } = await execAsync("npm pack --dry-run --ignore-scripts --json", {
       cwd: directory,
     });
-    const [artifact] = JSON.parse(stdout) as { files: { path: string }[] }[];
+    // npm <= 11 prints an array of packs; npm 12 an object keyed by package name.
+    const parsed = JSON.parse(stdout) as
+      | { files: { path: string }[] }[]
+      | Record<string, { files: { path: string }[] }>;
+    const [artifact] = Array.isArray(parsed) ? parsed : Object.values(parsed);
     expect(artifact.files.map((file) => file.path)).toEqual(
       expect.arrayContaining(["OVERVIEW.md", "paseo-plugin.json"]),
     );

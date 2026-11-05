@@ -5,11 +5,13 @@ import { File, Paths } from "expo-file-system";
 import { createPlaybackQueue } from "./playback";
 import { playFile } from "./file-playback";
 import { playPcm16 } from "./pcm";
+import { resolveCaptureInterruption, type CaptureInterruptionPolicy } from "./capture-interruption";
 
 export function createAudioEngine(
   callbacks: AudioEngineCallbacks,
-  _options?: { traceLabel?: string },
+  options?: { traceLabel?: string; interruptionPolicy?: CaptureInterruptionPolicy },
 ): AudioEngine {
+  const interruptionPolicy = options?.interruptionPolicy ?? "end-if-blocked";
   const native = require("@getpaseo/expo-two-way-audio");
 
   const refs: {
@@ -47,16 +49,26 @@ export function createAudioEngine(
   const interruptionSubscription = native.addExpoTwoWayAudioEventListener(
     "onAudioInterruption",
     (event: { data: string }) => {
-      if (event.data !== "blocked") {
+      const action = resolveCaptureInterruption({
+        event: event.data,
+        captureActive: refs.captureActive,
+        policy: interruptionPolicy,
+      });
+      if (action === "silence-mic") {
+        // Native resumed the mic after the interruption, but nothing here is capturing.
+        native.toggleRecording(false);
+        releaseSessionIfIdle();
         return;
       }
-      const wasCaptureActive = refs.captureActive;
+      if (action !== "end-capture") {
+        return;
+      }
       refs.captureActive = false;
       refs.muted = false;
+      native.toggleRecording(false);
       callbacks.onVolumeLevel(0);
-      if (wasCaptureActive) {
-        callbacks.onInterruption?.();
-      }
+      releaseSessionIfIdle();
+      callbacks.onInterruption?.();
     },
   );
 

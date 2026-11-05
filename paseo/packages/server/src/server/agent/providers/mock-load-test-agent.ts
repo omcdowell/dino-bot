@@ -168,6 +168,18 @@ const MODELS: AgentModelDefinition[] = [
       intervalMs: 20,
     },
   },
+  {
+    provider: MOCK_LOAD_TEST_PROVIDER_ID,
+    id: "e2e-tool-heavy",
+    label: "E2E tool heavy",
+    description: "Short stream whose tool calls carry several KB of output, like bot chats.",
+    isSelectable: false,
+    metadata: {
+      durationMs: 3_000,
+      intervalMs: 5,
+      toolOutputBytes: 6_000,
+    },
+  },
 ];
 
 /**
@@ -207,6 +219,7 @@ interface ActiveTurn {
   emittedTokens: number;
   turnStarted: boolean;
   burst: BurstProfile | null;
+  toolOutputBytes: number;
   burstIndex: number;
 }
 
@@ -328,6 +341,7 @@ function resolveModelProfile(modelId: string | null | undefined): {
   durationMs: number;
   intervalMs: number;
   burst: BurstProfile | null;
+  toolOutputBytes: number;
 } {
   const model = MODELS.find((entry) => entry.id === modelId) ?? MODELS[0];
   const metadata = model.metadata ?? {};
@@ -349,6 +363,7 @@ function resolveModelProfile(modelId: string | null | undefined): {
             gapMs: typeof metadata.burstGapMs === "number" ? metadata.burstGapMs : 90,
           }
         : null,
+    toolOutputBytes: typeof metadata.toolOutputBytes === "number" ? metadata.toolOutputBytes : 0,
   };
 }
 
@@ -550,7 +565,40 @@ function buildEditDiff(filePath: string): string {
   ].join("\n");
 }
 
-function buildCycleQueue(turnId: string, cycle: number): CycleEvent[] {
+const PAD_WORDS =
+  "agent anchor apply batch bottom buffer build cache call check chunk client commit compile config cursor daemon delta diff done drain epoch error event fetch file flush frame head index item layout link list load merge message module node offset page parse patch payload query queue range read render replay request resolve retry row scroll send seq server session shell sink socket source stream sync tail task test tick timeline token turn update value view warn window worker write".split(
+    " ",
+  );
+
+/**
+ * Pads tool output to `bytes` with varied log-like lines (seeded, so runs repeat). Repeating one
+ * line would compress to nothing on the wire; real tool output compresses about 3 to 5 times.
+ */
+function padOutput(text: string, bytes: number, seed: string): string {
+  if (bytes <= text.length) return text;
+  let state = 2166136261;
+  for (let index = 0; index < seed.length; index += 1) {
+    state = Math.imul(state ^ seed.charCodeAt(index), 16777619) >>> 0;
+  }
+  const next = () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state;
+  };
+  const lines = [text];
+  let length = text.length;
+  while (length < bytes) {
+    const words = Array.from(
+      { length: 4 + (next() % 8) },
+      () => PAD_WORDS[next() % PAD_WORDS.length],
+    );
+    const line = `[${(next() % 100000).toString().padStart(5, "0")}] ${words.join(" ")} ${(next() % 4096).toString(16)} ok=${next() % 2 === 0}\n`;
+    lines.push(line);
+    length += line.length;
+  }
+  return lines.join("");
+}
+
+function buildCycleQueue(turnId: string, cycle: number, toolOutputBytes = 0): CycleEvent[] {
   const queue: CycleEvent[] = [];
 
   for (const tok of tokenize(buildIntroParagraph(cycle))) {
@@ -573,8 +621,11 @@ function buildCycleQueue(turnId: string, cycle: number): CycleEvent[] {
     name: "read",
     detail: {
       ...readDetail,
-      content:
+      content: padOutput(
         "export function ConversationList() {\n  const ref = useRef<FlatList>(null);\n  // ...\n}",
+        toolOutputBytes,
+        readId,
+      ),
     },
   });
 
@@ -621,8 +672,11 @@ function buildCycleQueue(turnId: string, cycle: number): CycleEvent[] {
     type: "shell",
     command: "node scripts/simulate-stream-burst.mjs",
     cwd: "/tmp/paseo-mock-load",
-    output:
+    output: padOutput(
       "[burst] tick 1 userIsAtBottom=true\n[burst] tick 2 userIsAtBottom=true\n[burst] drag-start isDragging=true\n[burst] tick 3 suppressed\n[burst] drag-end isDragging=false\n",
+      toolOutputBytes,
+      `${turnId}:bash:${cycle}`,
+    ),
     exitCode: 0,
   };
   const shellId = `${turnId}:bash:${cycle}`;
@@ -846,6 +900,7 @@ export class MockLoadTestAgentSession implements AgentSession {
       emittedTokens: 0,
       turnStarted: false,
       burst: profile.burst,
+      toolOutputBytes: profile.toolOutputBytes,
       burstIndex: 0,
     };
     this.activeTurn = turn;
@@ -1532,7 +1587,7 @@ export class MockLoadTestAgentSession implements AgentSession {
         turn.cycle += 1;
         turn.queue = turn.burst
           ? buildBurstyStreamQueue(turn.cycle)
-          : buildCycleQueue(turn.turnId, turn.cycle);
+          : buildCycleQueue(turn.turnId, turn.cycle, turn.toolOutputBytes);
       }
       const event = turn.queue.shift();
       if (!event) {

@@ -1,5 +1,6 @@
 import { generateMessageId } from "@/types/stream";
 import type { SessionOutboundMessage } from "@getpaseo/protocol/messages";
+import { isDictationOpusFormat } from "@getpaseo/protocol/dictation-audio-format";
 import { i18n } from "@/i18n/i18next";
 
 const MAX_CHUNKS_PER_FLUSH_TURN = 128;
@@ -15,7 +16,13 @@ interface DrainWaitResult {
 
 export interface DictationStreamClient {
   readonly isConnected: boolean;
-  startDictationStream(dictationId: string, format: string): Promise<void>;
+  startDictationStream(
+    dictationId: string,
+    format: string,
+    options?: { resume?: boolean },
+  ): Promise<{ ackSeq: number; resumed: boolean } | void>;
+  /** COMPAT(dictationOpus): optional so test doubles and old clients read as "no". */
+  supportsDictationOpus?(): boolean;
   sendDictationStreamChunk(dictationId: string, seq: number, audio: string, format: string): void;
   finishDictationStream(
     dictationId: string,
@@ -36,13 +43,35 @@ interface DictationFinishResult {
   text: string;
 }
 
+/** Wire counters for the current recording (reset by clearAll). */
+export interface DictationSendStats {
+  chunksSent: number;
+  base64CharsSent: number;
+  /** Chunks sent again for a seq that had already gone out once (after a drop). */
+  chunksResent: number;
+  base64CharsResent: number;
+  /** Restarts that reattached to the daemon's stream instead of replaying from seq 0. */
+  resumes: number;
+}
+
+const emptyStats = (): DictationSendStats => ({
+  chunksSent: 0,
+  base64CharsSent: 0,
+  chunksResent: 0,
+  base64CharsResent: 0,
+  resumes: 0,
+});
+
 /**
  * Small, non-React state machine for dictation streaming.
  *
  * Responsibilities:
- * - Maintain an ordered buffer of base64 PCM segments
+ * - Maintain an ordered buffer of base64 audio segments (PCM or Opus, see `format`)
  * - Start/restart a dictation stream (dictationId)
  * - Send missing segments (seq) when connected
+ * - After a dropped connection, reattach to the same dictationId with `resume` so only the
+ *   segments the daemon has not acked are resent; a daemon that lost the stream (or predates
+ *   resume) acks -1 and gets the full replay
  * - Finish/cancel the stream
  *
  * This class intentionally keeps sending synchronous (no internal async mutex),
@@ -50,10 +79,14 @@ interface DictationFinishResult {
  */
 export class DictationStreamSender {
   private client: DictationStreamClient | null = null;
-  private readonly format: string;
+  private format: string;
   private readonly createDictationId: () => string;
 
   private dictationId: string | null = null;
+  /** The stream we lost the socket for; reused (with resume) by the next restart. */
+  private resumeDictationId: string | null = null;
+  private highestSentSeq = -1;
+  private stats: DictationSendStats = emptyStats();
   private sendSeq = 0;
   private acknowledgedSeq = -1;
   private segments: string[] = [];
@@ -96,7 +129,28 @@ export class DictationStreamSender {
   }
 
   getDictationId(): string | null {
-    return this.dictationId;
+    return this.dictationId ?? this.resumeDictationId;
+  }
+
+  getFormat(): string {
+    return this.format;
+  }
+
+  /** Choose the audio format for the next recording. Only allowed while no audio is buffered. */
+  setFormat(format: string): void {
+    if (format === this.format) {
+      return;
+    }
+    if (this.segments.length > 0) {
+      throw new Error("Cannot change dictation format while audio is buffered");
+    }
+    this.resetStreamForReplay();
+    this.resumeDictationId = null;
+    this.format = format;
+  }
+
+  getStats(): DictationSendStats {
+    return { ...this.stats };
   }
 
   getSegmentCount(): number {
@@ -117,11 +171,21 @@ export class DictationStreamSender {
 
   clearAll(): void {
     this.resetStreamForReplay();
+    this.resumeDictationId = null;
     this.segments = [];
+    this.highestSentSeq = -1;
+    this.stats = emptyStats();
   }
 
+  /**
+   * Drop the live stream. The buffered audio stays; the next start reattaches to the same
+   * dictationId (resume) when there is audio to keep, else it starts fresh.
+   */
   resetStreamForReplay(): void {
     this.clearScheduledFlush();
+    if (this.dictationId && this.segments.length > 0) {
+      this.resumeDictationId = this.dictationId;
+    }
     this.dictationId = null;
     this.sendSeq = 0;
     this.acknowledgedSeq = -1;
@@ -171,6 +235,14 @@ export class DictationStreamSender {
         this.invalidateStream();
         return sent;
       }
+      this.stats.chunksSent += 1;
+      this.stats.base64CharsSent += audio.length;
+      if (seq <= this.highestSentSeq) {
+        this.stats.chunksResent += 1;
+        this.stats.base64CharsResent += audio.length;
+      } else {
+        this.highestSentSeq = seq;
+      }
       this.sendSeq = seq + 1;
       sent += 1;
     }
@@ -189,29 +261,52 @@ export class DictationStreamSender {
       return;
     }
 
+    if (isDictationOpusFormat(this.format) && client.supportsDictationOpus?.() !== true) {
+      // Recorded as Opus for a daemon that read it, now connected to one that does not (e.g. a
+      // rolled-back daemon). Sending would feed it noise; fail so the user can retry or discard.
+      throw new Error("This daemon cannot read Opus dictation audio");
+    }
+
     this.startGeneration += 1;
     const generation = this.startGeneration;
 
-    const dictationId = this.createDictationId();
+    const resumeId = this.segments.length > 0 ? (this.dictationId ?? this.resumeDictationId) : null;
+    const dictationId = resumeId ?? this.createDictationId();
     this.dictationId = dictationId;
+    this.resumeDictationId = null;
     this.sendSeq = 0;
     this.acknowledgedSeq = -1;
     this.streamReady = false;
 
     const start = (async () => {
-      await client.startDictationStream(dictationId, this.format);
+      const ack = await client.startDictationStream(
+        dictationId,
+        this.format,
+        resumeId ? { resume: true } : undefined,
+      );
       if (this.startGeneration !== generation) {
         return;
       }
       if (this.dictationId !== dictationId) {
         return;
       }
+      if (ack && ack.resumed && ack.ackSeq >= 0) {
+        // The daemon kept the stream: resend only what it has not acknowledged.
+        const ackSeq = Math.min(ack.ackSeq, this.segments.length - 1);
+        this.acknowledgedSeq = ackSeq;
+        this.sendSeq = ackSeq + 1;
+        this.stats.resumes += 1;
+      }
       this.streamReady = true;
       this.flush();
+      this.resolveDrainWaiters();
     })()
       .catch((error) => {
         // If starting failed, keep the segments for retry but clear the stream so finish can error cleanly.
         if (this.startGeneration === generation && this.dictationId === dictationId) {
+          if (this.segments.length > 0) {
+            this.resumeDictationId = dictationId;
+          }
           this.dictationId = null;
           this.sendSeq = 0;
           this.acknowledgedSeq = -1;
@@ -264,6 +359,7 @@ export class DictationStreamSender {
       client.cancelDictationStream(dictationId);
     }
     this.resetStreamForReplay();
+    this.resumeDictationId = null;
   }
 
   private hasPendingSegments(): boolean {

@@ -345,6 +345,7 @@ export const ru: TranslationResources = {
       closeImage: "Закрыть изображение",
       imageLoadFailed: "Не удалось загрузить изображение",
       imageUnavailable: "Изображение недоступно",
+      downloadImage: "Скачать изображение",
       imagePreviewUnavailable: "Предварительный просмотр изображения недоступен.",
       imagePreviewLoadFailed: "Не удалось загрузить предварительный просмотр изображения.",
       review: "Ревью",
@@ -634,6 +635,8 @@ export const ru: TranslationResources = {
         trigger: "Переключить вкладки (открыто: {{count}})",
         title: "Переключить вкладку",
         searchPlaceholder: "Поиск вкладок",
+        groupLabel: "Вкладки",
+        groupCount: "открыто: {{count}}",
       },
       menu: {
         openFor: "Открыть меню для {{label}}",
@@ -1672,6 +1675,11 @@ export const ru: TranslationResources = {
     retrying: "Повторная попытка...",
     noMatches: "Ни одна модель не соответствует вашему запросу",
     noMatchesForQuery: "Нет моделей, соответствующих «{{query}}»",
+    scopeScoped: "Избранные",
+    scopeAll: "Все",
+    scopeAdd: "Добавить в избранные",
+    scopeRemove: "Убрать из избранных",
+    scopeEmpty: "Избранных пока нет. Отметьте модели галочкой во вкладке «Все».",
     searchAllPlaceholder: "Поиск по всем моделям...",
     searchPlaceholder: "Поиск моделей...",
     openProviderSettings: "Открыть настройки {{provider}}",
@@ -2136,6 +2144,8 @@ export const ru: TranslationResources = {
     general: {
       title: "Основные",
       sending: "Отправка",
+      network: en.settings.general.network,
+      meteredNetwork: en.settings.general.meteredNetwork,
       browserData: {
         title: "Данные браузера",
         siteData: "Файлы cookie и данные сайтов",
@@ -2862,4 +2872,6 @@ export const ru: TranslationResources = {
       },
     },
   },
+  delivery: en.delivery,
+  network: en.network,
 };

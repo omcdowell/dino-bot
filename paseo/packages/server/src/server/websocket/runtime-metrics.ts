@@ -5,12 +5,18 @@ export interface WebSocketRuntimeCounters {
   connectedAwaitingHello: number;
   helloResumed: number;
   helloNew: number;
+  helloSessionToken: number;
+  helloSessionTokenRejected: number;
+  sessionTokenIssued: number;
   pendingDisconnected: number;
   sessionDisconnectedWaitingReconnect: number;
   sessionSocketDisconnectedAttached: number;
   sessionCleanup: number;
   validationFailed: number;
   binaryBeforeHelloRejected: number;
+  compressionReset: number;
+  compressionResetClosed: number;
+  uplinkFrameRejected: number;
   pendingMessageRejectedBeforeHello: number;
   missingConnectionForMessage: number;
   unexpectedHelloOnActiveConnection: number;
@@ -222,12 +228,18 @@ function createRuntimeCounters(): WebSocketRuntimeCounters {
     connectedAwaitingHello: 0,
     helloResumed: 0,
     helloNew: 0,
+    helloSessionToken: 0,
+    helloSessionTokenRejected: 0,
+    sessionTokenIssued: 0,
     pendingDisconnected: 0,
     sessionDisconnectedWaitingReconnect: 0,
     sessionSocketDisconnectedAttached: 0,
     sessionCleanup: 0,
     validationFailed: 0,
     binaryBeforeHelloRejected: 0,
+    compressionReset: 0,
+    compressionResetClosed: 0,
+    uplinkFrameRejected: 0,
     pendingMessageRejectedBeforeHello: 0,
     missingConnectionForMessage: 0,
     unexpectedHelloOnActiveConnection: 0,

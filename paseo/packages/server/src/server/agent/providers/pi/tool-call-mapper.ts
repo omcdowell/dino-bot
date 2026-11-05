@@ -262,6 +262,23 @@ export function extractTextFromToolResult(result: PiToolResult): string | undefi
   return textParts.length > 0 ? textParts.join("\n") : undefined;
 }
 
+/** Image blocks of a tool result (pi's `read` on a PNG returns one), as chat image inputs. */
+export function extractToolResultImages(
+  result: PiToolResult,
+): Array<{ data: string; mimeType: string }> {
+  if (!result || typeof result === "string" || !result.content) return [];
+  const images: Array<{ data: string; mimeType: string }> = [];
+  for (const block of result.content) {
+    if (block.type !== "image") continue;
+    const data: unknown = Reflect.get(block, "data");
+    const mimeType: unknown = Reflect.get(block, "mimeType");
+    if (typeof data === "string" && data.length > 0) {
+      images.push({ data, mimeType: typeof mimeType === "string" ? mimeType : "image/png" });
+    }
+  }
+  return images;
+}
+
 export function parseToolArgs(toolName: string, rawArgs: unknown): PiTrackedToolCall {
   if (toolName === "edit") {
     return parseEditToolArgs(rawArgs);

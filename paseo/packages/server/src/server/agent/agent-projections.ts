@@ -151,6 +151,13 @@ export function toAgentPayload(
     payload.lastError = agent.lastError;
   }
 
+  if (agent.messageQueue && agent.messageQueue.items.length > 0) {
+    payload.messageQueue = {
+      revision: agent.messageQueue.revision,
+      items: agent.messageQueue.items.map((item) => ({ ...item })),
+    };
+  }
+
   // Handle attention state
   payload.requiresAttention = agent.attention.requiresAttention;
   if (agent.attention.requiresAttention) {

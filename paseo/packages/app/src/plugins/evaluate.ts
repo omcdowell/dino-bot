@@ -6,8 +6,7 @@ import * as pluginSharedRuntime from "@getpaseo/plugin";
 import * as pluginClientRuntime from "@getpaseo/plugin/client";
 import * as React from "react";
 import * as ReactJsxRuntime from "react/jsx-runtime";
-// eslint-disable-next-line no-restricted-imports -- plugin client runtime injects host ReactNative.
-import * as ReactNative from "react-native";
+import { pluginReactNative } from "./react-native/scroll-top-inset";
 // eslint-disable-next-line no-restricted-imports -- plugin bundles receive TanStack's real runtime, not Paseo's query wrappers.
 import * as ReactQuery from "@tanstack/react-query";
 import * as Zod from "zod";
@@ -76,6 +75,51 @@ function isComponentType(value: unknown): boolean {
   );
 }
 
+/**
+ * A screen's `mobileFloatingHeader`, keeping only the parts that are components. Anything else
+ * leaves it out, so the screen falls back to the plain header instead of failing to load.
+ */
+function readMobileFloatingHeader(
+  value: unknown,
+): Pick<PluginScreenContribution, "mobileFloatingHeader"> {
+  if (typeof value !== "object" || value === null) return {};
+  const { Avatar, Controls } = value as Record<string, unknown>;
+  return {
+    mobileFloatingHeader: {
+      ...(isComponentType(Avatar) ? { Avatar: Avatar as ComponentType<PluginScreenProps> } : {}),
+      ...(isComponentType(Controls)
+        ? { Controls: Controls as ComponentType<PluginScreenProps> }
+        : {}),
+    },
+  };
+}
+
+/** Keeps well-formed menu items (id, title, icon, onSelect); drops the menu when none are left. */
+export function readMobileHomeMenu(
+  value: unknown,
+): Pick<PluginScreenContribution, "mobileHomeMenu"> {
+  if (typeof value !== "object" || value === null) return {};
+  const { title, items } = value as Record<string, unknown>;
+  if (!Array.isArray(items)) return {};
+  const kept = items.flatMap((item) => {
+    if (typeof item !== "object" || item === null) return [];
+    const { id, title: label, icon, onSelect } = item as Record<string, unknown>;
+    if (typeof id !== "string" || !id.trim()) return [];
+    if (typeof label !== "string" || !label.trim()) return [];
+    if (typeof icon !== "string" || typeof onSelect !== "function") return [];
+    return [
+      { id: id.trim(), title: label.trim(), icon: icon.trim(), onSelect: onSelect as () => void },
+    ];
+  });
+  if (kept.length === 0) return {};
+  return {
+    mobileHomeMenu: {
+      ...(typeof title === "string" && title.trim() ? { title: title.trim() } : {}),
+      items: kept,
+    },
+  };
+}
+
 function requireId(value: string, label: string): string {
   const id = value.trim();
   if (!CONTRIBUTION_ID.test(id)) throw new Error(`Invalid ${label}: ${value}`);
@@ -100,6 +144,7 @@ export type PluginClientRuntime = Pick<
   | "openPanel"
   | "addComposerPill"
   | "addHeaderButton"
+  | "events"
 > & { hosts: ReturnType<typeof createPluginHosts> };
 
 export function runPluginClientBundle(
@@ -218,7 +263,14 @@ export function runPluginClientBundle(
       surfaceIds.add(normalizedId);
       return register(
         collector.surfaces,
-        { id: normalizedId, title, Component: contribution.Component },
+        {
+          id: normalizedId,
+          title,
+          Component: contribution.Component,
+          ...(contribution.mobileHome === true ? { mobileHome: true } : {}),
+          ...readMobileFloatingHeader(contribution.mobileFloatingHeader),
+          ...readMobileHomeMenu(contribution.mobileHomeMenu),
+        },
         () => surfaceIds.delete(normalizedId),
       );
     },
@@ -440,7 +492,7 @@ export function runPluginClientBundle(
     if (name === "@getpaseo/plugin/client/ui") return pluginUiRuntime;
     if (name === "react") return React;
     if (name === "react/jsx-runtime") return ReactJsxRuntime;
-    if (name === "react-native") return ReactNative;
+    if (name === "react-native") return pluginReactNative;
     if (name === "@getpaseo/plugin") return pluginSharedRuntime;
     if (name === "@getpaseo/plugin/client")
       return {

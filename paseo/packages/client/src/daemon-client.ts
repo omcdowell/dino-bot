@@ -29,8 +29,22 @@ import {
   type ServerInfoStatusPayload,
 } from "@getpaseo/protocol/messages";
 import { validateWSOutboundMessage } from "@getpaseo/protocol/validation/ws-outbound";
+import { AgentPatchExpander } from "./agent-patches.js";
+import {
+  CheckedJsonFrameDecoder,
+  CompressionResetAckOpcode,
+  CheckedJsonFrameEncoder,
+  decodeCompressionResetAck,
+  isCheckedJsonFrame,
+  isCompressedJsonFrame,
+  JsonFrameDecompressor,
+} from "@getpaseo/protocol/binary-frames/compressed-json";
 import type {
   AgentStreamEventPayload,
+  AgentMessageCancelResponse,
+  DiagnosticsProviderTestResponse,
+  AgentQueueForceResponse,
+  SendAgentMessageResponseMessage,
   AgentSnapshotPayload,
   ProjectPlacementPayload,
   AgentPermissionResolvedMessage,
@@ -78,6 +92,7 @@ import type {
   ProjectIconSource,
   ProjectIconResponse,
   ProjectIconGetResponse,
+  ProviderModelScope,
   ProjectAddResponse,
   ProjectCreateDirectoryResponse,
   OpenProjectResponseMessage,
@@ -152,11 +167,14 @@ import {
   type FileTransferFrame,
 } from "@getpaseo/protocol/binary-frames/index";
 import {
+  createDirectE2eeUpgradeTransportFactory,
   createRelayE2eeTransportFactory,
-  createRelayTransportFactory,
+  createRelayUpgradeTransportFactory,
   createWebSocketTransportFactory,
   decodeMessageData,
   defaultWebSocketFactory,
+  describeDirectE2eeFailure,
+  describeEndpointSecurityClose,
   describeTransportClose,
   describeTransportError,
   type DaemonTransport,
@@ -219,6 +237,15 @@ function normalizePassword(value: string | undefined): string | null {
   return value.length > 0 ? value : null;
 }
 
+function selectUpgradeTransportFactory(
+  base: DaemonTransportFactory,
+  path: { isRelayTransport: boolean; isDirectE2ee: boolean },
+): DaemonTransportFactory {
+  if (path.isRelayTransport) return createRelayUpgradeTransportFactory(base);
+  if (path.isDirectE2ee) return createDirectE2eeUpgradeTransportFactory(base);
+  return base;
+}
+
 function compatibleBearerPassword(password: string | null): string | null {
   return password && /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(password) ? password : null;
 }
@@ -226,7 +253,31 @@ function compatibleBearerPassword(password: string | null): string | null {
 type HelloAuth =
   | { kind: "password"; password: string }
   | { kind: "localCredential"; token: string }
+  | { kind: "sessionToken"; token: string }
   | undefined;
+
+/**
+ * Where a client keeps the per-device session token the daemon issues after a password check
+ * (client capability session_tokens). Share one store between every client that talks to the
+ * same daemon with the same clientId (probes included): the daemon keeps one token per clientId
+ * and channel, so a second client's fresh token replaces the first one's. The token is a secret.
+ */
+export interface DaemonSessionTokenStore {
+  get(): string | null;
+  set(token: string | null): void;
+}
+
+export function createMemorySessionTokenStore(
+  initial: string | null = null,
+): DaemonSessionTokenStore {
+  let token = initial;
+  return {
+    get: () => token,
+    set: (next) => {
+      token = next;
+    },
+  };
+}
 
 export type DaemonAuthFailureReason = "password_required" | "incorrect_password";
 
@@ -254,11 +305,15 @@ function authFailureFromLegacyClose(event: unknown): DaemonAuthFailureReason | n
 function chooseConnectionAuth(
   config: DaemonClientConfig,
   localCredential: string | undefined,
+  sessionToken: string | null,
 ): { helloAuth: HelloAuth; headers: Record<string, string>; protocols?: string[] } {
   const password = normalizePassword(config.password);
   let helloAuth: HelloAuth;
   if (localCredential) helloAuth = { kind: "localCredential", token: localCredential };
-  else if (password) helloAuth = { kind: "password", password };
+  else if (sessionToken) {
+    // Only a daemon that issued the token reads it, so no bearer header for older daemons.
+    return { helloAuth: { kind: "sessionToken", token: sessionToken }, headers: {} };
+  } else if (password) helloAuth = { kind: "password", password };
   const headers: Record<string, string> = {};
   const compatibleBearer = localCredential ? null : compatibleBearerPassword(password);
   // COMPAT(headerAuth): added in v0.9.1, remove after 2027-03-24.
@@ -273,12 +328,30 @@ function chooseConnectionAuth(
 
 function resolveConnectionAuth(
   config: DaemonClientConfig,
+  sessionTokens: DaemonSessionTokenStore,
 ): ReturnType<typeof chooseConnectionAuth> | Promise<ReturnType<typeof chooseConnectionAuth>> {
   const resolution = config.localCredential?.();
   if (resolution instanceof Promise) {
-    return resolution.then((credential) => chooseConnectionAuth(config, credential));
+    return resolution.then((credential) =>
+      chooseConnectionAuth(config, credential, sessionTokens.get()),
+    );
   }
-  return chooseConnectionAuth(config, resolution);
+  return chooseConnectionAuth(config, resolution, sessionTokens.get());
+}
+
+type SelectedConnectionAuth = ReturnType<typeof chooseConnectionAuth>;
+
+/** The second socket of a connection race: opened beside the current one, no hello sent yet. */
+interface RaceCandidate {
+  transport: DaemonTransport;
+  selected: SelectedConnectionAuth;
+  isDirectE2ee: boolean;
+  startedAt: number;
+  opened: boolean;
+  /** Frames that arrived before adoption (none are expected before the hello). */
+  buffered: unknown[];
+  cleanup: Array<() => void>;
+  timer: ReturnType<typeof setTimeout> | null;
 }
 
 function extractCorrelatedResponseIdentity(input: unknown): CorrelatedResponseIdentity | null {
@@ -324,6 +397,8 @@ export type {
   WebSocketFactory,
   WebSocketLike,
 } from "./daemon-client-transport.js";
+
+export { DIRECT_E2EE_FAILED_MESSAGE } from "./daemon-client-transport.js";
 
 export type { TerminalStreamEvent };
 
@@ -385,6 +460,9 @@ export type DaemonEventHandler = (event: DaemonEvent) => void;
 export type BrowserAutomationExecuteRequestMessage = BrowserAutomationExecuteRequest;
 export type BrowserAutomationExecuteResponseMessage = BrowserAutomationExecuteResponse;
 
+/** Endpoint security negotiated on a relay connection. See docs/relay-endpoint-security.md. */
+export type RelaySecurityMode = "legacy" | "protected";
+
 export interface DaemonClientConfig {
   /** Deliver compact bodies/hash references to a caller-owned snapshot cache.
    * The default keeps public SDK snapshot entries expanded. */
@@ -398,6 +476,8 @@ export interface DaemonClientConfig {
   localCredential?: () => string | undefined | Promise<string | undefined>;
   authHeader?: string;
   suppressSendErrors?: boolean;
+  /** checkedUplink: compress JSON frames to the daemon when it reads them (default true). */
+  compressUplink?: boolean;
   transportFactory?: DaemonTransportFactory;
   webSocketFactory?: WebSocketFactory;
   logger?: Logger;
@@ -405,12 +485,34 @@ export interface DaemonClientConfig {
   e2ee?: {
     enabled?: boolean;
     daemonPublicKeyB64?: string;
+    /** Refuse connections whose negotiated endpoint security is below this mode. */
+    minimumMode?: RelaySecurityMode;
+    /** Called with the negotiated mode after each authenticated relay handshake. */
+    onSecurityMode?: (mode: RelaySecurityMode) => void;
   };
   reconnect?: {
     enabled?: boolean;
     baseDelayMs?: number;
     maxDelayMs?: number;
+    /**
+     * While a heartbeat has gone unanswered, open a throwaway socket to the same address now and
+     * then; if it opens while the current socket is still silent, that socket is stuck (TCP
+     * retransmit backoff after a dead spot) and is replaced at once. On by default for direct
+     * WebSocket addresses without a custom transportFactory; false turns it off; a function
+     * replaces the probe (tests).
+     */
+    pathProbe?: boolean | ((input: { url: string; timeoutMs: number }) => Promise<boolean>);
+    /**
+     * When the OS reports the network is back (ensureConnected({ verify: true })), keep the
+     * current socket and open a second one beside it; whichever shows life first is kept (see
+     * startConnectionRace). On by default for direct WebSocket addresses without a custom
+     * transportFactory (not the relay, not desktop socket/pipe transports); false turns it off;
+     * true forces it on (tests).
+     */
+    race?: boolean;
   };
+  /** Per-device session token storage (default: in memory for this client only). */
+  sessionTokens?: DaemonSessionTokenStore;
   runtimeMetricsIntervalMs?: number;
   runtimeMetricsWindowMs?: number;
   trace?: DaemonClientTrace;
@@ -430,6 +532,13 @@ export interface SendMessageOptions {
   activeTurnBehavior?: ActiveTurnBehavior;
   images?: Array<{ data: string; mimeType: string }>;
   attachments?: SendAgentMessageRequest["attachments"];
+  /** Called once the daemon has recorded the message durably (daemon feature messageReceivedAck). */
+  onReceived?: () => void;
+}
+
+export interface SendAgentMessageResult {
+  /** How the agent took the message; absent from older daemons and for a repeated message id. */
+  disposition?: SendAgentMessageResponseMessage["payload"]["disposition"];
 }
 
 export interface AgentAttentionRequiredNotification {
@@ -670,9 +779,33 @@ export interface FetchAgentTimelineOptions {
   limit?: number;
   projection?: FetchAgentTimelineProjection;
   mergeWindow?: boolean;
+  /** compactTimeline: tool calls without large payloads (metadata.paseoCompact marks them). */
+  compact?: boolean;
+  /** compactTimeline: fail with AgentNotLoadedError instead of resuming a stored agent. */
+  ifLoaded?: boolean;
+  /** leanTimeline: no reasoning, tool calls as stubs; for chats nobody is looking at. */
+  lean?: boolean;
   requestId?: string;
   timeout?: number;
 }
+
+/** The daemon answered an `ifLoaded` fetch for an agent that is not in memory. */
+export class AgentNotLoadedError extends Error {
+  constructor(readonly agentId: string) {
+    super("Agent is not loaded");
+    this.name = "AgentNotLoadedError";
+  }
+}
+
+export type AgentImageThumbnailPayload = Extract<
+  SessionOutboundMessage,
+  { type: "agent.image.thumbnail.response" }
+>["payload"];
+
+export type AgentTimelineItemPayload = Extract<
+  SessionOutboundMessage,
+  { type: "agent.timeline.item.response" }
+>["payload"];
 
 export interface AgentTimelineSearchOptions {
   agentId: string;
@@ -957,6 +1090,7 @@ interface PendingBinaryFileRead {
   cwd: string;
   path: string;
   maxBytes?: number;
+  onProgress?: (receivedBytes: number, totalBytes: number) => void;
 }
 
 interface BinaryFileTransferState extends PendingBinaryFileRead {
@@ -969,6 +1103,7 @@ interface BinaryFileTransferState extends PendingBinaryFileRead {
   modifiedAt: string;
   revision?: string;
   chunks: Uint8Array[];
+  receivedBytes: number;
 }
 
 type RpcWaitResult<T> = { kind: "ok"; value: T } | { kind: "error"; error: DaemonRpcError };
@@ -1047,15 +1182,75 @@ function toTimeoutError(error: unknown, label: string, timeoutMs: number): Error
   return error instanceof Error ? error : new Error(String(error));
 }
 
-const DEFAULT_RECONNECT_BASE_DELAY_MS = 1500;
-const DEFAULT_RECONNECT_MAX_DELAY_MS = 30000;
+const DEFAULT_RECONNECT_BASE_DELAY_MS = 1000;
+/** The daemon closes a hello it cannot parse with this code (e.g. an unknown auth kind). */
+const WS_CLOSE_INVALID_HELLO = 4002;
+/**
+ * After a liveness teardown the link is usually back within seconds (a lift, a dead spot), and
+ * nothing tells the app when. For this long, retry about every FAST_RETRY_DELAY_MS instead of
+ * backing off, and give up on an attempt whose socket has not opened within a few round trips
+ * (a SYN sent into the dead spot is otherwise retried by TCP only after 1, 2, 4, 8 s).
+ */
+const FAST_RETRY_WINDOW_MS = 60_000;
+const FAST_RETRY_DELAY_MS = 750;
+const FAST_RETRY_OPEN_TIMEOUT_MIN_MS = 2_000;
+const FAST_RETRY_OPEN_TIMEOUT_MAX_MS = 5_000;
+/** Path probes while a heartbeat is unanswered: one at a time, this far apart, for this long. */
+const PATH_PROBE_INTERVAL_MS = 1_000;
+const PATH_PROBE_WINDOW_MS = 60_000;
+/**
+ * Connection race on "network back": a socket that has gone unanswered for this long (or has
+ * already missed a heartbeat) is suspect and the second socket starts at once. Otherwise the
+ * second socket waits about one round trip, so a healthy socket answers the verify ping first
+ * and no second connection is opened at all.
+ */
+const RACE_SUSPECT_PING_AGE_MIN_MS = 500;
+const RACE_HEALTHY_GRACE_MAX_MS = 500;
+// A chat app on a phone should not sit 30 s between attempts after a lift or a tunnel.
+const DEFAULT_RECONNECT_MAX_DELAY_MS = 15_000;
+/** Each reconnect delay is spread by up to this fraction either way. */
+const RECONNECT_JITTER = 0.2;
 const DEFAULT_SESSION_RPC_TIMEOUT_MS = 60_000;
 const PUSH_TOKEN_REVOCATION_TIMEOUT_MS = 2_000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
+/** A checked-frame reset the daemon has not answered by then means a dead link: reconnect. */
+const CHECKED_FRAME_RESET_TIMEOUT_MS = 15_000;
 const DEFAULT_LIVENESS_TIMEOUT_MS = 5000;
 const LIVENESS_HEARTBEAT_INTERVAL_MS = 10_000;
-const LIVENESS_HEARTBEAT_TIMEOUT_MS = 15_000;
+/**
+ * A heartbeat waits for its pong for 3 x the smoothed RTT + 3 s, within these bounds. Data that
+ * arrives while it waits proves the path is alive (just busy), so it never counts as a failure;
+ * only silence does. After one silent probe the next goes at once, so a dead path is noticed in
+ * about interval + 2 x timeout (~22 s on a good link) instead of up to ~47 s.
+ */
+const LIVENESS_HEARTBEAT_MIN_TIMEOUT_MS = 6_000;
+const LIVENESS_HEARTBEAT_MAX_TIMEOUT_MS = 15_000;
+const LIVENESS_RTT_SAMPLE_LIMIT = 30;
 const LIVENESS_FAILURE_RECONNECT_THRESHOLD = 2;
+/**
+ * A large frame (a photo on send_agent_message) holds everything sent after it on the same
+ * socket, pings included, until its bytes are through. On a slow uplink that took longer than the
+ * liveness check, so the client tore the socket down mid-upload and the outbox sent the photo
+ * again from the start, and again. While such a frame may still be draining (estimated at a floor
+ * rate, ~16 kbit/s, capped), a missed pong does not count against the link and the request
+ * carrying the frame gets that much longer to answer. A pong to a ping sent after the frame
+ * proves it drained and ends the allowance early.
+ */
+const LARGE_UPLINK_FRAME_BYTES = 64 * 1024;
+const UPLINK_FLOOR_BYTES_PER_SECOND = 2_000;
+const UPLINK_DRAIN_MAX_MS = 10 * 60 * 1000;
+
+function imagePayloadBytes(options: SendMessageOptions | undefined): number {
+  let bytes = 0;
+  for (const image of options?.images ?? []) bytes += image.data.length;
+  return bytes;
+}
+
+/** Extra time a frame of this size may need to get through a slow uplink. */
+export function uplinkDrainAllowanceMs(bytes: number): number {
+  if (bytes < LARGE_UPLINK_FRAME_BYTES) return 0;
+  return Math.min(UPLINK_DRAIN_MAX_MS, Math.ceil((bytes / UPLINK_FLOOR_BYTES_PER_SECOND) * 1000));
+}
 
 /** Default timeout for waiting for connection before sending queued messages */
 const DEFAULT_SEND_QUEUE_TIMEOUT_MS = DEFAULT_SESSION_RPC_TIMEOUT_MS;
@@ -1073,6 +1268,35 @@ function normalizeClientId(value: unknown): string | null {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+/** Filler for the upload speed test; crypto.getRandomValues is not on every RN runtime. */
+function pseudoRandomBytes(length: number): Uint8Array {
+  const bytes = new Uint8Array(length);
+  let state = (Date.now() ^ 0x9e3779b9) >>> 0;
+  for (let index = 0; index < length; index += 1) {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    bytes[index] = state & 0xff;
+  }
+  return bytes;
+}
+
+function base64ByteLength(base64: string): number {
+  let padding = 0;
+  if (base64.endsWith("==")) padding = 2;
+  else if (base64.endsWith("=")) padding = 1;
+  return Math.floor((base64.length * 3) / 4) - padding;
+}
+
+function encodeBase64ForSpeedTest(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunk));
+  }
+  return globalThis.btoa(binary);
 }
 
 function decodeBase64ToBytes(base64: string): Uint8Array {
@@ -1247,7 +1471,29 @@ export class DaemonClient {
     failed: (error) => this.logger.error({ err: error }, "Subscription failed"),
   });
   private transport: DaemonTransport | null = null;
+  /** One DEFLATE stream per physical socket (compressed_frames). */
+  private frameDecompressor: JsonFrameDecompressor | null = null;
+  /** Checked frames (checked_frames): sequence, checksum and reset per physical socket. */
+  private checkedDecoder: CheckedJsonFrameDecoder | null = null;
+  /** checkedUplink: JSON frames to the daemon as checked DEFLATE frames, once it says it reads them. */
+  private uplinkEncoder: CheckedJsonFrameEncoder | null = null;
+  private checkedResetTimer: ReturnType<typeof setTimeout> | null = null;
+  /** agent_patches: per-socket bases that turn agent_patch back into full agent_update. */
+  private readonly agentPatches = new AgentPatchExpander();
   private helloAuth: HelloAuth;
+  private readonly sessionTokens: DaemonSessionTokenStore;
+  /** The next reconnect goes at once (a stale session token was dropped; a stuck socket was replaced). */
+  private immediateReconnect = false;
+  /** Until then (perfNow ms), reconnect fast: see FAST_RETRY_WINDOW_MS. */
+  private fastRetryUntil = 0;
+  private fastRetryOpenTimeout: ReturnType<typeof setTimeout> | null = null;
+  private pathProbeTransport: DaemonTransport | null = null;
+  /** The second socket of a connection race, not yet adopted (see startConnectionRace). */
+  private raceCandidate: RaceCandidate | null = null;
+  private raceStartTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Whether this.transport has opened (its hello may have gone). */
+  private transportOpenedValue = false;
+  private readonly raceStats = { started: 0, oldWon: 0, newWon: 0, dropped: 0 };
   private transportCleanup: Array<() => void> = [];
   private rawMessageListeners: Set<(message: SessionOutboundMessage) => void> = new Set();
   private messageHandlers: Map<
@@ -1275,6 +1521,12 @@ export class DaemonClient {
   private completedBinaryFileReads = new Map<string, FileReadResult>();
   private logger: Logger;
   private pendingSendQueue: PendingSend[] = [];
+  /**
+   * Lowest relay endpoint security this client accepts on its next attempt.
+   * Starts at the configured minimum and rises to "protected" once a daemon
+   * negotiates it, so a later reconnect cannot be downgraded to legacy.
+   */
+  private relaySecurityFloorValue: RelaySecurityMode | undefined;
   private readonly logConnectionPath: "direct" | "relay";
   private readonly logServerId: string | null;
   private readonly logClientIdHash: string;
@@ -1286,10 +1538,19 @@ export class DaemonClient {
   private connectionVerification: DaemonTransport | null = null;
   private livenessHeartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private lastLivenessRttMs: number | null = null;
+  private smoothedRttMs: number | null = null;
+  private readonly livenessRttSamples: Array<{ at: number; rttMs: number | null }> = [];
+  /** perfNow() of the last frame of any kind from the daemon. */
+  private lastInboundAt = 0;
+  /** Until when (perfNow) a large frame sent on this socket may still be draining. */
+  private uplinkDrainDeadline = 0;
+  private lastLargeFrameSentAt = 0;
   private consecutiveLivenessFailures = 0;
 
   constructor(private config: DaemonClientConfig) {
     this.logger = config.logger ?? consoleLogger;
+    this.sessionTokens = config.sessionTokens ?? createMemorySessionTokenStore();
+    this.relaySecurityFloorValue = config.e2ee?.minimumMode;
     this.logConnectionPath = isRelayClientWebSocketUrl(this.config.url) ? "relay" : "direct";
     let parsedUrlForLog: URL | null = null;
     try {
@@ -1380,41 +1641,25 @@ export class DaemonClient {
     }
 
     try {
-      const resolution = resolveConnectionAuth(this.config);
-      const selected = resolution instanceof Promise ? await resolution : resolution;
-      if (!this.shouldReconnect) return;
+      // A race's second socket (already open, or still connecting) becomes this attempt.
+      const adopted = this.takeRaceCandidate();
+      const choice = this.selectAttemptAuth(adopted);
+      const selected = choice instanceof Promise ? await choice : choice;
+      if (!this.shouldReconnect) {
+        if (adopted) this.closeRaceTransport(adopted, "Client closed");
+        return;
+      }
       this.helloAuth = selected.helloAuth;
       // Reconnect can overlap with browser close/error delivery ordering.
       // Always dispose previous transport before constructing the next one.
       this.disposeTransport();
-      const baseTransportFactory =
-        this.config.transportFactory ??
-        createWebSocketTransportFactory(this.config.webSocketFactory ?? defaultWebSocketFactory);
-      const isRelayTransport = isRelayClientWebSocketUrl(this.config.url);
-      const shouldUseRelayE2ee = this.config.e2ee?.enabled === true && isRelayTransport;
-      this.assertEncryptedRelayAuth(selected.helloAuth, isRelayTransport);
-
-      let transportFactory = isRelayTransport
-        ? createRelayTransportFactory(baseTransportFactory)
-        : baseTransportFactory;
-      if (shouldUseRelayE2ee) {
-        const daemonPublicKeyB64 = this.config.e2ee?.daemonPublicKeyB64;
-        if (!daemonPublicKeyB64) {
-          throw new Error("daemonPublicKeyB64 is required for relay E2EE");
-        }
-        transportFactory = createRelayE2eeTransportFactory({
-          baseFactory: transportFactory,
-          daemonPublicKeyB64,
-          logger: this.logger,
-        });
-      }
-      const transportUrl = this.resolveTransportUrlForAttempt();
-      const transport = transportFactory({
-        url: transportUrl,
-        headers: selected.headers,
-        ...(selected.protocols ? { protocols: selected.protocols } : {}),
-      });
+      const { transport, isDirectE2ee } = adopted ?? this.buildAttemptTransport(selected);
       this.transport = transport;
+      this.frameDecompressor = new JsonFrameDecompressor();
+      this.checkedDecoder = new CheckedJsonFrameDecoder();
+      this.uplinkEncoder = null;
+      this.agentPatches.clear();
+      this.clearCheckedResetTimer();
       this.lastServerInfoMessage = null;
       this.authFailureReasonValue = null;
 
@@ -1440,25 +1685,52 @@ export class DaemonClient {
         });
       }, timeoutMs);
 
+      let transportOpened = false;
+      this.transportOpenedValue = false;
+      this.armFastRetryOpenTimeout(transport, () => transportOpened);
+      // Before the encrypted channel opens, a refusal by the daemon (old daemon, wrong key,
+      // policy) cannot be fixed by retrying; say so instead of reconnecting forever.
+      const directE2eeFailure = (event: unknown): string | null => {
+        if (!isDirectE2ee || transportOpened) return null;
+        const failure = describeDirectE2eeFailure(event);
+        if (failure) this.setReconnectEnabled(false);
+        return failure;
+      };
+
+      const handleOpen = () => {
+        // An encrypted transport reports an earlier open again to a late listener.
+        if (transportOpened || this.transport !== transport) return;
+        transportOpened = true;
+        this.transportOpenedValue = true;
+        // This attempt opened before a second socket racing it: that one is not needed.
+        this.cancelConnectionRace("attempt_opened_first");
+        this.clearFastRetryOpenTimeout();
+        if (this.pendingGenericTransportErrorTimeout) {
+          clearTimeout(this.pendingGenericTransportErrorTimeout);
+          this.pendingGenericTransportErrorTimeout = null;
+        }
+        this.lastErrorValue = null;
+        void this.sendHelloMessage();
+      };
+
       this.transportCleanup = [
-        transport.onOpen(() => {
-          if (this.pendingGenericTransportErrorTimeout) {
-            clearTimeout(this.pendingGenericTransportErrorTimeout);
-            this.pendingGenericTransportErrorTimeout = null;
-          }
-          this.lastErrorValue = null;
-          void this.sendHelloMessage();
-        }),
+        transport.onOpen(handleOpen),
         transport.onClose((event) => {
           this.resetConnectTimeout();
           if (this.pendingGenericTransportErrorTimeout) {
             clearTimeout(this.pendingGenericTransportErrorTimeout);
             this.pendingGenericTransportErrorTimeout = null;
           }
+          const tokenRefused = this.dropSessionTokenRefusedAsInvalidHello(event);
           this.authFailureReasonValue ??= authFailureFromLegacyClose(event);
+          // An endpoint security policy close cannot be fixed by retrying.
+          const securityFailure = tokenRefused
+            ? null
+            : (directE2eeFailure(event) ?? describeEndpointSecurityClose(event));
+          if (securityFailure) this.setReconnectEnabled(false);
           const reason = this.authFailureReasonValue
             ? new DaemonAuthenticationError(this.authFailureReasonValue).message
-            : describeTransportClose(event);
+            : (securityFailure ?? describeTransportClose(event));
           if (reason) {
             this.lastErrorValue = reason;
           }
@@ -1470,7 +1742,7 @@ export class DaemonClient {
         }),
         transport.onError((event) => {
           this.resetConnectTimeout();
-          const reason = describeTransportError(event);
+          const reason = directE2eeFailure(event) ?? describeTransportError(event);
           const isGeneric = reason === "Transport error";
           // Browser WebSocket.onerror often provides no useful details and is followed
           // by a close event (often with code 1006). Prefer surfacing the close details
@@ -1508,9 +1780,18 @@ export class DaemonClient {
           });
         }),
         transport.onMessage((data) => {
-          if (this.transport === transport) this.handleTransportMessage(data);
+          if (this.transport !== transport) return;
+          // Any frame on the current socket: it is alive, a second socket racing it is not needed.
+          this.raceOldAnswered();
+          this.handleTransportMessage(data);
         }),
       ];
+      if (adopted) {
+        if (adopted.opened) handleOpen();
+        for (const data of adopted.buffered) {
+          if (this.transport === transport) this.handleTransportMessage(data);
+        }
+      }
     } catch (error) {
       this.resetConnectTimeout();
       const message = error instanceof Error ? error.message : "Failed to connect";
@@ -1522,6 +1803,72 @@ export class DaemonClient {
       });
       this.rejectConnect(error instanceof Error ? error : new Error(message));
     }
+  }
+
+  /**
+   * The credentials for this attempt. An adopted race socket keeps its upgrade (no credentials on
+   * direct E2EE); its hello uses the current choice when that is known now (a token may have been
+   * renewed meanwhile).
+   */
+  private selectAttemptAuth(
+    adopted: RaceCandidate | null,
+  ): SelectedConnectionAuth | Promise<SelectedConnectionAuth> {
+    const current = resolveConnectionAuth(this.config, this.sessionTokens);
+    if (adopted && current instanceof Promise) {
+      current.catch(() => undefined);
+      return adopted.selected;
+    }
+    return current;
+  }
+
+  /** One attempt's socket to the daemon: upgrade, credentials on the upgrade, E2EE. No listeners. */
+  private buildAttemptTransport(selected: SelectedConnectionAuth): {
+    transport: DaemonTransport;
+    isDirectE2ee: boolean;
+  } {
+    const baseTransportFactory =
+      this.config.transportFactory ??
+      createWebSocketTransportFactory(this.config.webSocketFactory ?? defaultWebSocketFactory);
+    const isRelayTransport = isRelayClientWebSocketUrl(this.config.url);
+    this.assertEncryptedRelayAuth(selected.helloAuth, isRelayTransport);
+    // A direct socket with a pinned daemon key runs the same encrypted channel as the relay.
+    const isDirectE2ee = !isRelayTransport && this.config.e2ee?.enabled === true;
+
+    // Relay upgrades are routing only: credentials never reach the relay socket.
+    // Direct E2EE upgrades carry only the E2EE subprotocol: no bearer header or subprotocol.
+    let transportFactory = selectUpgradeTransportFactory(baseTransportFactory, {
+      isRelayTransport,
+      isDirectE2ee,
+    });
+    // Endpoint security is selected by configuration, never inferred from the URL.
+    if (this.config.e2ee?.enabled === true) {
+      const daemonPublicKeyB64 = this.config.e2ee.daemonPublicKeyB64;
+      if (!daemonPublicKeyB64) {
+        throw new Error("daemonPublicKeyB64 is required for relay E2EE");
+      }
+      transportFactory = createRelayE2eeTransportFactory({
+        baseFactory: transportFactory,
+        daemonPublicKeyB64,
+        logger: this.logger,
+        ...this.e2eeMinimumMode(isDirectE2ee),
+        onSecurityMode: (mode) => {
+          if (mode === "protected") this.relaySecurityFloorValue = "protected";
+          this.config.e2ee?.onSecurityMode?.(mode);
+        },
+      });
+    }
+    const transport = transportFactory({
+      url: this.resolveTransportUrlForAttempt(),
+      headers: selected.headers,
+      ...(selected.protocols ? { protocols: selected.protocols } : {}),
+    });
+    return { transport, isDirectE2ee };
+  }
+
+  /** Direct E2EE has no legacy peers to stay compatible with: protected (replay-safe) only. */
+  private e2eeMinimumMode(isDirectE2ee: boolean): { minimumMode?: RelaySecurityMode } {
+    if (isDirectE2ee) return { minimumMode: "protected" };
+    return this.relaySecurityFloorValue ? { minimumMode: this.relaySecurityFloorValue } : {};
   }
 
   private assertEncryptedRelayAuth(helloAuth: HelloAuth, isRelayTransport: boolean): void {
@@ -1561,6 +1908,7 @@ export class DaemonClient {
       this.reconnectTimeout = null;
     }
     this.resetConnectTimeout();
+    this.cancelConnectionRace("client_closed");
     this.disposeTransport(1000, "Client closed");
     this.providerSnapshotUpdates.clear();
     this.clearWaiters(new Error("Daemon client closed"));
@@ -1593,7 +1941,12 @@ export class DaemonClient {
       if (options?.verify) this.verifyConnection();
       return;
     }
-    if (this.connectionState.status === "connecting") return;
+    if (this.connectionState.status === "connecting") {
+      // An attempt whose socket has not opened may have sent its SYN into the dead spot:
+      // race a fresh one beside it.
+      if (options?.verify && !this.transportOpenedValue) this.scheduleConnectionRace();
+      return;
+    }
     if (this.connectPromise) {
       this.attemptConnect();
       return;
@@ -1605,12 +1958,20 @@ export class DaemonClient {
     const transport = this.transport;
     if (!transport || this.connectionVerification === transport) return;
     this.connectionVerification = transport;
+    // Keep this socket, but race a second one beside it (startConnectionRace).
+    this.scheduleConnectionRace();
     // A session probe has its own deadline, independent of a heartbeat that the OS
     // may have suspended. A successful response also proves the session can serve RPCs.
     void this.ping({ timeoutMs: 3_000 })
+      .then(() => {
+        // Answered both ways: a second socket racing this one is not needed.
+        if (this.transport === transport) this.raceOldAnswered();
+        return undefined;
+      })
       .catch((error: unknown) => {
         if (this.transport !== transport || this.connectionState.status !== "connected") return;
         this.disposeTransport(1001, "Connection verification failed");
+        this.fastRetryUntil = perfNow() + FAST_RETRY_WINDOW_MS;
         this.scheduleReconnect({
           reason: error instanceof Error ? error.message : String(error),
           event: "CONNECTION_VERIFICATION_FAILED",
@@ -1643,6 +2004,11 @@ export class DaemonClient {
     return this.connectionState.status === "connecting";
   }
 
+  /** The relay endpoint security this client requires on its next attempt. */
+  get relaySecurityFloor(): RelaySecurityMode | undefined {
+    return this.relaySecurityFloorValue;
+  }
+
   get lastError(): string | null {
     return this.lastErrorValue;
   }
@@ -1653,6 +2019,28 @@ export class DaemonClient {
 
   getLastLivenessRttMs(): number | null {
     return this.lastLivenessRttMs;
+  }
+
+  /** Recent heartbeat round trips (oldest first), with failures as null. */
+  getLivenessRttSamples(): Array<{ at: number; rttMs: number | null }> {
+    return [...this.livenessRttSamples];
+  }
+
+  private recordLivenessSample(rttMs: number | null): void {
+    this.livenessRttSamples.push({ at: Date.now(), rttMs });
+    if (this.livenessRttSamples.length > LIVENESS_RTT_SAMPLE_LIMIT) this.livenessRttSamples.shift();
+    if (rttMs !== null) {
+      this.smoothedRttMs =
+        this.smoothedRttMs === null ? rttMs : this.smoothedRttMs * 0.75 + rttMs * 0.25;
+    }
+  }
+
+  private livenessTimeoutMs(): number {
+    const rtt = this.smoothedRttMs ?? 1000;
+    return Math.min(
+      LIVENESS_HEARTBEAT_MAX_TIMEOUT_MS,
+      Math.max(LIVENESS_HEARTBEAT_MIN_TIMEOUT_MS, Math.round(rtt * 3 + 3000)),
+    );
   }
 
   // ============================================================================
@@ -1760,16 +2148,27 @@ export class DaemonClient {
       envelopeType,
       messageType,
     });
-    this.sendTransportFrame(JSON.stringify(message));
+    const text = JSON.stringify(message);
+    this.sendTransportFrame(this.uplinkEncoder ? this.uplinkEncoder.encode(text) : text);
   }
 
   private sendTransportFrame(frame: string | Uint8Array | ArrayBuffer): void {
     if (!this.transport) {
       throw new DaemonConnectionError("Transport not connected");
     }
+    const size = getTransportFrameSize(frame);
+    const drainMs = uplinkDrainAllowanceMs(size);
+    if (drainMs > 0) {
+      const now = perfNow();
+      this.lastLargeFrameSentAt = now;
+      this.uplinkDrainDeadline = Math.min(
+        now + UPLINK_DRAIN_MAX_MS,
+        Math.max(now, this.uplinkDrainDeadline) + drainMs,
+      );
+    }
     const isOpen = this.beginTraceSection("paseo.ws.frame.outbound", {
       kind: typeof frame === "string" ? "text" : "binary",
-      size: String(getTransportFrameSize(frame)),
+      size: String(size),
     });
     try {
       this.transport.send(frame);
@@ -2231,7 +2630,13 @@ export class DaemonClient {
         this.pingProbe = null;
         const error = new PingTimeoutError(timeoutMs);
         probe.reject(error);
-        if (probe.drivesLivenessFailure) {
+        // Frames arrived while the pong was queued behind them: slow, not dead. Likewise while a
+        // large frame may still be holding the ping back on the uplink.
+        if (
+          probe.drivesLivenessFailure &&
+          this.lastInboundAt <= probe.startedAt &&
+          perfNow() >= this.uplinkDrainDeadline
+        ) {
           this.recordLivenessFailure(toTimeoutError(error, "Liveness check", timeoutMs));
         }
       }, timeoutMs),
@@ -2272,14 +2677,23 @@ export class DaemonClient {
     if (this.connectionState.status !== "connected" || this.livenessHeartbeatTimer) {
       return;
     }
-    this.livenessHeartbeatTimer = setTimeout(() => {
-      this.livenessHeartbeatTimer = null;
-      this.livenessPing({ timeoutMs: LIVENESS_HEARTBEAT_TIMEOUT_MS })
-        .catch(() => {})
-        .finally(() => {
-          this.scheduleNextLivenessHeartbeat();
-        });
-    }, LIVENESS_HEARTBEAT_INTERVAL_MS);
+    this.livenessHeartbeatTimer = setTimeout(
+      () => {
+        this.livenessHeartbeatTimer = null;
+        this.livenessPing({ timeoutMs: this.livenessTimeoutMs() })
+          .then((rttMs) => {
+            this.recordLivenessSample(rttMs);
+            return undefined;
+          })
+          .catch(() => {
+            this.recordLivenessSample(null);
+          })
+          .finally(() => {
+            this.scheduleNextLivenessHeartbeat();
+          });
+      },
+      this.consecutiveLivenessFailures > 0 ? 0 : LIVENESS_HEARTBEAT_INTERVAL_MS,
+    );
   }
 
   // ============================================================================
@@ -3272,6 +3686,9 @@ export class DaemonClient {
       ...(typeof options.limit === "number" ? { limit: options.limit } : {}),
       ...(options.projection ? { projection: options.projection } : {}),
       ...(options.mergeWindow === true ? { mergeWindow: true } : {}),
+      ...(options.compact === true ? { compact: true } : {}),
+      ...(options.ifLoaded === true ? { ifLoaded: true } : {}),
+      ...(options.lean === true ? { lean: true } : {}),
     });
 
     const payload = await this.sendRequest({
@@ -3290,11 +3707,126 @@ export class DaemonClient {
       },
     });
 
+    if (payload.notLoaded === true) {
+      throw new AgentNotLoadedError(agentId);
+    }
     if (payload.error) {
       throw new Error(payload.error);
     }
 
     return payload;
+  }
+
+  /** One tool call in full, for a row that arrived compacted (compactTimeline). */
+  async fetchAgentTimelineItem(
+    agentId: string,
+    callId: string,
+    options: { timeout?: number } = {},
+  ): Promise<AgentTimelineItemPayload> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.timeline.item.request",
+      agentId,
+      requestId,
+      callId,
+    });
+    const payload = await this.sendRequest({
+      requestId,
+      message,
+      timeout: options.timeout,
+      options: { skipQueue: true },
+      select: (response) =>
+        response.type === "agent.timeline.item.response" && response.payload.requestId === requestId
+          ? response.payload
+          : null,
+    });
+    if (payload.error) throw new Error(payload.error);
+    return payload;
+  }
+
+  /**
+   * A chat image's placeholder, display image or full-screen image (chatImages). `placeholder`
+   * answers inline (ThumbHash + display size); `display` and `full` answer with a daemon path to
+   * read with `readFile`. Daemons before variants answer every request with an inline thumbnail
+   * (`data`), which callers can use as the display image.
+   */
+  async fetchAgentImageVariant(
+    imageId: string,
+    variant: "placeholder" | "display" | "full",
+    options: { acceptsHeic?: boolean; timeout?: number } = {},
+  ): Promise<{
+    thumbhash: string | null;
+    path: string | null;
+    data: string | null;
+    mimeType: string | null;
+    width: number | null;
+    height: number | null;
+    byteSize: number | null;
+  }> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.image.thumbnail.request",
+      requestId,
+      imageId,
+      variant,
+      ...(variant === "display" ? { maxEdge: 640 } : {}),
+      ...(options.acceptsHeic ? { acceptsHeic: true } : {}),
+    });
+    const payload: AgentImageThumbnailPayload = await this.sendRequest({
+      requestId,
+      message,
+      timeout: options.timeout ?? 60_000,
+      options: { skipQueue: true },
+      select: (response) =>
+        response.type === "agent.image.thumbnail.response" &&
+        response.payload.requestId === requestId
+          ? response.payload
+          : null,
+    });
+    if (payload.error) throw new Error(payload.error);
+    return {
+      thumbhash: payload.thumbhash ?? null,
+      path: payload.path ?? null,
+      data: payload.data,
+      mimeType: payload.mimeType,
+      width: payload.width,
+      height: payload.height,
+      byteSize: payload.byteSize ?? null,
+    };
+  }
+
+  /** A small JPEG of a chat image (chatImages). The original is read with `readFile`. */
+  async fetchAgentImageThumbnail(
+    imageId: string,
+    options: { maxEdge?: number; timeout?: number } = {},
+  ): Promise<{ data: string; mimeType: string; width: number; height: number }> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.image.thumbnail.request",
+      requestId,
+      imageId,
+      ...(options.maxEdge ? { maxEdge: options.maxEdge } : {}),
+    });
+    const payload: AgentImageThumbnailPayload = await this.sendRequest({
+      requestId,
+      message,
+      timeout: options.timeout,
+      options: { skipQueue: true },
+      select: (response) =>
+        response.type === "agent.image.thumbnail.response" &&
+        response.payload.requestId === requestId
+          ? response.payload
+          : null,
+    });
+    if (payload.error || !payload.data || !payload.mimeType || !payload.width || !payload.height) {
+      throw new Error(payload.error ?? "Thumbnail unavailable");
+    }
+    return {
+      data: payload.data,
+      mimeType: payload.mimeType,
+      width: payload.width,
+      height: payload.height,
+    };
   }
 
   async appendAgentTimelineItem(
@@ -3479,7 +4011,7 @@ export class DaemonClient {
     agentId: string,
     text: string,
     options?: SendMessageOptions,
-  ): Promise<void> {
+  ): Promise<SendAgentMessageResult> {
     if (
       options?.sourceAgentId &&
       this.lastServerInfoMessage?.features?.agentMessageProvenance !== true
@@ -3502,8 +4034,14 @@ export class DaemonClient {
     const payload = await this.sendRequest({
       requestId,
       message,
+      // A photo on a slow uplink takes a while to get through: no timeout (and resend) meanwhile.
+      timeout: DEFAULT_SESSION_RPC_TIMEOUT_MS + uplinkDrainAllowanceMs(imagePayloadBytes(options)),
       options: { skipQueue: true },
       select: (msg) => {
+        if (msg.type === "send_agent_message_received" && msg.payload.requestId === requestId) {
+          options?.onReceived?.();
+          return null;
+        }
         if (msg.type !== "send_agent_message_response") {
           return null;
         }
@@ -3516,6 +4054,98 @@ export class DaemonClient {
     if (!payload.accepted) {
       throw new Error(payload.error ?? "sendAgentMessage rejected");
     }
+    return payload.disposition ? { disposition: payload.disposition } : {};
+  }
+
+  /** Sends a daemon-held (queued) message now, steered into the running turn. */
+  async forceQueuedAgentMessage(
+    agentId: string,
+    messageId: string,
+  ): Promise<AgentQueueForceResponse["payload"]> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.queue.force.request",
+      requestId,
+      agentId,
+      messageId,
+    });
+    return this.sendCorrelatedRequest({
+      requestId,
+      message,
+      responseType: "agent.queue.force.response",
+      options: { skipQueue: true },
+    });
+  }
+
+  /** Withdraws a message the agent has not taken; "too_late" when it already has it. */
+  async cancelAgentMessage(
+    agentId: string,
+    messageId: string,
+  ): Promise<AgentMessageCancelResponse["payload"]> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.message.cancel.request",
+      requestId,
+      agentId,
+      messageId,
+    });
+    return this.sendCorrelatedRequest({
+      requestId,
+      message,
+      responseType: "agent.message.cancel.response",
+      options: { skipQueue: true },
+    });
+  }
+
+  /**
+   * Speed test over this socket (networkDiagnostics). "down" fetches `bytes` random bytes from the
+   * daemon, "up" sends them. Returns the wall time and the daemon's own processing time.
+   */
+  async runNetworkSpeedTest(
+    direction: "down" | "up",
+    bytes: number,
+  ): Promise<{ bytes: number; elapsedMs: number; serverMs: number }> {
+    const requestId = this.createRequestId();
+    const payload =
+      direction === "up" ? encodeBase64ForSpeedTest(pseudoRandomBytes(bytes)) : undefined;
+    const startedAt = perfNow();
+    const message = SessionInboundMessageSchema.parse({
+      type: "diagnostics.speed_test.request",
+      requestId,
+      direction,
+      bytes,
+      ...(payload ? { payload } : {}),
+    });
+    const response = await this.sendCorrelatedRequest({
+      requestId,
+      message,
+      responseType: "diagnostics.speed_test.response",
+      timeout: 120_000,
+      options: { skipQueue: true },
+    });
+    if (response.error) throw new Error(response.error);
+    return {
+      bytes: direction === "down" ? base64ByteLength(response.payload ?? "") : bytes,
+      elapsedMs: perfNow() - startedAt,
+      serverMs: response.serverMs,
+    };
+  }
+
+  /** Daemon → model provider check, no model call (networkDiagnostics). */
+  async runProviderTest(provider?: string): Promise<DiagnosticsProviderTestResponse["payload"]> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "diagnostics.provider_test.request",
+      requestId,
+      ...(provider ? { provider } : {}),
+    });
+    return this.sendCorrelatedRequest({
+      requestId,
+      message,
+      responseType: "diagnostics.provider_test.response",
+      timeout: 30_000,
+      options: { skipQueue: true },
+    });
   }
 
   async sendMessage(agentId: string, text: string, options?: SendMessageOptions): Promise<void> {
@@ -3855,7 +4485,28 @@ export class DaemonClient {
     this.sendSessionMessage({ type: "voice_audio_chunk", audio, format, isLast });
   }
 
-  async startDictationStream(dictationId: string, format: string): Promise<void> {
+  /** COMPAT(dictationOpus): the daemon decodes DICTATION_OPUS_FORMAT chunks. */
+  supportsDictationOpus(): boolean {
+    return this.lastServerInfoMessage?.features?.dictationOpus === true;
+  }
+
+  /** COMPAT(dictationResume): the daemon honours `dictation_stream_start.resume`. */
+  supportsDictationResume(): boolean {
+    return this.lastServerInfoMessage?.features?.dictationResume === true;
+  }
+
+  /**
+   * Start (or, with `resume`, reattach to) a dictation stream. Resolves with the daemon's ack:
+   * `ackSeq` -1 means a fresh stream (send everything); a resumed stream already holds every
+   * seq up to `ackSeq`. `resume` is only sent when the daemon advertises dictationResume; an
+   * old daemon simply restarts the stream, which is the full replay this falls back to.
+   */
+  async startDictationStream(
+    dictationId: string,
+    format: string,
+    options: { resume?: boolean } = {},
+  ): Promise<{ ackSeq: number; resumed: boolean }> {
+    const resume = options.resume === true && this.supportsDictationResume();
     const ack = this.waitForWithCancel(
       (msg) => {
         if (msg.type !== "dictation_stream_ack") {
@@ -3863,6 +4514,9 @@ export class DaemonClient {
         }
         if (msg.payload.dictationId !== dictationId) {
           return null;
+        }
+        if (resume && msg.payload.resumed === true) {
+          return msg.payload;
         }
         if (msg.payload.ackSeq !== -1) {
           return null;
@@ -3872,7 +4526,10 @@ export class DaemonClient {
       30000,
       { skipQueue: true },
     );
-    const ackPromise = ack.promise.then(() => undefined);
+    const ackPromise = ack.promise.then((payload) => ({
+      ackSeq: payload.ackSeq,
+      resumed: payload.resumed === true,
+    }));
 
     const streamError = this.waitForWithCancel(
       (msg) => {
@@ -3893,8 +4550,13 @@ export class DaemonClient {
 
     const cleanupError = new Error("Cancelled dictation start waiter");
     try {
-      this.sendSessionMessageStrict({ type: "dictation_stream_start", dictationId, format });
-      await Promise.race([ackPromise, errorPromise]);
+      this.sendSessionMessageStrict({
+        type: "dictation_stream_start",
+        dictationId,
+        format,
+        ...(resume ? { resume: true } : {}),
+      });
+      return await Promise.race([ackPromise, errorPromise]);
     } finally {
       ack.cancel(cleanupError);
       streamError.cancel(cleanupError);
@@ -4741,6 +5403,7 @@ export class DaemonClient {
     requestId?: string,
     acceptBinary = false,
     maxBytes?: number,
+    chunkBytes?: number,
   ): Promise<FileExplorerPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId,
@@ -4751,6 +5414,7 @@ export class DaemonClient {
         mode,
         ...(acceptBinary ? { acceptBinary: true } : {}),
         ...(maxBytes ? { maxBytes } : {}),
+        ...(chunkBytes ? { chunkBytes } : {}),
       },
       responseType: "file_explorer_response",
     });
@@ -4771,14 +5435,27 @@ export class DaemonClient {
     return payload.directory;
   }
 
+  /**
+   * Reads a file over the binary channel. `chunkBytes` asks the daemon for smaller chunks (older
+   * daemons ignore it) so `onProgress` can report a small file arriving over a slow link.
+   */
   async readFile(
     cwd: string,
     path: string,
     requestId?: string,
     maxBytes?: number,
+    options: {
+      chunkBytes?: number;
+      onProgress?: (receivedBytes: number, totalBytes: number) => void;
+    } = {},
   ): Promise<FileReadResult> {
     const resolvedRequestId = this.createRequestId(requestId);
-    this.pendingBinaryFileReads.set(resolvedRequestId, { cwd, path, maxBytes });
+    this.pendingBinaryFileReads.set(resolvedRequestId, {
+      cwd,
+      path,
+      maxBytes,
+      onProgress: options.onProgress,
+    });
     try {
       const payload = await this.requestFileExplorer(
         cwd,
@@ -4787,6 +5464,7 @@ export class DaemonClient {
         resolvedRequestId,
         true,
         maxBytes,
+        options.chunkBytes,
       );
       if (payload.error) {
         throw new Error(payload.error);
@@ -5032,6 +5710,42 @@ export class DaemonClient {
   // ============================================================================
   // Provider Models / Commands
   // ============================================================================
+
+  /** True when the host serves provider.model_scope.* (the Scoped / All model picker). */
+  supportsModelScope(): boolean {
+    // COMPAT(modelScope): hosts before this feature have no Scoped list.
+    return this.lastServerInfoMessage?.features?.modelScope === true;
+  }
+
+  /** Pi-based providers: the Scoped list (Pi's enabledModels). `supported: false` elsewhere. */
+  async getProviderModelScope(provider: AgentProvider): Promise<ProviderModelScope> {
+    if (!this.supportsModelScope())
+      throw new Error("Update the host to use the Scoped model list.");
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"provider.model_scope.get.response">({
+        message: { type: "provider.model_scope.get.request", provider },
+        timeout: 90000,
+      });
+    if (payload.error || !payload.scope) throw new Error(payload.error ?? "No model scope");
+    return payload.scope;
+  }
+
+  /** Adds a model to Scoped (`scoped: true`) or removes it; returns the new scope. */
+  async setProviderModelScope(
+    provider: AgentProvider,
+    modelId: string,
+    scoped: boolean,
+  ): Promise<ProviderModelScope> {
+    if (!this.supportsModelScope())
+      throw new Error("Update the host to use the Scoped model list.");
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"provider.model_scope.set.response">({
+        message: { type: "provider.model_scope.set.request", provider, modelId, scoped },
+        timeout: 90000,
+      });
+    if (payload.error || !payload.scope) throw new Error(payload.error ?? "No model scope");
+    return payload.scope;
+  }
 
   async listProviderModels(
     provider: AgentProvider,
@@ -5447,11 +6161,20 @@ export class DaemonClient {
     });
   }
 
-  async getPluginCatalog() {
+  /**
+   * `knownBundles` (pluginBundleCache): client bundles the app already has, by plugin id and the
+   * hash the daemon gave each one. A current daemon then answers those with an empty bundle and
+   * `clientBundleUnchanged`; an older one ignores the field and sends every bundle.
+   */
+  async getPluginCatalog(options?: { knownBundles?: Array<{ id: string; hash: string }> }) {
     const requestId = this.createRequestId();
     const payload = await this.sendCorrelatedSessionRequest({
       requestId,
-      message: { type: "plugin.catalog.get.request", requestId },
+      message: {
+        type: "plugin.catalog.get.request",
+        requestId,
+        ...(options?.knownBundles ? { knownBundles: options.knownBundles } : {}),
+      },
       responseType: "plugin.catalog.get.response",
     });
     return payload.plugins;
@@ -6291,10 +7014,14 @@ export class DaemonClient {
       }
       this.transport = null;
     }
+    this.transportOpenedValue = false;
   }
 
   private cleanupTransport(): void {
+    this.uplinkDrainDeadline = 0;
+    this.lastLargeFrameSentAt = 0;
     this.resetConnectTimeout();
+    this.clearCheckedResetTimer();
     if (this.pendingGenericTransportErrorTimeout) {
       clearTimeout(this.pendingGenericTransportErrorTimeout);
       this.pendingGenericTransportErrorTimeout = null;
@@ -6310,6 +7037,7 @@ export class DaemonClient {
   }
 
   private resetConnectTimeout(): void {
+    this.clearFastRetryOpenTimeout();
     if (!this.connectTimeout) {
       return;
     }
@@ -6317,6 +7045,393 @@ export class DaemonClient {
     this.connectTimeout = null;
   }
 
+  private inFastRetryWindow(): boolean {
+    return perfNow() < this.fastRetryUntil;
+  }
+
+  /** In the fast-retry window, an attempt whose socket has not opened after a few RTTs is dropped. */
+  private armFastRetryOpenTimeout(transport: DaemonTransport, opened: () => boolean): void {
+    this.clearFastRetryOpenTimeout();
+    if (!this.inFastRetryWindow()) return;
+    const rtt = this.smoothedRttMs ?? 250;
+    const timeoutMs = Math.min(
+      FAST_RETRY_OPEN_TIMEOUT_MAX_MS,
+      Math.max(FAST_RETRY_OPEN_TIMEOUT_MIN_MS, Math.round(1500 + rtt * 4)),
+    );
+    this.fastRetryOpenTimeout = setTimeout(() => {
+      this.fastRetryOpenTimeout = null;
+      if (this.transport !== transport || opened()) return;
+      if (this.connectionState.status !== "connecting") return;
+      this.resetConnectTimeout();
+      this.lastErrorValue = "Connection timed out";
+      this.disposeTransport(1001, "Connection timed out");
+      this.scheduleReconnect({
+        reason: "Connection timed out",
+        event: "CONNECT_TIMEOUT",
+        reasonCode: "connect_timeout",
+      });
+    }, timeoutMs);
+  }
+
+  private clearFastRetryOpenTimeout(): void {
+    if (!this.fastRetryOpenTimeout) return;
+    clearTimeout(this.fastRetryOpenTimeout);
+    this.fastRetryOpenTimeout = null;
+  }
+
+  /**
+   * A daemon that does not know session tokens (downgraded) closes a token hello as invalid.
+   * Drop the token and go again with the password at once.
+   */
+  private dropSessionTokenRefusedAsInvalidHello(event: unknown): boolean {
+    if (this.helloAuth?.kind !== "sessionToken" || this.lastServerInfoMessage) return false;
+    if (!event || typeof event !== "object") return false;
+    const { code, reason } = event as { code?: unknown; reason?: unknown };
+    // 4002 is also the client's own protected-handshake failure; the daemon's reason tells them apart.
+    if (code !== WS_CLOSE_INVALID_HELLO || reason !== "Invalid hello") return false;
+    this.sessionTokens.set(null);
+    this.immediateReconnect = true;
+    return true;
+  }
+
+  private canRace(): boolean {
+    const option = this.config.reconnect?.race;
+    if (option === false || this.config.reconnect?.enabled === false) return false;
+    if (option === true) return true;
+    // Relay: a second socket is a second relay session (side effects there). Desktop socket/pipe
+    // transports: a local link that does not sit in TCP retransmit backoff.
+    return !this.config.transportFactory && !isRelayClientWebSocketUrl(this.config.url);
+  }
+
+  /**
+   * The OS says the network is back (or the app came to the front). The current socket may be
+   * fine, may be about to come back by itself (TCP retransmits), or may be dead. Replacing it
+   * at once costs a few round trips plus a catch-up when it would have come back anyway; waiting
+   * for it costs seconds when it would not. So race: keep it, open a second socket beside it,
+   * and keep whichever shows life first.
+   *
+   * - Any frame on the current socket (stream data, a pong) wins for it: the second socket is
+   *   closed before its hello, so the daemon never sees a second session.
+   * - The second socket opening (upgrade and E2EE handshake done) while the current one is still
+   *   silent wins for it: the current socket is closed and the second one becomes the next
+   *   attempt at once (hello, resume). Exactly one hello goes, on the socket that is kept.
+   * - The current socket dying mid-race hands over to the second socket at once.
+   * - A second socket that does not open in a few round trips is dropped; the heartbeat, path
+   *   probe and verify ping still guard the current socket as before.
+   *
+   * While the current socket is an attempt that has not opened yet, the same race runs between
+   * the two attempts. A socket that is not suspect gets about one round trip to answer the verify
+   * ping before the second socket starts, so a healthy socket costs no extra connection.
+   */
+  private scheduleConnectionRace(): void {
+    if (this.raceCandidate || this.raceStartTimer || !this.canRace()) return;
+    const transport = this.transport;
+    if (!transport) return;
+    const delayMs = this.raceStartDelayMs();
+    if (delayMs <= 0) {
+      this.startConnectionRace(transport);
+      return;
+    }
+    this.raceStartTimer = setTimeout(() => {
+      this.raceStartTimer = null;
+      this.startConnectionRace(transport);
+    }, delayMs);
+  }
+
+  private raceStartDelayMs(): number {
+    const rtt = this.smoothedRttMs ?? 250;
+    const grace = Math.min(RACE_HEALTHY_GRACE_MAX_MS, Math.round(rtt * 1.5 + 50));
+    // An attempt that has not opened sent its SYN before the OS saw the network come back.
+    if (this.connectionState.status === "connecting") return 0;
+    if (this.consecutiveLivenessFailures > 0) return 0;
+    const ping = this.pingProbe;
+    const suspectAge = Math.max(RACE_SUSPECT_PING_AGE_MIN_MS, Math.round(rtt * 2 + 200));
+    if (ping && perfNow() - ping.startedAt > suspectAge) return 0;
+    return grace;
+  }
+
+  private raceTargetLive(transport: DaemonTransport): boolean {
+    if (this.transport !== transport || !this.shouldReconnect) return false;
+    const status = this.connectionState.status;
+    return status === "connected" || (status === "connecting" && !this.transportOpenedValue);
+  }
+
+  private startConnectionRace(transport: DaemonTransport): void {
+    if (this.raceCandidate || !this.raceTargetLive(transport)) return;
+    let resolution: ReturnType<typeof resolveConnectionAuth>;
+    try {
+      resolution = resolveConnectionAuth(this.config, this.sessionTokens);
+    } catch {
+      return;
+    }
+    if (resolution instanceof Promise) {
+      void resolution
+        .then((selected) => this.openRaceCandidate(transport, selected))
+        .catch(() => undefined);
+      return;
+    }
+    this.openRaceCandidate(transport, resolution);
+  }
+
+  private openRaceCandidate(transport: DaemonTransport, selected: SelectedConnectionAuth): void {
+    if (this.raceCandidate || !this.raceTargetLive(transport)) return;
+    let built: { transport: DaemonTransport; isDirectE2ee: boolean };
+    try {
+      built = this.buildAttemptTransport(selected);
+    } catch {
+      return;
+    }
+    const candidate: RaceCandidate = {
+      transport: built.transport,
+      selected,
+      isDirectE2ee: built.isDirectE2ee,
+      startedAt: perfNow(),
+      opened: false,
+      buffered: [],
+      cleanup: [],
+      timer: null,
+    };
+    this.raceCandidate = candidate;
+    this.raceStats.started += 1;
+    const dropped = (outcome: string) => {
+      if (this.raceCandidate !== candidate) return;
+      this.cancelConnectionRace(outcome);
+    };
+    candidate.cleanup.push(
+      built.transport.onOpen(() => {
+        if (this.raceCandidate !== candidate || candidate.opened) return;
+        candidate.opened = true;
+        if (candidate.timer) clearTimeout(candidate.timer);
+        candidate.timer = null;
+        this.raceCandidateOpened(candidate);
+      }),
+      built.transport.onClose(() => dropped("candidate_closed")),
+      built.transport.onError(() => dropped("candidate_error")),
+      built.transport.onMessage((data) => {
+        if (this.raceCandidate === candidate) candidate.buffered.push(data);
+      }),
+    );
+    if (this.raceCandidate !== candidate) return;
+    const rtt = this.smoothedRttMs ?? 250;
+    const openTimeoutMs = Math.min(
+      FAST_RETRY_OPEN_TIMEOUT_MAX_MS,
+      Math.max(FAST_RETRY_OPEN_TIMEOUT_MIN_MS, Math.round(1500 + rtt * 4)),
+    );
+    candidate.timer = setTimeout(() => {
+      candidate.timer = null;
+      dropped("candidate_open_timeout");
+    }, openTimeoutMs);
+  }
+
+  /** The current socket showed life (any frame, or a pong): it wins the race. */
+  private raceOldAnswered(): void {
+    if (this.raceCandidate || this.raceStartTimer) this.cancelConnectionRace("old_answered");
+  }
+
+  /**
+   * The second socket opened (its own round trips prove the path both ways) while the current
+   * socket was still silent: the second one takes over now.
+   */
+  private raceCandidateOpened(candidate: RaceCandidate): void {
+    // The current socket already died: the reconnect it scheduled adopts the candidate.
+    if (!this.transport) return;
+    this.raceNewWins(candidate);
+  }
+
+  private raceNewWins(candidate: RaceCandidate): void {
+    const status = this.connectionState.status;
+    if (!this.transport) return;
+    if (status === "connected") {
+      this.raceStats.newWon += 1;
+      this.logger.debug(
+        { raceMs: Math.round(perfNow() - candidate.startedAt) },
+        "connection_race_new_socket_won",
+      );
+      this.consecutiveLivenessFailures = 0;
+      this.lastErrorValue = "Connection stalled";
+      this.disposeTransport(1001, "Replaced by a faster connection");
+      this.fastRetryUntil = perfNow() + FAST_RETRY_WINDOW_MS;
+      this.immediateReconnect = true;
+      this.scheduleReconnect({
+        reason: "Connection stalled",
+        event: "CONNECTION_RACE_WON",
+        reasonCode: "liveness_timeout",
+      });
+      return;
+    }
+    if (status === "connecting" && !this.transportOpenedValue) {
+      this.raceStats.newWon += 1;
+      this.disposeTransport(1001, "Replaced by a faster attempt");
+      this.immediateReconnect = true;
+      this.scheduleReconnect({
+        reason: "Connection attempt stalled",
+        event: "CONNECTION_RACE_WON",
+        reasonCode: "connect_timeout",
+      });
+      return;
+    }
+    this.cancelConnectionRace("stale");
+  }
+
+  /** Hand the race's second socket to the attempt that is starting now (null if there is none). */
+  private takeRaceCandidate(): RaceCandidate | null {
+    if (this.raceStartTimer) {
+      clearTimeout(this.raceStartTimer);
+      this.raceStartTimer = null;
+    }
+    const candidate = this.raceCandidate;
+    if (!candidate) return null;
+    this.raceCandidate = null;
+    this.releaseRaceCandidate(candidate);
+    return candidate;
+  }
+
+  /** Stop a race: the second socket is closed without a hello. */
+  private cancelConnectionRace(outcome: string): void {
+    if (this.raceStartTimer) {
+      clearTimeout(this.raceStartTimer);
+      this.raceStartTimer = null;
+    }
+    const candidate = this.raceCandidate;
+    if (!candidate) return;
+    this.raceCandidate = null;
+    this.releaseRaceCandidate(candidate);
+    if (outcome === "old_answered" || outcome === "attempt_opened_first") {
+      this.raceStats.oldWon += 1;
+    } else {
+      this.raceStats.dropped += 1;
+    }
+    this.logger.debug(
+      { outcome, raceMs: Math.round(perfNow() - candidate.startedAt) },
+      "connection_race_ended",
+    );
+    this.closeRaceTransport(candidate, "Not needed");
+  }
+
+  private releaseRaceCandidate(candidate: RaceCandidate): void {
+    if (candidate.timer) clearTimeout(candidate.timer);
+    candidate.timer = null;
+    for (const cleanup of candidate.cleanup.splice(0)) {
+      try {
+        cleanup();
+      } catch {
+        // no-op
+      }
+    }
+  }
+
+  private closeRaceTransport(candidate: RaceCandidate, reason: string): void {
+    try {
+      candidate.transport.close(1000, reason);
+    } catch {
+      // no-op
+    }
+  }
+
+  /** Connection races so far (diagnostics and tests). */
+  getConnectionRaceStats(): { started: number; oldWon: number; newWon: number; dropped: number } {
+    return { ...this.raceStats };
+  }
+
+  private canProbePath(): boolean {
+    const option = this.config.reconnect?.pathProbe;
+    if (option === false || this.config.reconnect?.enabled === false) return false;
+    if (typeof option === "function") return true;
+    return !this.config.transportFactory && !isRelayClientWebSocketUrl(this.config.url);
+  }
+
+  /**
+   * One heartbeat went unanswered. Keep the socket, but try fresh sockets to the same address
+   * about once a second: a fresh one opening while the old one is still silent means the old
+   * one is stuck, so replace it at once instead of waiting for the second heartbeat to fail.
+   */
+  private startPathProbe(): void {
+    if (this.pathProbeTransport !== null || !this.canProbePath()) return;
+    const transport = this.transport;
+    if (!transport || this.connectionState.status !== "connected") return;
+    const startedAt = perfNow();
+    const stillSuspect = () =>
+      this.transport === transport &&
+      this.connectionState.status === "connected" &&
+      this.consecutiveLivenessFailures > 0 &&
+      this.lastInboundAt <= startedAt &&
+      perfNow() - startedAt < PATH_PROBE_WINDOW_MS;
+    const run = async (): Promise<void> => {
+      while (stillSuspect()) {
+        const probeStartedAt = perfNow();
+        const opened = await this.probePathOnce();
+        if (!stillSuspect()) return;
+        // A race in progress decides between the sockets itself.
+        if (opened && !this.raceCandidate) {
+          this.consecutiveLivenessFailures = 0;
+          this.lastErrorValue = "Connection stalled";
+          this.disposeTransport(1001, "Liveness check timed out");
+          this.fastRetryUntil = perfNow() + FAST_RETRY_WINDOW_MS;
+          this.immediateReconnect = true;
+          this.scheduleReconnect({
+            reason: "Connection stalled",
+            event: "LIVENESS_TIMEOUT",
+            reasonCode: "liveness_timeout",
+          });
+          return;
+        }
+        const wait = Math.max(0, PATH_PROBE_INTERVAL_MS - (perfNow() - probeStartedAt));
+        await new Promise<void>((resolve) => setTimeout(resolve, wait));
+      }
+    };
+    this.pathProbeTransport = transport;
+    void run()
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.pathProbeTransport === transport) this.pathProbeTransport = null;
+      });
+  }
+
+  private async probePathOnce(): Promise<boolean> {
+    const rtt = this.smoothedRttMs ?? 250;
+    const timeoutMs = Math.min(
+      FAST_RETRY_OPEN_TIMEOUT_MAX_MS,
+      Math.max(FAST_RETRY_OPEN_TIMEOUT_MIN_MS, Math.round(1500 + rtt * 4)),
+    );
+    const option = this.config.reconnect?.pathProbe;
+    if (typeof option === "function") {
+      return option({ url: this.config.url, timeoutMs }).catch(() => false);
+    }
+    let probe: DaemonTransport;
+    try {
+      const base = createWebSocketTransportFactory(
+        this.config.webSocketFactory ?? defaultWebSocketFactory,
+      );
+      // Same upgrade as a real attempt, but no credentials and no hello: it only has to open.
+      const factory =
+        this.config.e2ee?.enabled === true ? createDirectE2eeUpgradeTransportFactory(base) : base;
+      probe = factory({ url: this.config.url, headers: {} });
+    } catch {
+      return false;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cleanups: Array<() => void> = [];
+    try {
+      return await new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+        cleanups.push(
+          probe.onOpen(() => resolve(true)),
+          probe.onClose(() => resolve(false)),
+          probe.onError(() => resolve(false)),
+        );
+      });
+    } finally {
+      clearTimeout(timer);
+      for (const cleanup of cleanups) cleanup();
+      try {
+        probe.close(1000, "Path probe");
+      } catch {
+        // no-op
+      }
+    }
+  }
+
+  // oxlint-disable-next-line complexity -- one flat dispatch over frame kinds (checked, compressed, binary, JSON)
   private handleTransportMessage(data: unknown): void {
     const rawData =
       data && typeof data === "object" && "data" in data ? (data as { data: unknown }).data : data;
@@ -6340,11 +7455,32 @@ export class DaemonClient {
     }
 
     const rawBytes = asUint8Array(rawData);
+    this.lastInboundAt = perfNow();
     const isOpen = this.beginTraceSection(
       "paseo.ws.frame.inbound",
       describeInboundTransportFrame(rawData, rawBytes),
     );
     try {
+      if (rawBytes && isCheckedJsonFrame(rawBytes)) {
+        if (!this.checkedDecoder) return;
+        const payload = this.decodeCheckedFrame(this.checkedDecoder, rawBytes);
+        if (payload !== null) this.handleJsonPayload(payload, rawBytes.byteLength);
+        return;
+      }
+      if (rawBytes && rawBytes[0] === CompressionResetAckOpcode) {
+        const ack = decodeCompressionResetAck(rawBytes);
+        if (ack && this.checkedDecoder?.acceptResetAck(ack)) {
+          this.clearCheckedResetTimer();
+          this.logger.info({ generation: ack.generation }, "compressed_frame_reset_done");
+        }
+        return;
+      }
+      if (rawBytes && isCompressedJsonFrame(rawBytes)) {
+        if (!this.frameDecompressor) return;
+        const payload = this.decompressFrame(this.frameDecompressor, rawBytes);
+        if (payload !== null) this.handleJsonPayload(payload, rawBytes.byteLength);
+        return;
+      }
       if (rawBytes && this.tryHandleBinaryFrame(rawBytes)) {
         return;
       }
@@ -6356,6 +7492,73 @@ export class DaemonClient {
     } finally {
       this.endTraceSection(isOpen);
     }
+  }
+
+  /**
+   * A compressed frame that does not decode means this socket's history no longer matches the
+   * daemon's, and a message is lost. Every later frame would decode wrong too, so drop the history
+   * and the socket and reconnect: the new socket starts both histories empty, and reconnecting
+   * resyncs state the way any dropped link does. Never throw out of the message handler.
+   */
+  private decompressFrame(decompressor: JsonFrameDecompressor, frame: Uint8Array): string | null {
+    try {
+      return decompressor.decompress(frame);
+    } catch (error) {
+      const reason = `Compressed frame did not decode: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+      this.logger.warn({ err: error, bytes: frame.byteLength }, "compressed_frame_decode_failed");
+      this.frameDecompressor = null;
+      this.lastErrorValue = reason;
+      this.disposeTransport(1011, "Compressed frame did not decode");
+      this.scheduleReconnect({
+        reason,
+        event: "FRAME_DECODE_FAILED",
+        reasonCode: "frame_decode_failed",
+      });
+      return null;
+    }
+  }
+
+  /**
+   * A checked frame that is out of sequence, does not decode, or fails its checksum: ask the daemon
+   * to start the history again and resend from the missing frame, keeping the socket and every
+   * subscription. JSON frames are dropped until its ack. A daemon that cannot resend closes the
+   * socket; one that never answers is treated as a dead link.
+   */
+  private decodeCheckedFrame(decoder: CheckedJsonFrameDecoder, frame: Uint8Array): string | null {
+    const result = decoder.decode(frame);
+    if (result.kind === "message") return result.text;
+    if (result.kind === "dropped") return null;
+    this.logger.warn(
+      { reason: result.reason, bytes: frame.byteLength, resets: decoder.resets },
+      "compressed_frame_reset",
+    );
+    try {
+      this.sendTransportFrame(result.reset);
+    } catch {
+      // The socket is going away; reconnecting resyncs.
+    }
+    this.clearCheckedResetTimer();
+    const transport = this.transport;
+    this.checkedResetTimer = setTimeout(() => {
+      this.checkedResetTimer = null;
+      if (this.transport !== transport || !decoder.awaitingReset) return;
+      const reason = `Compressed frame reset not answered: ${result.reason}`;
+      this.lastErrorValue = reason;
+      this.disposeTransport(1011, "Compressed frame reset not answered");
+      this.scheduleReconnect({
+        reason,
+        event: "FRAME_DECODE_FAILED",
+        reasonCode: "frame_decode_failed",
+      });
+    }, CHECKED_FRAME_RESET_TIMEOUT_MS);
+    return null;
+  }
+
+  private clearCheckedResetTimer(): void {
+    if (this.checkedResetTimer) clearTimeout(this.checkedResetTimer);
+    this.checkedResetTimer = null;
   }
 
   private handleJsonPayload(payload: string, rawBytesLength: number | undefined): void {
@@ -6411,10 +7614,24 @@ export class DaemonClient {
         password_required: "Password required",
         incorrect_password: "Incorrect password",
         incompatible_protocol: "Incompatible protocol version",
+        session_token_invalid: "Session token invalid",
       };
       this.lastErrorValue = reasonMessage[parsed.data.reason];
+      if (parsed.data.reason === "session_token_invalid") {
+        // Expired, revoked or from before a daemon restart: not an auth failure. Drop it and
+        // reconnect at once with the password.
+        this.sessionTokens.set(null);
+        this.immediateReconnect = true;
+        this.authFailureReasonValue = null;
+        return;
+      }
       this.authFailureReasonValue =
         parsed.data.reason === "incompatible_protocol" ? null : parsed.data.reason;
+      return;
+    }
+
+    if (parsed.data.type === "session.token") {
+      this.sessionTokens.set(parsed.data.token);
       return;
     }
 
@@ -6486,7 +7703,9 @@ export class DaemonClient {
         modifiedAt: frame.metadata.modifiedAt,
         revision: frame.metadata.revision,
         chunks: [],
+        receivedBytes: 0,
       });
+      pending.onProgress?.(0, frame.metadata.size);
       return;
     }
 
@@ -6502,6 +7721,8 @@ export class DaemonClient {
         return;
       }
       transfer.chunks.push(frame.payload);
+      transfer.receivedBytes += frame.payload.byteLength;
+      transfer.onProgress?.(transfer.receivedBytes, transfer.size);
       return;
     }
 
@@ -6623,7 +7844,10 @@ export class DaemonClient {
       return;
     }
     this.emitDisconnectedStateForReconnect(reason, input);
+    // The socket died while a second one was racing it: that one is the next attempt, now.
+    if (this.raceCandidate) this.immediateReconnect = true;
     if (!this.shouldReconnect || this.config.reconnect?.enabled === false) {
+      this.cancelConnectionRace("reconnect_disabled");
       this.rejectConnect(
         this.authFailureReasonValue
           ? new DaemonAuthenticationError(this.authFailureReasonValue)
@@ -6653,11 +7877,7 @@ export class DaemonClient {
   }
 
   private armReconnectTimer(): void {
-    const attempt = this.reconnectAttempt;
-    const baseDelay = this.config.reconnect?.baseDelayMs ?? DEFAULT_RECONNECT_BASE_DELAY_MS;
-    const maxDelay = this.config.reconnect?.maxDelayMs ?? DEFAULT_RECONNECT_MAX_DELAY_MS;
-    const delay = Math.min(baseDelay * 2 ** attempt, maxDelay);
-    this.reconnectAttempt = attempt + 1;
+    const delay = this.nextReconnectDelayMs();
     this.reconnectTimeout = setTimeout(() => {
       this.reconnectTimeout = null;
       if (!this.shouldReconnect) {
@@ -6667,6 +7887,21 @@ export class DaemonClient {
     }, delay);
   }
 
+  /** Backoff 1 → 2 → 4 → 8 → 15 s; fast (~0.75 s) after a liveness teardown; 0 when asked. */
+  private nextReconnectDelayMs(): number {
+    if (this.immediateReconnect) {
+      this.immediateReconnect = false;
+      return 0;
+    }
+    const attempt = this.reconnectAttempt;
+    const spread = 1 + (Math.random() * 2 - 1) * RECONNECT_JITTER;
+    this.reconnectAttempt = attempt + 1;
+    if (this.inFastRetryWindow()) return Math.round(FAST_RETRY_DELAY_MS * spread);
+    const baseDelay = this.config.reconnect?.baseDelayMs ?? DEFAULT_RECONNECT_BASE_DELAY_MS;
+    const maxDelay = this.config.reconnect?.maxDelayMs ?? DEFAULT_RECONNECT_MAX_DELAY_MS;
+    return Math.round(Math.min(baseDelay * 2 ** attempt, maxDelay) * spread);
+  }
+
   private resolvePingProbe(): void {
     const probe = this.pingProbe;
     if (!probe) {
@@ -6674,6 +7909,10 @@ export class DaemonClient {
     }
     this.pingProbe = null;
     clearTimeout(probe.timeoutHandle);
+    // A pong proves the current socket both ways: a second socket racing it is not needed.
+    this.raceOldAnswered();
+    // The ping went after the large frame, so the frame is through.
+    if (probe.startedAt > this.lastLargeFrameSentAt) this.uplinkDrainDeadline = 0;
     probe.resolve(perfNow() - probe.startedAt);
   }
 
@@ -6699,11 +7938,13 @@ export class DaemonClient {
   private recordLivenessFailure(error: Error): void {
     this.consecutiveLivenessFailures += 1;
     if (this.consecutiveLivenessFailures < LIVENESS_FAILURE_RECONNECT_THRESHOLD) {
+      this.startPathProbe();
       return;
     }
     this.consecutiveLivenessFailures = 0;
     this.lastErrorValue = error.message;
     this.disposeTransport(1001, "Liveness check timed out");
+    this.fastRetryUntil = perfNow() + FAST_RETRY_WINDOW_MS;
     this.scheduleReconnect({
       reason: error.message,
       event: "LIVENESS_TIMEOUT",
@@ -6712,6 +7953,25 @@ export class DaemonClient {
   }
 
   private handleSessionMessage(msg: SessionOutboundMessage): void {
+    if (msg.type === "agent_patch") {
+      const expanded = this.agentPatches.expand(msg);
+      if (expanded.kind === "resync") {
+        this.logger.warn({ agentId: expanded.agentId }, "agent_patch_base_missing");
+        try {
+          this.sendSessionMessage({
+            type: "agent_patch.resync",
+            agentId: expanded.agentId,
+            ...(expanded.subscriptionId ? { subscriptionId: expanded.subscriptionId } : {}),
+          });
+        } catch {
+          // Disconnected: the new socket's subscriptions start from full snapshots.
+        }
+      }
+      if (expanded.kind !== "update") return;
+      msg = expanded.message;
+    } else if (msg.type === "agent_update") {
+      this.agentPatches.observe(msg);
+    }
     msg = this.owned.normalize(msg);
     if (
       msg.type === "providers_snapshot_update" &&
@@ -6735,9 +7995,14 @@ export class DaemonClient {
       const serverInfo = parseServerInfoStatusPayload(consumerMessage.payload);
       if (serverInfo) {
         this.lastServerInfoMessage = serverInfo;
+        if (serverInfo.features?.checkedUplink === true && this.config.compressUplink !== false) {
+          this.uplinkEncoder ??= new CheckedJsonFrameEncoder();
+        }
         if (this.connectionState.status === "connecting") {
           this.resetConnectTimeout();
           this.reconnectAttempt = 0;
+          this.fastRetryUntil = 0;
+          this.immediateReconnect = false;
           this.updateConnectionState({ status: "connected" }, { event: "HELLO_SERVER_INFO" });
           this.startLivenessHeartbeat();
           this.owned.restore(serverInfo, {

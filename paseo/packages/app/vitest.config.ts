@@ -62,6 +62,8 @@ export default defineConfig({
           "react-native-web",
           "react-native-gesture-handler",
           "react-native-keyboard-controller",
+          // Its CJS build requires the real (Flow) react-native; inlined, the alias applies.
+          "@floating-ui/react-native",
         ],
       },
     },
@@ -83,6 +85,9 @@ export default defineConfig({
       "react-native-keyboard-controller",
     ],
   },
+  // Expo's tsconfig sets jsx "react-native", so esbuild would emit classic React.createElement
+  // calls; module-level JSX (icons built at import) then throws "React is not defined".
+  esbuild: { jsx: "automatic" },
   // The globals a React Native bundler defines, which esbuild is no longer there to supply for
   // the package excluded above.
   define: {
@@ -122,6 +127,15 @@ export default defineConfig({
         replacement: path.resolve(
           resolvePackageEntry("react-native-keyboard-controller"),
           "lib/module/index.js",
+        ),
+      },
+      // Same for floating-ui's React Native build: its CJS entry requires the real (Flow)
+      // react-native, which Node cannot parse.
+      {
+        find: /^@floating-ui\/react-native$/,
+        replacement: path.resolve(
+          resolvePackageEntry("@floating-ui/react-native"),
+          "dist/floating-ui.react-native.esm.js",
         ),
       },
       // The CJS entry bypasses Vite's React Native alias and web-extension resolution.

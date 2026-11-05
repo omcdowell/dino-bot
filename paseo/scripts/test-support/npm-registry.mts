@@ -68,8 +68,11 @@ export async function startNpmRegistry(packages: FixturePackage[]) {
       const { stdout } = await execCommand("npm", ["pack", "--ignore-scripts", "--json"], {
         cwd: directory,
       });
-      const packed: Array<{ filename: string }> = JSON.parse(stdout);
-      const artifact = await readFile(path.join(directory, packed[0].filename));
+      // npm <= 11 prints an array of packs; npm 12 an object keyed by package name.
+      const parsed: Array<{ filename: string }> | Record<string, { filename: string }> =
+        JSON.parse(stdout);
+      const [packed] = Array.isArray(parsed) ? parsed : Object.values(parsed);
+      const artifact = await readFile(path.join(directory, packed.filename));
       const artifactPath = `/artifacts/${index}.tgz`;
       artifacts.set(artifactPath, artifact);
       const published = {

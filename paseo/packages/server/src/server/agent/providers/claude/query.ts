@@ -1,5 +1,6 @@
 import { type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { query, type Options, type Query, type SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
+import type { Options, Query, SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
+import type * as ClaudeSdk from "@anthropic-ai/claude-agent-sdk";
 
 import {
   createProviderEnv,
@@ -13,8 +14,27 @@ import { spawnProcess } from "../../../../utils/spawn.js";
 // must stay shared between production and tests so Windows .cmd/.bat handling cannot
 // diverge from the daemon path.
 
+type ClaudeSdkModule = typeof ClaudeSdk;
+
+let claudeSdk: ClaudeSdkModule | null = null;
+let claudeSdkLoad: Promise<ClaudeSdkModule> | null = null;
+
+/**
+ * The SDK module costs ~45 MB of daemon memory once loaded, and a daemon that never runs a
+ * Claude agent never needs it: load it when the first Claude query or rewind starts.
+ */
+export function loadClaudeSdk(): Promise<ClaudeSdkModule> {
+  claudeSdkLoad ??= import("@anthropic-ai/claude-agent-sdk").then((sdk) => {
+    claudeSdk = sdk;
+    return sdk;
+  });
+  return claudeSdkLoad;
+}
+
 export type ClaudeOptions = Options;
-export type ClaudeQueryInput = Parameters<typeof query>[0] & { options: ClaudeOptions };
+export type ClaudeQueryInput = Parameters<ClaudeSdkModule["query"]>[0] & {
+  options: ClaudeOptions;
+};
 export type ClaudeQueryFactory = (input: ClaudeQueryInput) => Query;
 
 export interface ClaudeQueryContext {
@@ -110,8 +130,10 @@ function applyRuntimeSettingsToClaudeOptions(
   };
 }
 
+/** Without a queryFactory, loadClaudeSdk() must have resolved first. */
 export function claudeQuery(input: ClaudeQueryInput, context: ClaudeQueryContext = {}): Query {
-  const launchQuery = context.queryFactory ?? query;
+  const launchQuery = context.queryFactory ?? claudeSdk?.query;
+  if (!launchQuery) throw new Error("Claude SDK is not loaded; await loadClaudeSdk() first");
   return launchQuery({
     ...input,
     options: applyRuntimeSettingsToClaudeOptions(input.options, context),

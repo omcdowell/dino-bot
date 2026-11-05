@@ -657,7 +657,7 @@ const styles = StyleSheet.create((theme) => ({
       : {}),
   },
   editorInputFocused: {
-    borderColor: theme.colors.accent,
+    borderColor: theme.colors.accentText,
   },
   editorActions: {
     flexDirection: "row",

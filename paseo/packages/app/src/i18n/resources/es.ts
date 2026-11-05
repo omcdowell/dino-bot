@@ -346,6 +346,7 @@ export const es: TranslationResources = {
       closeImage: "Cerrar imagen",
       imageLoadFailed: "No se pudo cargar la imagen",
       imageUnavailable: "Imagen no disponible",
+      downloadImage: "Descargar imagen",
       imagePreviewUnavailable: "Vista previa de la imagen no disponible.",
       imagePreviewLoadFailed: "No se puede cargar la vista previa de la imagen.",
       review: "Revisión",
@@ -633,6 +634,8 @@ export const es: TranslationResources = {
         trigger: "Cambiar pestañas ({{count}}abierto)",
         title: "Cambiar pestaña",
         searchPlaceholder: "Pestañas de búsqueda",
+        groupLabel: "Pestañas",
+        groupCount: "{{count}} abiertas",
       },
       menu: {
         openFor: "Menú abierto para{{label}}",
@@ -1689,6 +1692,11 @@ export const es: TranslationResources = {
     retrying: "Reintentando...",
     noMatches: "Ningún modelo coincide con tu búsqueda",
     noMatchesForQuery: "Ningún modelo coincide con «{{query}}»",
+    scopeScoped: "Selección",
+    scopeAll: "Todos",
+    scopeAdd: "Añadir a la selección",
+    scopeRemove: "Quitar de la selección",
+    scopeEmpty: "La selección está vacía. Marca modelos con la casilla en Todos.",
     searchAllPlaceholder: "Buscar en todos los modelos...",
     searchPlaceholder: "Buscar modelos...",
     openProviderSettings: "Abrir configuración de{{provider}}",
@@ -2151,6 +2159,8 @@ export const es: TranslationResources = {
     general: {
       title: "General",
       sending: "Envío",
+      network: en.settings.general.network,
+      meteredNetwork: en.settings.general.meteredNetwork,
       browserData: {
         title: "Datos del navegador",
         siteData: "Cookies y datos de sitios",
@@ -2869,4 +2879,6 @@ export const es: TranslationResources = {
       },
     },
   },
+  delivery: en.delivery,
+  network: en.network,
 };

@@ -38,8 +38,12 @@ export function HostConfirmationSheet() {
           showBorder
         />
         <DetailRow
-          label={t("pairing.hostConfirmation.relayLabel")}
-          value={pending.relayEndpoint}
+          label={
+            pending.relayEndpoint.startsWith("direct ")
+              ? "Address"
+              : t("pairing.hostConfirmation.relayLabel")
+          }
+          value={pending.relayEndpoint.replace(/^direct /, "")}
           testID="host-confirmation-relay"
           showBorder
         />

@@ -578,6 +578,49 @@ test("routes plugin requests and releases its owned catalog subscription on clea
   expect(releasePluginSubscription).toHaveBeenCalledOnce();
 });
 
+test("plugin catalog: bundles the app already has are not resent; older apps get every bundle", async () => {
+  const messages: SessionOutboundMessage[] = [];
+  const bundle = "bots-client-bundle".repeat(1000);
+  const pluginRuntime = {
+    catalog: () => [
+      { id: "apns", clientBundle: "apns-bundle" },
+      { id: "bots", clientBundle: bundle },
+    ],
+  } as unknown as NonNullable<SessionOptions["pluginRuntime"]>;
+  const session = createSessionForTest({ messages, pluginRuntime });
+  const catalogPayload = () => {
+    const message = messages.pop();
+    if (message?.type !== "plugin.catalog.get.response") throw new Error("no catalog response");
+    return message.payload.plugins;
+  };
+
+  await session.handleMessage({ type: "plugin.catalog.get.request", requestId: "old" });
+  expect(catalogPayload()).toEqual([
+    { id: "apns", clientBundle: "apns-bundle" },
+    { id: "bots", clientBundle: bundle },
+  ]);
+
+  await session.handleMessage({
+    type: "plugin.catalog.get.request",
+    requestId: "first",
+    knownBundles: [],
+  });
+  const first = catalogPayload();
+  expect(first.map((entry) => entry.clientBundle)).toEqual(["apns-bundle", bundle]);
+  const botsHash = first[1]?.clientBundleHash;
+  expect(botsHash).toEqual(expect.any(String));
+
+  await session.handleMessage({
+    type: "plugin.catalog.get.request",
+    requestId: "next",
+    knownBundles: [{ id: "bots", hash: botsHash! }],
+  });
+  expect(catalogPayload()).toEqual([
+    { id: "apns", clientBundle: "apns-bundle", clientBundleHash: first[0]?.clientBundleHash },
+    { id: "bots", clientBundle: "", clientBundleHash: botsHash, clientBundleUnchanged: true },
+  ]);
+});
+
 describe("workspace label subscriptions", () => {
   type LabelSubscription = Awaited<ReturnType<WorkspaceLabelService["subscribe"]>>;
   type LabelChange = Parameters<Parameters<WorkspaceLabelService["subscribe"]>[0]["onChange"]>[0];

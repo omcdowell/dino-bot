@@ -158,6 +158,12 @@ export interface ProcessTimelineResponseInput {
   hasActiveInitDeferred: boolean;
   initRequestDirection: InitRequestDirection;
   sendingClientMessageIds: readonly string[];
+  /**
+   * The current rows were painted from a device cache saved without a cursor. They cover nothing,
+   * so a tail page replaces them (keeping this device's unconfirmed prompts) instead of being
+   * appended after them.
+   */
+  paintedWithoutCursor?: boolean;
 }
 
 export interface ProcessTimelineResponseOutput {
@@ -367,6 +373,23 @@ function deriveResumeTailPolicy(input: {
     return { kind: "append" };
   }
   return { kind: "replace", preserveContinuity: true };
+}
+
+// Rows painted from a cache saved without a cursor cover nothing: a tail page replaces them,
+// keeping this device's unconfirmed prompts, instead of being appended after them.
+function deriveTailPolicyOverPaintedRows(
+  input: Parameters<typeof deriveResumeTailPolicy>[0] & { paintedWithoutCursor: boolean },
+): ResumeTailPolicy {
+  const { paintedWithoutCursor, ...resume } = input;
+  if (
+    paintedWithoutCursor &&
+    resume.direction === "tail" &&
+    !resume.bootstrapReplace &&
+    !resume.currentCursor
+  ) {
+    return { kind: "replace", preserveContinuity: true };
+  }
+  return deriveResumeTailPolicy(resume);
 }
 
 function shouldPreserveReplacementContinuity(input: {
@@ -610,8 +633,12 @@ function acceptIncrementalTimelineUnits(args: {
     };
   }
 
+  // A page asked for with an older cursor (a parked or retried catch-up, or one that crossed live
+  // rows on the wire) also carries rows this client already holds. Applying those again appends
+  // them a second time, so only rows that reach past the cursor are applied; a row that straddles
+  // the cursor is reconciled with its live prefix.
   return {
-    acceptedUnits: timelineUnits,
+    acceptedUnits: timelineUnits.filter((unit) => unit.seqEnd > currentCursor.endSeq),
     cursor: { ...currentCursor, endSeq: responseEndSeq },
     gapCursor: null,
   };
@@ -1295,7 +1322,8 @@ export function processTimelineResponse(
   });
   const replace = bootstrapPolicy.replace;
   const sideEffects: TimelineReducerSideEffect[] = [];
-  const resumeTailPolicy = deriveResumeTailPolicy({
+  const resumeTailPolicy = deriveTailPolicyOverPaintedRows({
+    paintedWithoutCursor: input.paintedWithoutCursor === true,
     direction: payload.direction,
     reset: payload.reset,
     epoch: payload.epoch,
@@ -1479,7 +1507,16 @@ export interface CreateAgentStreamReducerQueueInput {
   handleSideEffects: (agentId: string, sideEffects: AgentStreamReducerSideEffect[]) => void;
   scheduleFlush: (callback: () => void) => number;
   cancelFlush: (id: number) => void;
+  /**
+   * Hold events while the timeline has no authoritative baseline (cold, or painted from the device
+   * cache) instead of drawing them. They are applied, in arrival order and through the sequence
+   * gate, on the first flush after the baseline lands.
+   */
+  holdWithoutBaseline?: boolean;
 }
+
+// Held events per agent. Past this the oldest go; the sequence gate then sees a gap and fetches.
+const MAX_HELD_STREAM_EVENTS = 5_000;
 
 function processTimelineSequencingGate(input: {
   event: AgentStreamEventPayload;
@@ -1727,9 +1764,12 @@ export function createAgentStreamReducerQueue(
     scheduledFlushId = null;
   };
 
+  const heldByAgentId = new Map<string, AgentStreamReducerEvent[]>();
+
   const flushAgent = (agentId: string) => {
-    const events = pendingByAgentId.get(agentId);
-    if (!events || events.length === 0) {
+    const pending = pendingByAgentId.get(agentId) ?? [];
+    const held = heldByAgentId.get(agentId) ?? [];
+    if (pending.length === 0 && held.length === 0) {
       return;
     }
     pendingByAgentId.delete(agentId);
@@ -1737,9 +1777,19 @@ export function createAgentStreamReducerQueue(
       cancelScheduledFlush();
     }
 
+    const events = held.length > 0 ? [...held, ...pending] : pending;
+    const snapshot = input.getSnapshot(agentId);
+    if (input.holdWithoutBaseline && snapshot.hasAuthoritativeBaseline === false) {
+      // Live rows have no place yet: the painted rows are not a base to merge into, and drawing
+      // them over it misorders the chat and saves rows without a cursor.
+      heldByAgentId.set(agentId, events.slice(-MAX_HELD_STREAM_EVENTS));
+      return;
+    }
+    heldByAgentId.delete(agentId);
+
     const result = processAgentStreamEvents({
       events,
-      ...input.getSnapshot(agentId),
+      ...snapshot,
     });
 
     input.commit(agentId, result, events);
@@ -1784,6 +1834,7 @@ export function createAgentStreamReducerQueue(
       } else {
         pendingByAgentId.clear();
       }
+      heldByAgentId.clear();
     },
   };
 }
@@ -1949,5 +2000,6 @@ export function createSessionAgentStreamReducerQueue(
     },
     scheduleFlush: scheduleAgentStreamReducerFlush,
     cancelFlush: cancelAgentStreamReducerFlush,
+    holdWithoutBaseline: true,
   });
 }

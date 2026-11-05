@@ -1,7 +1,8 @@
 import { AppDiagnosticSheet } from "@/components/app-diagnostic-sheet";
 import { isElectronRuntime } from "@/desktop/host";
 import { useAppDiagnosticStore } from "@/diagnostics/store";
-import { resolveAppVersion } from "@/utils/app-version";
+import { resolveDisplayVersion, resolveNativeBuildNumber } from "@/utils/app-version";
+import { formatDiagnosticAppVersion } from "@/utils/app-version-label";
 
 export function AppDiagnosticHost() {
   const visible = useAppDiagnosticStore((state) => state.visible);
@@ -11,7 +12,7 @@ export function AppDiagnosticHost() {
     <AppDiagnosticSheet
       visible={visible}
       onClose={close}
-      appVersion={resolveAppVersion()}
+      appVersion={formatDiagnosticAppVersion(resolveDisplayVersion(), resolveNativeBuildNumber())}
       isDesktopApp={isElectronRuntime()}
     />
   );

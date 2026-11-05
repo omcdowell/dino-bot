@@ -4,6 +4,7 @@ import {
   ConnectionOfferSchema,
   decodeOfferFragmentPayload,
   parseConnectionOfferFromUrl,
+  parsePairingOfferFromUrl,
 } from "./connection-offer.js";
 
 function encodeBase64UrlNoPadUtf8(input: string): string {
@@ -75,5 +76,47 @@ describe("connection offer", () => {
 
   it("returns null when the URL has no offer fragment", () => {
     expect(parseConnectionOfferFromUrl("https://app.paseo.sh/pair")).toBeNull();
+  });
+
+  it("parses a direct (v3) offer with its endpoints and password", () => {
+    const offer = {
+      v: 3,
+      serverId: "server-123",
+      daemonPublicKeyB64: "pubkey",
+      endpoints: ["box.tail1.ts.net:6767", "100.64.0.7:6767", "192.168.1.20:6767"],
+      password: "secret",
+    };
+    const encoded = encodeBase64UrlNoPadUtf8(JSON.stringify(offer));
+
+    expect(parsePairingOfferFromUrl(`paseo://pair#offer=${encoded}`)).toEqual({
+      kind: "direct",
+      offer,
+    });
+  });
+
+  it("still reads relay (v2) offers through the pairing parser", () => {
+    const offer = {
+      v: 2,
+      serverId: "server-123",
+      daemonPublicKeyB64: "pubkey",
+      relay: { endpoint: "relay.paseo.sh:443" },
+    };
+    const encoded = encodeBase64UrlNoPadUtf8(JSON.stringify(offer));
+
+    expect(parsePairingOfferFromUrl(`https://app.paseo.sh/#offer=${encoded}`)).toEqual({
+      kind: "relay",
+      offer,
+    });
+  });
+
+  it("rejects a direct offer without endpoints, and keeps v2 parsing strict", () => {
+    const empty = encodeBase64UrlNoPadUtf8(
+      JSON.stringify({ v: 3, serverId: "s", daemonPublicKeyB64: "k", endpoints: [] }),
+    );
+    expect(() => parsePairingOfferFromUrl(`paseo://pair#offer=${empty}`)).toThrow();
+    const direct = encodeBase64UrlNoPadUtf8(
+      JSON.stringify({ v: 3, serverId: "s", daemonPublicKeyB64: "k", endpoints: ["h:1"] }),
+    );
+    expect(() => parseConnectionOfferFromUrl(`paseo://pair#offer=${direct}`)).toThrow();
   });
 });

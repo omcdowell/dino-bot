@@ -6,8 +6,10 @@ import { useDictationAudioSource } from "@/hooks/use-dictation-audio-source";
 import { generateMessageId } from "@/types/stream";
 import { AttemptGuard } from "@/utils/attempt-guard";
 import {
+  DICTATION_INTERRUPTED_MESSAGE,
   DURATION_TICK_MS,
   PCM_DICTATION_FORMAT,
+  resolveInterruptedDictation,
   toError,
   type DictationStatus,
   type UseDictationOptions,
@@ -226,20 +228,17 @@ export function useDictation(options: UseDictationOptions): UseDictationResult {
     [reportError, stopDurationTracking],
   );
 
+  // Set below, once confirm/cancel exist; the audio source only needs a stable entry point.
+  const onAudioInterruptionRef = useRef<() => void>(() => undefined);
   const audio = useDictationAudioSource({
-    onPcmSegment: (audioData) => {
+    onAudioSegment: (audioData) => {
       senderRef.current?.enqueueSegment(audioData);
     },
     onError: (err) => {
       onErrorRef.current?.(err);
     },
     onInterruption: () => {
-      try {
-        senderRef.current?.cancel();
-      } catch {
-        // no-op
-      }
-      handleDictationFailure(new Error("Dictation was interrupted by another audio source."));
+      onAudioInterruptionRef.current();
     },
   });
   const audioStopRef = useRef(audio.stop);
@@ -272,6 +271,11 @@ export function useDictation(options: UseDictationOptions): UseDictationResult {
     clearStreamingState();
 
     try {
+      // COMPAT(dictationOpus): Opus (~2 KB/s) only for a daemon that decodes it and a device
+      // that encodes it; otherwise PCM16 (32 KB/s), which every daemon reads. Offline at start
+      // means the daemon is unknown, so PCM.
+      const format = audio.prepareFormat(client?.supportsDictationOpus?.() === true);
+      senderRef.current?.setFormat(format);
       await audio.start();
       isRecordingRef.current = true;
       setIsRecording(true);
@@ -282,7 +286,7 @@ export function useDictation(options: UseDictationOptions): UseDictationResult {
         await startNewStream("start");
       }
     } catch (err) {
-      await audio.stop().catch(() => undefined);
+      await audio.stop({ discard: true }).catch(() => undefined);
       stopDurationTracking();
       isRecordingRef.current = false;
       setIsRecording(false);
@@ -322,7 +326,7 @@ export function useDictation(options: UseDictationOptions): UseDictationResult {
       } catch {
         // no-op
       }
-      await audio.stop();
+      await audio.stop({ discard: true });
     } catch (err) {
       reportError(err, "Failed to cancel dictation");
     } finally {
@@ -389,6 +393,45 @@ export function useDictation(options: UseDictationOptions): UseDictationResult {
     stopDurationTracking,
     ensureFinalTranscript,
   ]);
+
+  const stopAfterInterruption = useCallback(async () => {
+    if (!isRecordingRef.current || isProcessingRef.current) {
+      return;
+    }
+    if (actionGateRef.current.confirming || actionGateRef.current.cancelling) {
+      return;
+    }
+    const outcome = resolveInterruptedDictation({
+      hasCapturedAudio: senderRef.current?.hasSegments() ?? false,
+      canFinalize: canConfirm ? canConfirm() : true,
+    });
+    if (outcome === "discard") {
+      await cancelDictation();
+      return;
+    }
+    if (outcome === "finalize") {
+      await confirmDictation();
+      return;
+    }
+    // Daemon unreachable: stop, keep the captured audio and offer the usual retry.
+    stopDurationTracking();
+    await audio.stop().catch(() => undefined);
+    handleDictationFailure(new Error(DICTATION_INTERRUPTED_MESSAGE));
+  }, [
+    audio,
+    canConfirm,
+    cancelDictation,
+    confirmDictation,
+    handleDictationFailure,
+    stopDurationTracking,
+  ]);
+  useEffect(() => {
+    onAudioInterruptionRef.current = () => {
+      void stopAfterInterruption().catch((err) => {
+        reportError(err, "Failed to stop dictation after an audio interruption");
+      });
+    };
+  }, [reportError, stopAfterInterruption]);
 
   const retryFailedDictation = useCallback(async () => {
     if (!senderRef.current?.hasSegments()) {

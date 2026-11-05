@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@getpaseo/protocol/agent-message";
 import type {
   AgentProvider,
+  AgentTimelineImage,
   AgentTimelineItem,
   JsonValue,
   ToolCallDetail,
@@ -89,6 +90,52 @@ export type StreamItem =
   | PluginTimelineStreamItem;
 
 export type UserMessageImageAttachment = AttachmentMetadata;
+/**
+ * A local attachment (this device sent it and still has the file) or a daemon reference
+ * (chatImages: the canonical row, on reload or another device).
+ */
+/**
+ * A daemon image reference (chatImages). `local` is the copy this device sent, kept for an
+ * instant preview; it is never persisted.
+ */
+export type ChatImageReference = AgentTimelineImage & { local?: UserMessageImageAttachment };
+export type UserMessageImage = UserMessageImageAttachment | ChatImageReference;
+
+export function isChatImageReference(image: UserMessageImage): image is ChatImageReference {
+  return "source" in image && !("storageKey" in image);
+}
+
+/**
+ * Images for a user message seen both as the local optimistic row and as the daemon's canonical
+ * row: the daemon's references (so the row persists and works on other devices), each paired
+ * with the local copy at the same position for an instant preview.
+ */
+export function mergeUserMessageImages(
+  first: UserMessageImage[] | undefined,
+  second: UserMessageImage[] | undefined,
+): UserMessageImage[] | undefined {
+  const isRefs = (images: UserMessageImage[] | undefined): images is ChatImageReference[] =>
+    !!images?.length && images.every(isChatImageReference);
+  let refs: ChatImageReference[] | null = null;
+  let other: UserMessageImage[] | undefined;
+  if (isRefs(first)) {
+    refs = first;
+    other = second;
+  } else if (isRefs(second)) {
+    refs = second;
+    other = first;
+  }
+  if (!refs) return first?.length ? first : second;
+  const locals = other?.filter(
+    (image): image is UserMessageImageAttachment => !isChatImageReference(image),
+  );
+  if (!locals?.length || locals.length !== refs.length) return refs;
+  const merged: ChatImageReference[] = [];
+  for (const [index, ref] of refs.entries()) {
+    merged.push(ref.local ? ref : { ...ref, local: locals[index] });
+  }
+  return merged;
+}
 
 export interface UserMessageItem {
   kind: "user_message";
@@ -99,7 +146,7 @@ export interface UserMessageItem {
   timelineCursor?: TimelinePosition;
   text: string;
   timestamp: Date;
-  images?: UserMessageImageAttachment[];
+  images?: UserMessageImage[];
   attachments?: AgentAttachment[];
 }
 
@@ -111,7 +158,7 @@ export interface UserMessageInput {
   timelineCursor?: TimelinePosition;
   text: string;
   timestamp: Date;
-  images?: UserMessageImageAttachment[];
+  images?: UserMessageImage[];
   attachments?: AgentAttachment[];
 }
 
@@ -256,8 +303,10 @@ function produceUserMessage(
     throw new Error("User message upsert matched a non-user row");
   }
   const presentation = presentationPolicy === "incoming" ? incoming : existing;
+  const fallback = presentation === incoming ? existing : incoming;
   const merged = createUserMessage({
     ...presentation,
+    images: mergeUserMessageImages(presentation.images, fallback.images),
     clientMessageId: incoming.clientMessageId ?? existing.clientMessageId,
     messageId: incoming.messageId ?? existing.messageId,
     timelineCursor: incoming.timelineCursor ?? existing.timelineCursor,
@@ -754,6 +803,8 @@ export interface AgentToolCallData {
   error: unknown;
   detail: ToolCallDetail;
   metadata?: Record<string, unknown>;
+  /** Images the tool returned (chatImages), by reference. */
+  images?: AgentTimelineImage[];
 }
 
 export type ToolCallPayload =
@@ -892,13 +943,14 @@ function appendUserMessage(
   clientMessageId?: string,
   timelineCursor?: TimelinePosition,
   turnId?: string,
+  images?: AgentTimelineImage[],
 ): StreamItem[] {
   const { chunk, hasContent } = normalizeChunk(text);
-  if (!hasContent) {
+  if (!hasContent && !images?.length) {
     return state;
   }
 
-  const chunkSeed = chunk.trim() || chunk;
+  const chunkSeed = chunk.trim() || images?.map((image) => image.id).join(":") || chunk;
   const nextItem = createUserMessage({
     id: messageId ?? createUniqueTimelineId(state, "user", chunkSeed, timestamp),
     clientMessageId,
@@ -907,6 +959,7 @@ function appendUserMessage(
     turnId,
     text: chunk,
     timestamp,
+    images,
   });
   return upsertUserMessage(state, nextItem);
 }
@@ -1214,6 +1267,7 @@ function appendAgentToolCall(input: AppendAgentToolCallInput): StreamItem[] {
       merged.payload.data.error === existing.payload.data.error &&
       merged.payload.data.detail === existing.payload.data.detail &&
       merged.payload.data.metadata === existing.payload.data.metadata &&
+      merged.payload.data.images === existing.payload.data.images &&
       merged.timelineCursor === existing.timelineCursor
     ) {
       return state;
@@ -1449,6 +1503,7 @@ function reduceTimelineToolCall(
       detail: item.detail,
       metadata: item.metadata,
       ...(item.agentMessage ? { agentMessage: item.agentMessage } : {}),
+      ...(item.images?.length ? { images: item.images } : {}),
     },
     timestamp,
     timelineCursor,
@@ -1515,6 +1570,7 @@ function reduceTimelineEvent(
           item.clientMessageId,
           timelineCursor,
           event.turnId,
+          item.images,
         ),
       );
     case "assistant_message":
@@ -1769,23 +1825,47 @@ function getActiveAssistantHeadIndex(head: StreamItem[]): number {
   return -1;
 }
 
+interface TailAssistantResume {
+  index: number;
+  assistant: AssistantMessageItem;
+  /** Prompts sent on this device after the assistant row, still waiting for the daemon. */
+  submitted: UserMessageItem[];
+}
+
 function getTailAssistantToResume(params: {
   incomingKind: StreamItem["kind"] | null;
   event: AgentStreamEventPayload;
   nextHead: StreamItem[];
-  tailAssistant: StreamItem | undefined;
-}): AssistantMessageItem | null {
+  tail: StreamItem[];
+}): TailAssistantResume | null {
   if (params.incomingKind !== "assistant_message" || params.nextHead.length !== 0) {
     return null;
   }
-  if (params.tailAssistant?.kind !== "assistant_message") {
+  // A prompt sent while the reply's last chunks are still on the wire sits after the reply in
+  // the tail. The chunks still belong to the reply above it, not to a new row below it.
+  let index = params.tail.length - 1;
+  while (index >= 0) {
+    const item = params.tail[index];
+    if (item?.kind !== "user_message" || !isUnreconciledLocalUserMessage(item)) break;
+    index -= 1;
+  }
+  const tailAssistant = params.tail[index];
+  if (tailAssistant?.kind !== "assistant_message") {
     return null;
   }
   const incomingMessageId = getIncomingAssistantMessageId(params.event);
-  if (incomingMessageId !== undefined && params.tailAssistant.messageId !== incomingMessageId) {
+  if (incomingMessageId !== undefined && tailAssistant.messageId !== incomingMessageId) {
     return null;
   }
-  return params.tailAssistant;
+  if (index < params.tail.length - 1 && tailAssistant.messageId === undefined) {
+    // Without an id, a chunk after a local prompt may be the start of the next reply.
+    return null;
+  }
+  return {
+    index,
+    assistant: tailAssistant,
+    submitted: params.tail.slice(index + 1) as UserMessageItem[],
+  };
 }
 
 /**
@@ -1864,6 +1944,10 @@ export interface ApplyStreamEventResult {
   acknowledgedClientMessageIds?: string[];
 }
 
+function hasUserMessageContent(hasText: boolean, images: readonly unknown[] | undefined): boolean {
+  return hasText || (images?.length ?? 0) > 0;
+}
+
 function applyCanonicalUserMessageEvent(params: {
   tail: StreamItem[];
   head: StreamItem[];
@@ -1875,6 +1959,8 @@ function applyCanonicalUserMessageEvent(params: {
   const { tail, head, event, timestamp, timelineCursor, unmatchedInsert = "tail" } = params;
   if (event.type !== "timeline" || event.item.type !== "user_message") return null;
   const normalized = normalizeChunk(event.item.text);
+  const images = event.item.images;
+  const hasContent = hasUserMessageContent(normalized.hasContent, images);
 
   const flushedTail = head.length > 0 ? flushHeadToTail(tail, head) : tail;
   const flushedHead = head.length > 0 ? [] : head;
@@ -1888,13 +1974,14 @@ function applyCanonicalUserMessageEvent(params: {
     timelineCursor,
     text: normalized.chunk,
     timestamp,
+    images,
   });
   if (unmatchedInsert === "head") {
     const reconciled = upsertUserMessageAcrossStream({
       tail,
       head,
       message: canonical,
-      insert: normalized.hasContent ? "head" : "none",
+      insert: hasContent ? "head" : "none",
       presentation: "existing",
     });
     const reconciledTail = canonical.clientMessageId
@@ -1922,7 +2009,7 @@ function applyCanonicalUserMessageEvent(params: {
           : [],
     };
   }
-  const reconciled = placeCanonicalUserMessageAtTail(flushedTail, canonical, normalized.hasContent);
+  const reconciled = placeCanonicalUserMessageAtTail(flushedTail, canonical, hasContent);
   const reconciledTail = canonical.clientMessageId
     ? reconcileCanonicalUserTurnMembership(
         reconciled.items,
@@ -2014,18 +2101,21 @@ export function applyStreamEvent(params: {
     flushHead();
   }
 
-  const tailAssistant = getTailAssistantToResume({
+  const tailResume = getTailAssistantToResume({
     incomingKind,
     event,
     nextHead,
-    tailAssistant: nextTail.at(-1),
+    tail: nextTail,
   });
-  if (tailAssistant) {
-    nextTail = nextTail.slice(0, -1);
-    nextHead = [tailAssistant];
+  if (tailResume) {
+    // The submitted prompts move with it and stay after it, as when they were sent mid-stream.
+    nextTail = nextTail.slice(0, tailResume.index);
+    nextHead = [tailResume.assistant];
     changedTail = true;
     changedHead = true;
   }
+  const withSubmitted = (items: StreamItem[]): StreamItem[] =>
+    tailResume && tailResume.submitted.length > 0 ? [...items, ...tailResume.submitted] : items;
 
   // For streamable kinds, apply to head
   if (incomingKind !== null && isStreamableKind(incomingKind)) {
@@ -2042,7 +2132,7 @@ export function applyStreamEvent(params: {
       nextHead = reduced;
       changedHead = true;
     }
-    return { tail: nextTail, head: nextHead, changedTail, changedHead };
+    return { tail: nextTail, head: withSubmitted(nextHead), changedTail, changedHead };
   }
 
   // For non-streamable kinds or non-timeline events, apply to tail

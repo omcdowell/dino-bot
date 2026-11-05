@@ -42,12 +42,17 @@ export function parseRelayConnectionUri(input: string): ParsedRelayConnectionUri
   }
   const endpoint = normalizeHostPort(url.host);
   const password = url.searchParams.get("password") || undefined;
+  const security = url.searchParams.get("security");
+  if (security !== null && security !== "protected") {
+    throw new Error("Relay connection URI has an unsupported security mode");
+  }
   return {
     offer: {
       v: 2,
       serverId,
       daemonPublicKeyB64: key,
       relay: { endpoint, useTls: url.searchParams.get("ssl") === "true" },
+      ...(security === "protected" ? { minimumSecurityMode: "protected" as const } : {}),
     },
     ...(password ? { password } : {}),
   };
@@ -59,6 +64,9 @@ export function serializeRelayConnectionUri(parts: ParsedRelayConnectionUri): st
   );
   url.searchParams.set("key", parts.offer.daemonPublicKeyB64);
   if (parts.offer.relay.useTls) url.searchParams.set("ssl", "true");
+  if (parts.offer.minimumSecurityMode) {
+    url.searchParams.set("security", parts.offer.minimumSecurityMode);
+  }
   if (parts.password) url.searchParams.set("password", parts.password);
   return url.toString();
 }
@@ -299,3 +307,13 @@ export function isRelayClientWebSocketUrl(url: string): boolean {
     return false;
   }
 }
+
+/**
+ * WebSocket subprotocol a client offers on a direct (non-relay) socket when it wants the same
+ * end-to-end encrypted channel the relay uses, keyed to the daemon public key from pairing.
+ * The client then sends nothing but the `e2ee_hello` handshake until the daemon has proved
+ * that key, and its credentials travel only inside the encrypted application `hello`: no bearer
+ * header and no bearer subprotocol. A daemon that does not know this subprotocol fails the
+ * handshake ("Invalid hello"), so an updated client never falls back to plaintext.
+ */
+export const DIRECT_E2EE_SUBPROTOCOL = "paseo.e2ee.v1";

@@ -142,7 +142,7 @@ function HomeTile({ icon: Icon, title, description, onPress, testID, accent }: H
   const handleHoverIn = useCallback(() => setHovered(true), []);
   const handleHoverOut = useCallback(() => setHovered(false), []);
 
-  const iconColor = accent ? theme.colors.accent : theme.colors.foregroundMuted;
+  const iconColor = accent ? theme.colors.accentText : theme.colors.foregroundMuted;
 
   const pressableStyle = useCallback(
     ({ pressed }: { pressed: boolean }) => [

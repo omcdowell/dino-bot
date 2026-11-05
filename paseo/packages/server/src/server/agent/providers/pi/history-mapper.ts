@@ -1,5 +1,11 @@
 import { mapCustomMessageToToolCall } from "../custom-message.js";
-import type { AgentStreamEvent, AgentTimelineItem, ToolCallDetail } from "../../agent-sdk-types.js";
+import { storeChatImages } from "../../chat-images/store.js";
+import type {
+  AgentStreamEvent,
+  AgentTimelineImage,
+  AgentTimelineItem,
+  ToolCallDetail,
+} from "../../agent-sdk-types.js";
 import {
   createPiExtensionHost,
   type PiExtensionEventOutput,
@@ -8,6 +14,7 @@ import {
 import type { PiAgentMessage, PiImageContent, PiTextContent } from "./rpc-types.js";
 import {
   extractTextFromToolResult,
+  extractToolResultImages,
   mapToolDetail,
   parseToolArgs,
   parseToolResult,
@@ -55,6 +62,17 @@ export function getUserMessageText(content: string | (PiTextContent | PiImageCon
     }
   }
   return textParts.join("\n\n");
+}
+
+function getUserMessageImages(
+  content: string | (PiTextContent | PiImageContent)[],
+): Array<{ data: string; mimeType: string }> {
+  if (typeof content === "string") return [];
+  return content.flatMap((block) =>
+    block.type === "image" && typeof block.data === "string"
+      ? [{ data: block.data, mimeType: block.mimeType }]
+      : [],
+  );
 }
 
 export class PiHistoryMapper {
@@ -105,7 +123,8 @@ export class PiHistoryMapper {
   private mapUserMessage(message: Extract<PiAgentMessage, { role: "user" }>): AgentStreamEvent[] {
     const text = getUserMessageText(message.content);
     this.userIndex += 1;
-    if (!text) {
+    const images = storeChatImages(getUserMessageImages(message.content));
+    if (!text && images.length === 0) {
       return [];
     }
     const userEntry = this.userEntries[this.userIndex - 1];
@@ -117,6 +136,7 @@ export class PiHistoryMapper {
           type: "user_message",
           text,
           ...(userEntry ? { messageId: userEntry.id } : {}),
+          ...(images.length > 0 ? { images } : {}),
         },
       },
     ];
@@ -235,6 +255,7 @@ export class PiHistoryMapper {
           isError: Boolean(message.isError),
           detail,
           errorText: extractTextFromToolResult(result) ?? "Tool call failed",
+          images: storeChatImages(extractToolResultImages(result)),
         }),
       },
       ...this.extensionEvents(mapping),
@@ -315,7 +336,9 @@ function toToolResultTimelineItem(input: {
   isError: boolean;
   detail: ToolCallDetail;
   errorText: string;
+  images?: AgentTimelineImage[];
 }): AgentTimelineItem {
+  const images = input.images?.length ? { images: input.images } : {};
   if (input.isError) {
     return {
       type: "tool_call",
@@ -324,6 +347,7 @@ function toToolResultTimelineItem(input: {
       status: "failed",
       detail: input.detail,
       error: input.errorText,
+      ...images,
     };
   }
   return {
@@ -333,5 +357,6 @@ function toToolResultTimelineItem(input: {
     status: "completed",
     detail: input.detail,
     error: null,
+    ...images,
   };
 }

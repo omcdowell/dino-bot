@@ -1,15 +1,15 @@
 import type { AudioEngine } from "@/audio";
 import { useMemo, useSyncExternalStore } from "react";
-import { QueryClient } from "@tanstack/react-query";
+import { hydrate, type DehydratedState } from "@tanstack/react-query";
 import { createPaseoApi } from "@getpaseo/client";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { assertPluginCompatibility } from "@getpaseo/protocol/plugin-requirements";
 import { resolveAppVersion } from "@/utils/app-version";
 import { createPluginClientRuntime } from "./client-runtime";
 import { runPluginClientBundle } from "./evaluate";
+import { PluginEventHub } from "./events";
+import { createPluginQueryClient, dehydratePersisted, type CatalogPlugin } from "./plugin-cache";
 import type { InstalledPlugin } from "./types";
-
-type CatalogPlugin = Awaited<ReturnType<DaemonClient["getPluginCatalog"]>>[number];
 
 export class PluginRegistry {
   private readonly byHost = new Map<string, InstalledPlugin[]>();
@@ -17,6 +17,9 @@ export class PluginRegistry {
   private snapshot: InstalledPlugin[] = [];
   private readonly disposed = new WeakSet<InstalledPlugin>();
   private readonly evaluationErrors = new Map<string, string>();
+  private readonly liveHosts = new Set<string>();
+  /** The daemon client each installation was made with (a cached install: the host forwarder). */
+  private readonly clients = new WeakMap<InstalledPlugin, DaemonClient>();
 
   constructor(
     private readonly dependencies: {
@@ -32,6 +35,9 @@ export class PluginRegistry {
 
   getSnapshot = (): InstalledPlugin[] => this.snapshot;
 
+  /** Whether a catalog (live or cached, even an empty one) is installed for this host. */
+  hasCatalog = (serverId: string): boolean => this.byHost.has(serverId);
+
   getEvaluationError(serverId: string, pluginId: string): string | undefined {
     return this.evaluationErrors.get(`${serverId}/${pluginId}`);
   }
@@ -43,8 +49,13 @@ export class PluginRegistry {
       replacePluginId?: string;
       client: DaemonClient;
       audio: Pick<AudioEngine, "play">;
+      /** "cache": from the device cache, before the host answered (plugin cache). */
+      source?: "live" | "cache";
+      /** Persisted plugin queries to start from, by plugin id. */
+      queries?: ReadonlyMap<string, DehydratedState>;
     },
   ): boolean {
+    const source = options.source ?? "live";
     const previous = this.byHost.get(serverId) ?? [];
     const previousTimelineBundles = previous
       .filter((plugin) => plugin.timelineTransformers.length > 0)
@@ -55,15 +66,33 @@ export class PluginRegistry {
           plugin.id !== options.replacePluginId &&
           plugin.id === entry.id &&
           plugin.clientBundle === entry.clientBundle &&
-          plugin.requirements?.paseo === entry.requirements?.paseo,
+          plugin.requirements?.paseo === entry.requirements?.paseo &&
+          this.canKeep(plugin, source, options.client),
       );
       return existing ? [existing] : [];
     });
+    for (const plugin of preserved) {
+      if (plugin.source !== "cache" || source !== "live") continue;
+      // The live catalog confirms a cached install: it stays (no second evaluation, no remount),
+      // its calls already follow the host's live client, and its cached data refreshes.
+      plugin.source = "live";
+      this.clients.set(plugin, options.client);
+      void plugin.queryClient.invalidateQueries();
+    }
     const removed = previous.filter((plugin) => !preserved.includes(plugin));
-    if (removed.length > 0) {
-      this.byHost.set(serverId, preserved);
+    // Replacements start from the persisted data of what they replace.
+    const carried = new Map<string, DehydratedState>();
+    for (const plugin of removed) carried.set(plugin.id, dehydratePersisted(plugin.queryClient));
+    // Cached installs stay on screen until their replacements are published (no gap); live ones
+    // are torn down before their replacement is evaluated.
+    const removedNow = removed.filter((plugin) => plugin.source !== "cache");
+    if (removedNow.length > 0) {
+      this.byHost.set(
+        serverId,
+        previous.filter((plugin) => !removedNow.includes(plugin)),
+      );
       this.publish();
-      for (const plugin of removed) this.dispose(plugin);
+      for (const plugin of removedNow) this.dispose(plugin);
     }
     const installed = catalog.flatMap((entry) => {
       const key = `${serverId}/${entry.id}`;
@@ -82,12 +111,20 @@ export class PluginRegistry {
         installation = {
           lifetime: new AbortController(),
           paseo: createPaseoApi(client),
-          invoke: (method, input) => client.invokePluginRpc(entry.id, method, input),
+          // A confirmed cached install calls the live client directly (see `installCatalog`).
+          invoke: (method, input) =>
+            (installation ? (this.clients.get(installation) ?? client) : client).invokePluginRpc(
+              entry.id,
+              method,
+              input,
+            ),
           id: entry.id,
           serverId,
           clientBundle: entry.clientBundle,
           requirements: entry.requirements,
-          queryClient: new QueryClient(),
+          queryClient: createPluginQueryClient(),
+          source,
+          events: new PluginEventHub(),
           cleanup: () => undefined,
           surfaces: [],
           settingsScreens: [],
@@ -101,6 +138,10 @@ export class PluginRegistry {
           timelineTransformers: [],
           timelineRenderers: [],
         };
+        this.clients.set(installation, client);
+        const seed = options.queries?.get(entry.id) ?? carried.get(entry.id);
+        if (seed) hydrate(installation.queryClient, seed);
+        installation.events?.setLive(this.liveHosts.has(serverId));
         const runtime = this.dependencies.createRuntime(installation, options.audio);
         const evaluated = runPluginClientBundle(entry.id, entry.clientBundle, runtime, () =>
           this.publish(),
@@ -123,8 +164,11 @@ export class PluginRegistry {
         void installation?.paseo
           .dispose()
           .catch((failure) => console.warn(`[Plugins] API cleanup failed for ${key}`, failure));
-        this.evaluationErrors.set(key, error instanceof Error ? error.message : String(error));
-        console.warn(`[Plugins] Failed to evaluate ${serverId}/${entry.id}`, error);
+        // A cached bundle that fails is skipped quietly; the live catalog installs (or reports) it.
+        if (source === "live") {
+          this.evaluationErrors.set(key, error instanceof Error ? error.message : String(error));
+        }
+        console.warn(`[Plugins] Failed to evaluate ${source} ${serverId}/${entry.id}`, error);
         return [];
       }
     });
@@ -136,6 +180,7 @@ export class PluginRegistry {
     }
     this.byHost.set(serverId, installed);
     this.publish();
+    for (const plugin of removed) if (plugin.source === "cache") this.dispose(plugin);
     const installedTimelineBundles = installed
       .filter((plugin) => plugin.timelineTransformers.length > 0)
       .map((plugin) => `${plugin.id}\0${plugin.clientBundle}`);
@@ -145,7 +190,39 @@ export class PluginRegistry {
     );
   }
 
+  /**
+   * A live catalog keeps an installation only if it was made with the same client (its calls and
+   * subscriptions are bound to it), or if it is a cached install, whose calls follow the host.
+   */
+  private canKeep(
+    plugin: InstalledPlugin,
+    source: "live" | "cache",
+    client: DaemonClient,
+  ): boolean {
+    if (source === "cache") return plugin.source === "cache";
+    return plugin.source === "cache" || this.clients.get(plugin) === client;
+  }
+
+  /** pluginEvents: deliver one pushed event to the plugin installed from this host. */
+  dispatchEvent(serverId: string, pluginId: string, name: string, data: unknown): void {
+    this.byHost
+      .get(serverId)
+      ?.find((plugin) => plugin.id === pluginId)
+      ?.events?.dispatch(name, data);
+  }
+
+  /** pluginEvents: whether this host is pushing plugin events to this app right now. */
+  setEventsLive(serverId: string, live: boolean): void {
+    this.liveHosts[live ? "add" : "delete"](serverId);
+    for (const plugin of this.byHost.get(serverId) ?? []) plugin.events?.setLive(live);
+  }
+
+  isEventsLive(serverId: string): boolean {
+    return this.liveHosts.has(serverId);
+  }
+
   removeHost(serverId: string): void {
+    this.liveHosts.delete(serverId);
     const installed = this.byHost.get(serverId);
     if (!installed) return;
     for (const plugin of installed) this.dispose(plugin);
@@ -161,6 +238,7 @@ export class PluginRegistry {
     this.disposed.add(plugin);
     plugin.lifetime.abort();
     plugin.queryClient.clear();
+    plugin.events?.clear();
     try {
       void Promise.resolve(plugin.cleanup()).catch((error) => {
         console.warn(`[Plugins] Cleanup failed for ${plugin.serverId}/${plugin.id}`, error);

@@ -78,6 +78,13 @@ const manifests = {
     singleton: false,
     resourceKey: () => "pull_request",
   },
+  network_status: {
+    kind: "network_status",
+    supportedHosts: ["main", "explorer"],
+    showCloseButton: true,
+    singleton: true,
+    resourceKey: () => "network_status",
+  },
   file: {
     kind: "file",
     supportedHosts: ["main", "explorer"],

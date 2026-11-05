@@ -78,7 +78,8 @@ function chunkBytes(data: string): Buffer | null {
 }
 
 export class JsonlFrameDecoder {
-  private lineBuffer = "";
+  /** Pieces of the current, not yet terminated line. Joined once, when its newline arrives. */
+  private pendingLine: string[] = [];
   private assembly: ChunkAssembly | null = null;
 
   constructor(
@@ -88,15 +89,20 @@ export class JsonlFrameDecoder {
     },
   ) {}
 
+  // Scan only the new text: rescanning the buffered prefix on every read made one long
+  // line (a 60+ MB Pi get_messages reply) quadratic to decode.
   write(text: string): void {
-    this.lineBuffer += text;
-    let newline = this.lineBuffer.indexOf("\n");
+    let start = 0;
+    let newline = text.indexOf("\n");
     while (newline !== -1) {
-      const line = this.lineBuffer.slice(0, newline).replace(/\r$/, "");
-      this.lineBuffer = this.lineBuffer.slice(newline + 1);
+      this.pendingLine.push(text.slice(start, newline));
+      const line = this.pendingLine.join("").replace(/\r$/, "");
+      this.pendingLine = [];
       if (line.trim()) this.consumeLine(line);
-      newline = this.lineBuffer.indexOf("\n");
+      start = newline + 1;
+      newline = text.indexOf("\n", start);
     }
+    if (start < text.length) this.pendingLine.push(text.slice(start));
   }
 
   private consumeLine(line: string): void {

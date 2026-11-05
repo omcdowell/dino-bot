@@ -13,6 +13,9 @@ import { isStaleProviderSessionError } from "./stale-provider-session-error.js";
 import { getParentAgentIdFromLabels } from "@getpaseo/protocol/agent-labels";
 import type { ActiveTurnBehavior } from "@getpaseo/protocol/messages";
 
+/** How a dispatched prompt meets a running turn. "queue" is resolved before dispatch. */
+export type RunActiveTurnBehavior = Exclude<ActiveTurnBehavior, "queue">;
+
 export type AgentUnarchiveController = Pick<AgentManager, "notifyAgentState" | "unarchiveSnapshot">;
 
 export type AgentRunController = Pick<
@@ -31,7 +34,7 @@ export interface StartAgentRunOptions {
   /** Called after selecting the run, before consuming its events. */
   onDispatch?: (disposition: PromptDispatchDisposition) => void;
   replaceRunning?: boolean;
-  activeTurnBehavior?: ActiveTurnBehavior;
+  activeTurnBehavior?: RunActiveTurnBehavior;
   runOptions?: AgentRunOptions;
   /** Ask the provider to deny permissions blocking this steer. */
   clearPendingPermissions?: boolean;
@@ -221,7 +224,7 @@ export interface SendPromptToAgentParams {
   prompt: AgentPromptInput;
   source?: AgentPromptSource;
   messageId?: string;
-  activeTurnBehavior?: ActiveTurnBehavior;
+  activeTurnBehavior?: RunActiveTurnBehavior;
   runOptions?: AgentRunOptions;
   /** Optional mode to set on the agent before the run starts. */
   sessionMode?: string;

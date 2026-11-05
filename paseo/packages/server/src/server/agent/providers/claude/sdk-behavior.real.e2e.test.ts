@@ -11,7 +11,7 @@ import {
   getRealProviderRuntimeSettings,
 } from "../../../daemon-e2e/real-provider-test-config.js";
 import { findExecutable } from "../../../../executable-resolution/executable-resolution.js";
-import { claudeQuery } from "./query.js";
+import { claudeQuery, loadClaudeSdk } from "./query.js";
 
 class Pushable<T> implements AsyncIterable<T> {
   private queue: T[] = [];
@@ -107,6 +107,7 @@ describe("Claude SDK direct behavior", () => {
     const claudeBinary = await findExecutable("claude");
 
     // Use same options as the Claude provider
+    await loadClaudeSdk();
     const q = claudeQuery(
       {
         prompt: input,

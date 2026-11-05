@@ -9,6 +9,7 @@ interface FakeFinish {
 interface FakeStart {
   dictationId: string;
   format: string;
+  resume?: boolean;
 }
 interface FakeChunk {
   dictationId: string;
@@ -42,8 +43,22 @@ class FakeDaemonClient {
     return this.rawMessageListeners.size;
   }
 
-  async startDictationStream(dictationId: string, format: string): Promise<void> {
-    this.starts.push({ dictationId, format });
+  /** What the daemon answers a start with; undefined = an old client/daemon (void, fresh). */
+  startAck: ((start: FakeStart) => { ackSeq: number; resumed: boolean }) | undefined;
+  supportsOpus = false;
+
+  async startDictationStream(
+    dictationId: string,
+    format: string,
+    options?: { resume?: boolean },
+  ): Promise<{ ackSeq: number; resumed: boolean } | void> {
+    const start: FakeStart = { dictationId, format, ...(options?.resume ? { resume: true } : {}) };
+    this.starts.push(start);
+    return this.startAck?.(start);
+  }
+
+  supportsDictationOpus(): boolean {
+    return this.supportsOpus;
   }
 
   sendDictationStreamChunk(dictationId: string, seq: number, audio: string, format: string): void {
@@ -142,10 +157,15 @@ describe("DictationStreamSender", () => {
     sender.enqueueSegment("seg1");
     await tick();
 
+    const before = client.chunks.length;
     await sender.restartStream("reconnect");
 
-    expect(client.starts.map((s) => s.dictationId)).toEqual(["d1", "d2"]);
-    const d2Chunks = client.chunks.filter((c) => c.dictationId === "d2");
+    // Same stream id, asking to resume; this daemon answers like an old one (fresh stream).
+    expect(client.starts).toEqual([
+      { dictationId: "d1", format: "audio/pcm;rate=16000;bits=16" },
+      { dictationId: "d1", format: "audio/pcm;rate=16000;bits=16", resume: true },
+    ]);
+    const d2Chunks = client.chunks.slice(before);
     expect(d2Chunks.map((c) => [c.seq, c.audio])).toEqual([
       [0, "seg0"],
       [1, "seg1"],
@@ -243,11 +263,10 @@ describe("DictationStreamSender", () => {
     sender.enqueueSegment("after-outage");
 
     client.setConnected(true);
+    const before = client.chunks.length;
     await sender.restartStream("reconnect");
 
-    const replay = client.chunks
-      .filter((chunk) => chunk.dictationId === "d2")
-      .map((chunk) => [chunk.seq, chunk.audio]);
+    const replay = client.chunks.slice(before).map((chunk) => [chunk.seq, chunk.audio]);
     expect(replay).toEqual([
       [0, "before-outage"],
       [1, "during-outage"],
@@ -285,9 +304,11 @@ describe("DictationStreamSender", () => {
 
       client.setConnected(true);
       sender.resetStreamForReplay();
+      const before = client.chunks.length;
       await sender.restartStream("retry");
-      await expect(sender.finish(128)).resolves.toEqual({ dictationId: "d2", text: "ok" });
-      expect(client.chunks.filter((chunk) => chunk.dictationId === "d2")).toHaveLength(129);
+      await expect(sender.finish(128)).resolves.toEqual({ dictationId: "d1", text: "ok" });
+      expect(client.starts.at(-1)).toMatchObject({ dictationId: "d1", resume: true });
+      expect(client.chunks.slice(before)).toHaveLength(129);
     } finally {
       vi.useRealTimers();
     }
@@ -338,5 +359,133 @@ describe("DictationStreamSender", () => {
       text: "ok",
     });
     expect(client.finishes).toEqual([{ dictationId: "d1", finalSeq: 479 }]);
+  });
+});
+
+describe("resume after a dropped connection", () => {
+  const PCM = "audio/pcm;rate=16000;bits=16";
+
+  async function recordThenDrop(client: FakeDaemonClient, sender: DictationStreamSender) {
+    client.autoAck = false;
+    for (let seq = 0; seq < 5; seq += 1) sender.enqueueSegment(`seg${seq}`);
+    await tick();
+    expect(client.chunks.map((c) => c.seq)).toEqual([0, 1, 2, 3, 4]);
+    // The daemon acked 0..2; the acks for 3 and 4 were lost with the socket.
+    client.emitAck("d1", 2);
+    client.setConnected(false);
+    sender.enqueueSegment("seg5"); // captured while offline
+    sender.flush();
+    client.setConnected(true);
+    client.autoAck = true;
+  }
+
+  it("resends only what the daemon has not acknowledged", async () => {
+    const client = new FakeDaemonClient();
+    const sender = new DictationStreamSender({
+      client,
+      format: PCM,
+      createDictationId: () => "d1",
+    });
+    await recordThenDrop(client, sender);
+
+    client.startAck = (start) => ({
+      ackSeq: start.resume ? 2 : -1,
+      resumed: start.resume === true,
+    });
+    const before = client.chunks.length;
+    await sender.restartStream("reconnect");
+
+    expect(client.starts.at(-1)).toEqual({ dictationId: "d1", format: PCM, resume: true });
+    expect(client.chunks.slice(before).map((c) => [c.seq, c.audio])).toEqual([
+      [3, "seg3"],
+      [4, "seg4"],
+      [5, "seg5"],
+    ]);
+    expect(sender.getStats()).toMatchObject({ chunksSent: 8, chunksResent: 2, resumes: 1 });
+    await expect(sender.finish(5)).resolves.toEqual({ dictationId: "d1", text: "ok" });
+  });
+
+  it("falls back to a full replay when the daemon lost the stream", async () => {
+    const client = new FakeDaemonClient();
+    const sender = new DictationStreamSender({
+      client,
+      format: PCM,
+      createDictationId: () => "d1",
+    });
+    await recordThenDrop(client, sender);
+
+    client.startAck = () => ({ ackSeq: -1, resumed: false });
+    const before = client.chunks.length;
+    await sender.restartStream("reconnect");
+
+    expect(client.chunks.slice(before).map((c) => c.seq)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(sender.getStats()).toMatchObject({ chunksResent: 5, resumes: 0 });
+  });
+
+  it("starts a new stream id for a new recording and after cancel", async () => {
+    const client = new FakeDaemonClient();
+    const ids = ["d1", "d2", "d3"];
+    const sender = new DictationStreamSender({
+      client,
+      format: PCM,
+      createDictationId: () => ids.shift() ?? "dX",
+    });
+    sender.enqueueSegment("a");
+    await tick();
+    sender.clearAll();
+    sender.enqueueSegment("b");
+    await tick();
+    sender.cancel();
+    sender.enqueueSegment("c");
+    await tick();
+    expect(client.starts).toEqual([
+      { dictationId: "d1", format: PCM },
+      { dictationId: "d2", format: PCM },
+      { dictationId: "d3", format: PCM },
+    ]);
+  });
+});
+
+describe("audio format and the dictationOpus feature flag", () => {
+  const PCM = "audio/pcm;rate=16000;bits=16";
+  const OPUS = "audio/opus;rate=16000;channels=1;framing=len16";
+
+  it("sends Opus chunks with the Opus format when the daemon reads it", async () => {
+    const client = new FakeDaemonClient();
+    client.supportsOpus = true;
+    const sender = new DictationStreamSender({
+      client,
+      format: PCM,
+      createDictationId: () => "d1",
+    });
+    sender.setFormat(OPUS);
+    sender.enqueueSegment("AAEC");
+    await tick();
+    expect(client.starts).toEqual([{ dictationId: "d1", format: OPUS }]);
+    expect(client.chunks).toEqual([{ dictationId: "d1", seq: 0, audio: "AAEC", format: OPUS }]);
+  });
+
+  it("refuses to send Opus to a daemon that does not advertise it", async () => {
+    const client = new FakeDaemonClient();
+    client.supportsOpus = false;
+    const sender = new DictationStreamSender({
+      client,
+      format: PCM,
+      createDictationId: () => "d1",
+    });
+    sender.setFormat(OPUS);
+    await expect(sender.restartStream("start")).rejects.toThrow(/Opus/);
+    expect(client.starts).toEqual([]);
+  });
+
+  it("does not change format while audio is buffered", () => {
+    const client = new FakeDaemonClient();
+    client.isConnected = false;
+    const sender = new DictationStreamSender({ client, format: PCM });
+    sender.enqueueSegment("x");
+    expect(() => sender.setFormat(OPUS)).toThrow(/buffered/);
+    sender.clearAll();
+    sender.setFormat(OPUS);
+    expect(sender.getFormat()).toBe(OPUS);
   });
 });

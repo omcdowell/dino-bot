@@ -1,6 +1,8 @@
 import { createInstance } from "i18next";
 import { initReactI18next } from "react-i18next";
 import { observeI18nInit } from "./init";
+import { debrandResources } from "./debrand";
+import { APP_DISPLAY_NAME, RELEASE_POLICY } from "@/constants/flavour";
 import { ar } from "./resources/ar";
 import { en } from "./resources/en";
 import { es } from "./resources/es";
@@ -13,22 +15,24 @@ import { zhCN } from "./resources/zh-CN";
 
 const i18n = createInstance();
 
+const RESOURCES = {
+  ar: { translation: ar },
+  en: { translation: en },
+  es: { translation: es },
+  fr: { translation: fr },
+  ja: { translation: ja },
+  ko: { translation: ko },
+  "pt-BR": { translation: ptBR },
+  ru: { translation: ru },
+  "zh-CN": { translation: zhCN },
+};
+
 observeI18nInit(
   i18n.use(initReactI18next).init({
     compatibilityJSON: "v4",
     fallbackLng: "en",
     lng: "en",
-    resources: {
-      ar: { translation: ar },
-      en: { translation: en },
-      es: { translation: es },
-      fr: { translation: fr },
-      ja: { translation: ja },
-      ko: { translation: ko },
-      "pt-BR": { translation: ptBR },
-      ru: { translation: ru },
-      "zh-CN": { translation: zhCN },
-    },
+    resources: RELEASE_POLICY.debrand ? debrandResources(RESOURCES, APP_DISPLAY_NAME) : RESOURCES,
     interpolation: {
       escapeValue: false,
     },

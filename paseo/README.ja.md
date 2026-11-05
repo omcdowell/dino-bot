@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="packages/website/public/logo.svg" width="64" height="64" alt="Paseo logo">
-</p>
-
 <h1 align="center">Paseo</h1>
 
 <p align="center">
@@ -130,7 +126,6 @@ npx skills add getpaseo/paseo
 - `packages/cli`: デーモンおよびエージェントワークフロー向け `paseo` CLI
 - `packages/desktop`: Electron デスクトップアプリ
 - `packages/relay`: リモート接続用リレーパッケージ
-- `packages/website`: マーケティングサイトとドキュメント（`paseo.sh`）
 
 よく使うコマンド：
 
@@ -142,7 +137,6 @@ npm run dev
 npm run dev:server
 npm run dev:app
 npm run dev:desktop
-npm run dev:website
 
 # サーバースタックをビルド
 npm run build:server
@@ -155,7 +149,7 @@ npm run typecheck
 
 Paseo は一人で開発しており、使ってくれる人たちの支援で成り立っています。[GitHub Sponsors](https://github.com/sponsors/boudra) で支援できます。企業として毎月[スポンサー](https://paseo.sh/sponsor#spot)になっていただくと、ロゴをここと paseo.sh のホームページに掲載します。
 
-<!-- Sponsor logos go here, in the same order as packages/website/src/data/sponsors.ts -->
+<!-- Sponsor logos go here -->
 
 ## 関連プロジェクト
 

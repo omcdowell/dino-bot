@@ -22,6 +22,39 @@ interface AgentUpdatesSubscriptionState {
   isProviderVisible: (provider: string) => boolean;
   isBootstrapping: boolean;
   pendingUpdatesByAgentId: Map<string, AgentUpdatePayload>;
+  /** agent_patches: what this subscription last sent per agent, so the next send is a patch. */
+  patches: boolean;
+  sent: Map<string, SentAgent>;
+}
+
+interface SentAgent {
+  agent: AgentSnapshotPayload;
+  project: ProjectPlacementPayload | null;
+  rev: number;
+}
+
+type AgentPatchPayload = Extract<SessionOutboundMessage, { type: "agent_patch" }>["payload"];
+
+/**
+ * The top-level agent fields that differ from what this subscription last sent. Field values are
+ * compared as JSON: payloads are built by the same code, so key order is stable.
+ */
+export function diffAgentSnapshot(
+  previous: AgentSnapshotPayload,
+  next: AgentSnapshotPayload,
+): { set: Record<string, unknown>; unset: string[] } {
+  const set: Record<string, unknown> = {};
+  const unset: string[] = [];
+  const before = previous as Record<string, unknown>;
+  const after = next as Record<string, unknown>;
+  for (const key of Object.keys(after)) {
+    if (after[key] === undefined) continue;
+    if (JSON.stringify(after[key]) !== JSON.stringify(before[key])) set[key] = after[key];
+  }
+  for (const key of Object.keys(before)) {
+    if (before[key] !== undefined && after[key] === undefined) unset.push(key);
+  }
+  return { set, unset };
 }
 
 /** Owns filtered agent snapshots and live updates for independent observers. */
@@ -32,7 +65,11 @@ export interface AgentUpdatesService {
     emit?: (message: SessionOutboundMessage) => void;
     filter?: AgentUpdatesFilter;
     syncEnabled?: boolean;
+    /** Client capability agent_patches on this subscription's socket. */
+    patches?: boolean;
   }): void;
+  /** The client lost an agent_patch base: the next update of this agent goes out in full. */
+  forgetSent(agentId: string): void;
   flushBootstrapped(
     subscriptionId: string,
     options?: { snapshotUpdatedAtByAgentId?: Map<string, number> },
@@ -185,8 +222,54 @@ export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentU
       sub.pendingUpdatesByAgentId.set(agentUpdateTargetId(payload), payload);
       return;
     }
+    if (sub.patches) {
+      const message = toPatchMessage(sub, payload);
+      if (message) sub.emit(message);
+      return;
+    }
 
     sub.emit({ type: "agent_update", payload });
+  }
+
+  /**
+   * agent_patches: the first update of an agent goes out in full with rev 1, later ones as the
+   * changed fields on top of the previous rev, and one that changes nothing is not sent at all.
+   */
+  function toPatchMessage(
+    sub: AgentUpdatesSubscriptionState,
+    payload: AgentUpdatePayload,
+  ): SessionOutboundMessage | null {
+    if (payload.kind === "remove") {
+      sub.sent.delete(payload.agentId);
+      return { type: "agent_update", payload };
+    }
+    const agentId = payload.agent.id;
+    const project = payload.project ?? null;
+    const previous = sub.sent.get(agentId);
+    if (!previous) {
+      sub.sent.set(agentId, { agent: payload.agent, project, rev: 1 });
+      return { type: "agent_update", payload: { ...payload, rev: 1 } };
+    }
+    const { set, unset } = diffAgentSnapshot(previous.agent, payload.agent);
+    const projectChanged = JSON.stringify(previous.project) !== JSON.stringify(project);
+    if (Object.keys(set).length === 0 && unset.length === 0 && !projectChanged) return null;
+    const rev = previous.rev + 1;
+    sub.sent.set(agentId, { agent: payload.agent, project, rev });
+    const patch: AgentPatchPayload = {
+      agentId,
+      rev,
+      baseRev: previous.rev,
+      set,
+      ...(unset.length > 0 ? { unset } : {}),
+      ...(projectChanged ? { project } : {}),
+      ...(payload.generation !== undefined ? { generation: payload.generation } : {}),
+      ...(payload.seq !== undefined ? { seq: payload.seq } : {}),
+    };
+    return { type: "agent_patch", payload: patch };
+  }
+
+  function forgetSent(agentId: string): void {
+    for (const sub of subscriptions.values()) sub.sent.delete(agentId);
   }
 
   function beginSubscription(input: {
@@ -195,11 +278,14 @@ export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentU
     emit?: (message: SessionOutboundMessage) => void;
     filter?: AgentUpdatesFilter;
     syncEnabled?: boolean;
+    patches?: boolean;
   }): void {
     subscriptions.set(input.subscriptionId, {
       ...input,
       emit: input.emit ?? deps.emit,
       syncEnabled: input.syncEnabled ?? false,
+      patches: input.patches ?? false,
+      sent: new Map(),
       isProviderVisible: input.isProviderVisible ?? deps.isProviderVisibleToClient,
       isBootstrapping: true,
       pendingUpdatesByAgentId: new Map(),
@@ -351,6 +437,7 @@ export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentU
 
   return {
     beginSubscription,
+    forgetSent,
     flushBootstrapped,
     clearSubscription,
     hasSubscription,

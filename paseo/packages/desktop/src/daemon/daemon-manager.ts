@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { app, ipcMain, powerMonitor } from "electron";
+import { app, ipcMain, powerMonitor, shell } from "electron";
 import log from "electron-log/main";
 import {
   resolvePaseoHome,
@@ -53,6 +53,9 @@ import {
   readLegacySkillSelection,
 } from "../integrations/legacy-skill-selection.js";
 import { tailFile } from "../diagnostics/tail-file.js";
+import { getDesktopFlavour } from "../flavour.js";
+import { applyFlavourToCommandHandlers } from "../flavour-commands.js";
+import { findChromiumNotices } from "../features/licence-files.js";
 
 const DAEMON_LOG_FILENAME = "daemon.log";
 let ownedLaunch: { home: string; instance: DaemonInstance } | null = null;
@@ -469,13 +472,28 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     get_local_daemon_version: () => getLocalDaemonVersion(),
     install_cli: () => installCli(),
     get_cli_install_status: () => getCliInstallStatus(),
+    open_licence_file: async (args) => {
+      if (args?.file !== "chromium") throw new Error("Unknown licence file");
+      const file = findChromiumNotices({
+        resourcesPath: process.resourcesPath,
+        execPath: process.execPath,
+      });
+      if (!file) throw new Error("LICENSES.chromium.html is not in this build");
+      const error = await shell.openPath(file);
+      if (error) throw new Error(error);
+      return file;
+    },
     read_legacy_skill_selection: () => readLegacySkillSelection(),
     delete_legacy_skill_selection: () => deleteLegacySkillSelection(),
   };
 }
 
 export function registerDaemonManager(): void {
-  const handlers = createDaemonCommandHandlers();
+  const handlers = applyFlavourToCommandHandlers(
+    createDaemonCommandHandlers(),
+    getDesktopFlavour(),
+    resolveDesktopAppVersion,
+  );
 
   ipcMain.handle(
     "paseo:invoke",

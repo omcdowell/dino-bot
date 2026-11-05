@@ -5,6 +5,7 @@ import {
   resolveWorkspaceSelectionStatus,
 } from "@/navigation/host-runtime-bootstrap";
 import { StartupSplashScreen } from "@/screens/startup-splash-screen";
+import { useMobileHomeStartRoute, useStartHome } from "@/plugins/mobile-home-runtime";
 import { useHasHydratedWorkspaces, useWorkspaceExists } from "@/stores/session-store-hooks";
 import {
   useIsLastWorkspaceSelectionHydrated,
@@ -20,7 +21,10 @@ export default function HostIndexRoute() {
   const hasHydratedWorkspaces = useHasHydratedWorkspaces(serverId);
   const workspaceSelectionExists = useWorkspaceExists(serverId, workspaceSelectionWorkspaceId);
 
-  if (!serverId || !isWorkspaceSelectionLoaded) {
+  const mobileHome = useStartHome();
+  const mobileHomeStart = useMobileHomeStartRoute();
+
+  if (!serverId || !isWorkspaceSelectionLoaded || !mobileHomeStart.ready) {
     return <StartupSplashScreen />;
   }
 
@@ -33,6 +37,10 @@ export default function HostIndexRoute() {
           hasHydratedWorkspaces,
           workspaceExists: workspaceSelectionExists,
         }),
+        mobileHome:
+          mobileHome && mobileHomeStart.route
+            ? { serverId: mobileHome.serverId, route: mobileHomeStart.route }
+            : null,
       })}
     />
   );

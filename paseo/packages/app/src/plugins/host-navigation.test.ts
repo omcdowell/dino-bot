@@ -88,3 +88,56 @@ describe("plugin host navigation", () => {
     expect(browsers).toEqual([]);
   });
 });
+
+describe("sidebar item navigation", () => {
+  function setup(electron = true) {
+    const calls: unknown[] = [];
+    const navigation = createPluginHostNavigation(
+      "selected",
+      {
+        browserAvailable: electron,
+        resolveWorkspace: ({ workspaceId }) => workspaceId,
+        openAgent: (input) => calls.push({ open: "agent", ...input }),
+        openWorkspace: (input) => calls.push({ open: "workspace", ...input }),
+        createBrowser: () => ({ browserId: "browser-1" }),
+      },
+      () => calls.push("before"),
+    );
+    return { navigation, calls };
+  }
+
+  it("closes the sidebar surface before it opens an agent or a workspace", () => {
+    const { navigation, calls } = setup();
+    navigation.openAgent({ agentId: "agent-1" });
+    navigation.openWorkspace({ workspaceId: "one", serverId: "remote" });
+    expect(calls).toEqual([
+      "before",
+      { open: "agent", serverId: "selected", agentId: "agent-1" },
+      "before",
+      { open: "workspace", serverId: "remote", workspaceId: "one" },
+    ]);
+  });
+
+  it("closes the sidebar surface before it opens a browser, and only on Electron", () => {
+    const { navigation, calls } = setup();
+    navigation.openBrowser!({ url: "https://example.com", workspaceId: "one" });
+    expect(calls).toEqual([
+      "before",
+      {
+        open: "workspace",
+        serverId: "selected",
+        workspaceId: "one",
+        target: { kind: "browser", browserId: "browser-1" },
+      },
+    ]);
+    expect(setup(false).navigation.openBrowser).toBeUndefined();
+  });
+
+  it("leaves the sidebar open when the browser input is refused", () => {
+    const { navigation, calls } = setup();
+    expect(() =>
+      navigation.openBrowser!({ url: "javascript:alert(1)", workspaceId: "one" }),
+    ).toThrow("HTTP(S)");
+    expect(calls).toEqual([]);
+  });
+});

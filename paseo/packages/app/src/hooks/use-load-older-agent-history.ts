@@ -35,6 +35,7 @@ export interface LoadOlderAgentHistoryDeps {
   toast?: ToastApi | null;
   logger?: LoadOlderAgentHistoryLogger;
   failedMessage?: string;
+  loadFromDisk?: () => Promise<boolean>;
 }
 
 export async function loadOlderAgentHistory(
@@ -46,12 +47,15 @@ export async function loadOlderAgentHistory(
   if (isLoadingOlder) {
     return true;
   }
-  if (!client || !cursor || !hasOlder) {
+  if (!cursor || !hasOlder || (!client && !deps.loadFromDisk)) {
     return false;
   }
 
   setInFlight(true);
   try {
+    // History this device already holds pages in from disk without a round trip.
+    if (await deps.loadFromDisk?.()) return true;
+    if (!client) return false;
     await client.fetchAgentTimeline(
       agentId,
       planTimelineOlderFetch({ epoch: cursor.epoch, seq: cursor.startSeq }),
@@ -125,6 +129,10 @@ export function useLoadOlderAgentHistory({
       setInFlight,
       toast,
       failedMessage: t("loadOlderHistory.failed"),
+      loadFromDisk: () =>
+        getHostRuntimeStore()
+          .loadOlderTimelineFromDisk(serverId, agentId)
+          .catch(() => false),
     });
   }, [agentId, serverId, setInFlight, toast, t]);
 

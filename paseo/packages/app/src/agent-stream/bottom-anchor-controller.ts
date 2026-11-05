@@ -449,6 +449,12 @@ function createBottomAnchorControllerDriver(
 
   const createRequest = (request: BottomAnchorRouteRequest | BottomAnchorLocalRequest) => {
     cancelPendingAttempt();
+    if (__private__.shouldLocalRequestSupersedeUserScroll(request)) {
+      // An explicit jump-to-bottom / send is user intent and wins over in-flight
+      // momentum: the scroll command stops the fling, and the stale gesture end
+      // must not detach the anchor afterwards.
+      isUserScrollActive = false;
+    }
     const nextRequest: BottomAnchorRequest = {
       id: requestSequence + 1,
       agentId: request.agentId,
@@ -510,6 +516,10 @@ function createBottomAnchorControllerDriver(
       cancelPendingAttempt();
     },
     endUserScroll(params) {
+      if (!isUserScrollActive) {
+        // The gesture was superseded (explicit anchor request or agent reset).
+        return;
+      }
       isUserScrollActive = false;
       if (params.isNearBottom) {
         if (mode === "detached") {
@@ -673,6 +683,14 @@ export const __private__ = {
   deriveBottomAnchorBlockedReason,
   deriveVerificationBlockedReason,
   deriveRetryDisposition,
+  shouldLocalRequestSupersedeUserScroll(
+    request: BottomAnchorRouteRequest | BottomAnchorLocalRequest,
+  ): boolean {
+    if ("requestKey" in request) {
+      return false;
+    }
+    return request.reason === "jump-to-bottom" || request.reason === "message-sent";
+  },
   deriveModeForLocalRequest(_input: {
     reason: BottomAnchorLocalRequest["reason"];
   }): BottomAnchorMode {

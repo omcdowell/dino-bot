@@ -67,6 +67,10 @@ export function isGroupableToolCall(item: StreamItem): item is ToolCallItem {
     return false;
   }
   const descriptor = describeToolCall(item);
+  // A call that returned images stays its own row, so the images show without expanding.
+  if (item.payload.source === "agent" && (item.payload.data.images?.length ?? 0) > 0) {
+    return false;
+  }
   return descriptor.detail.type !== "plan" && descriptor.name.trim().toLowerCase() !== "speak";
 }
 

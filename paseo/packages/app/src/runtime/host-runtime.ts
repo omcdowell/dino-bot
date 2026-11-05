@@ -8,13 +8,16 @@ import {
   type ConnectionState,
   type FetchAgentsOptions,
 } from "@getpaseo/client/internal/daemon-client";
+import { getSessionTokenRegistry } from "./session-token-store";
 import {
   connectionFromListen,
   createRemoteSshHostConnection,
   normalizeStoredHostProfile,
+  pinRelayProtectedSecurityInProfiles,
   upsertHostConnectionInProfiles,
   registryHasConnection,
   relayConnectionFromOffer,
+  directConnectionsFromOffer,
   StoredHostRegistrySchema,
   type HostConnection,
   type HostProfile,
@@ -29,7 +32,14 @@ import {
   shouldUseTlsForDefaultHostedRelay,
 } from "@/utils/daemon-endpoints";
 import { resolveAppVersion } from "@/utils/app-version";
-import { ConnectionOfferSchema, type ConnectionOffer } from "@getpaseo/protocol/connection-offer";
+import {
+  ConnectionOfferSchema,
+  parsePairingOfferFromUrl,
+  type ConnectionOffer,
+  type DirectConnectionOffer,
+} from "@getpaseo/protocol/connection-offer";
+import { raceDirectEndpoints } from "./direct-pairing";
+import { directEndpointProblem } from "@/utils/direct-endpoint-policy";
 import { HostConfirmations, type HostConfirmationRequest } from "./host-confirmation";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
 import { isWeb } from "@/constants/platform";
@@ -51,6 +61,7 @@ import { readDesktopManagedLocalCredential } from "@/desktop/daemon/local-creden
 import { CLIENT_CAPS } from "@getpaseo/protocol/client-capabilities";
 import { BROWSER_AUTOMATION_COMMAND_NAMES } from "@getpaseo/protocol/browser-automation/rpc-schemas";
 import {
+  selectAgentTimelineState,
   useSessionStore,
   toDaemonServerInfo,
   type Agent,
@@ -73,9 +84,11 @@ import { resolveComposerAttachmentSubmitFormat } from "@/composer/attachments/su
 import { encodeImages } from "@/utils/encode-images";
 import { DirectorySync, type RefreshAgentDirectoryResult } from "@/runtime/directory-sync";
 import { ReplicaCache } from "@/runtime/replica-cache";
+import { getReplicaCacheMaxBytes } from "@/runtime/replica-cache/budget";
 import type { ReplicaRowStore } from "@/runtime/replica-cache/row-store";
 import { createReplicaRowStore } from "@/runtime/replica-cache/row-store-factory";
 import {
+  applyCachedOlderTimelinePage,
   createTimelineReplica,
   createViewedTimelineOwner,
   type TimelineReplica,
@@ -86,6 +99,9 @@ import { projectIconCache } from "@/projects/icon-cache";
 import { nativePerformanceTrace } from "@/performance/native-trace";
 import { revokePushNotifications } from "@/push-notifications";
 import { createAppWebSocketFactory } from "./websocket-factory";
+import { RELEASE_POLICY } from "@/constants/flavour";
+import { directTcpE2eeConfig } from "@/utils/direct-e2ee";
+import { RELAY_PAIRING_OFF_MESSAGE, tailnetOnlyEndpoints } from "@/hosts/pair-deep-link";
 
 export type HostRuntimeConnectionStatus = "idle" | "connecting" | "online" | "offline" | "error";
 export type PairingNavigationTarget = "openProject" | "hostRoot" | "hostSettings";
@@ -184,6 +200,12 @@ function hashForLog(value: string): string {
     hash = (hash * 31 + value.charCodeAt(index)) | 0;
   }
   return `h_${Math.abs(hash).toString(16)}`;
+}
+
+/** A daemon identity that negotiated protected relay security. */
+export interface RelaySecurityPin {
+  serverId: string;
+  daemonPublicKeyB64: string;
 }
 
 export interface HostRuntimeControllerDeps {
@@ -492,6 +514,29 @@ function buildConnectionCandidates(host: HostProfile): ConnectionCandidate[] {
   }));
 }
 
+/**
+ * A pin learned from the active client is already enforced by that client, so
+ * it keeps running. A pin that arrived from elsewhere (a strict offer) while
+ * the active client is still legacy needs a client that enforces it.
+ */
+function connectionNeedsNewClient(
+  previous: HostConnection,
+  next: HostConnection,
+  activeClient: DaemonClient | null,
+): boolean {
+  if (previous.type === "relay" && next.type === "relay") {
+    const { minimumSecurityMode: previousPin, ...previousRest } = previous;
+    const { minimumSecurityMode: nextPin, ...nextRest } = next;
+    if (!equal(previousRest, nextRest)) return true;
+    return (
+      nextPin === "protected" &&
+      previousPin !== "protected" &&
+      activeClient?.relaySecurityFloor !== "protected"
+    );
+  }
+  return !equal(previous, next);
+}
+
 function findConnectionById(host: HostProfile, connectionId: string | null): HostConnection | null {
   if (!connectionId) {
     return null;
@@ -516,6 +561,14 @@ function probeIntervalForConnection(
   if (age < 30_000) return 5_000;
   if (age < 60_000) return PROBE_STEADY_MS;
   return PROBE_MAX_BACKOFF_MS;
+}
+
+/** One session token per host connection, shared by its main client and its probes. */
+function sessionTokensFor(host: HostProfile, connection: HostConnection) {
+  return getSessionTokenRegistry().storeFor({
+    serverId: host.serverId,
+    connectionId: connection.id,
+  });
 }
 
 function createDefaultDeps(): HostRuntimeControllerDeps {
@@ -547,6 +600,7 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
         trace: nativePerformanceTrace,
         providerSnapshots: "wire",
         ...(host.password ? { password: host.password } : {}),
+        sessionTokens: sessionTokensFor(host, connection),
         localCredential: () => readDesktopManagedLocalCredential(connection),
       } satisfies Omit<DaemonClientConfig, "url">;
       if (connection.type === "directSocket" || connection.type === "directPipe") {
@@ -575,11 +629,17 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
         });
       }
       if (connection.type === "directTcp") {
+        // Probes refuse such an address first (buildClientConfig); should one still be selected,
+        // it gets no password (rel-security B1).
+        const { password: _password, sessionTokens: _sessionTokens, ...withoutPassword } = base;
         return new DaemonClient({
-          ...base,
+          ...(directEndpointProblem(connection) ? withoutPassword : base),
           ...webSocketConfig,
           url: buildDaemonWebSocketUrl(connection.endpoint, {
             useTls: connection.useTls ?? false,
+          }),
+          ...directTcpE2eeConfig(connection, {
+            required: RELEASE_POLICY.directE2eeRequired,
           }),
         });
       }
@@ -594,6 +654,9 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
         e2ee: {
           enabled: true,
           daemonPublicKeyB64: connection.daemonPublicKeyB64,
+          ...(connection.minimumSecurityMode
+            ? { minimumMode: connection.minimumSecurityMode }
+            : {}),
         },
       });
     },
@@ -601,6 +664,7 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
       connectToDaemon(connection, {
         ...(host.serverId ? { serverId: host.serverId } : {}),
         ...(host.password ? { password: host.password } : {}),
+        sessionTokens: sessionTokensFor(host, connection),
         localCredential: () => readDesktopManagedLocalCredential(connection),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
         capabilities: appCapabilities,
@@ -631,6 +695,7 @@ export class HostRuntimeController {
   private host: HostProfile;
   private deps: HostRuntimeControllerDeps;
   private onReconcileServerId: ((oldId: string, newId: string) => void) | null;
+  private onRelayProtectedSecurityNegotiated: ((input: RelaySecurityPin) => void) | null;
   private connectionMachineState: HostRuntimeConnectionMachineState;
   private connectionEpoch = 0;
   private snapshot: HostRuntimeSnapshot;
@@ -655,10 +720,12 @@ export class HostRuntimeController {
     host: HostProfile;
     deps?: HostRuntimeControllerDeps;
     onReconcileServerId?: (oldId: string, newId: string) => void;
+    onRelayProtectedSecurityNegotiated?: (input: RelaySecurityPin) => void;
   }) {
     this.host = input.host;
     this.deps = input.deps ?? createDefaultDeps();
     this.onReconcileServerId = input.onReconcileServerId ?? null;
+    this.onRelayProtectedSecurityNegotiated = input.onRelayProtectedSecurityNegotiated ?? null;
     this.connectionMachineState = {
       tag: "booting",
     };
@@ -760,7 +827,12 @@ export class HostRuntimeController {
       activeConnectionId &&
       previousActiveConnection &&
       nextActiveConnection &&
-      (!equal(previousActiveConnection, nextActiveConnection) || passwordChanged)
+      (connectionNeedsNewClient(
+        previousActiveConnection,
+        nextActiveConnection,
+        this.activeClient,
+      ) ||
+        passwordChanged)
     ) {
       this.connectionLastProbedAt.delete(activeConnectionId);
       await this.switchToConnection({ connectionId: activeConnectionId });
@@ -1372,6 +1444,7 @@ export class HostRuntimeController {
           void failConnection(new DaemonAuthenticationError(client.authFailureReason));
           return;
         }
+        if (state.status === "connected") this.learnRelaySecurity(client, connection.id);
         this.applyConnectionEvent({ type: "client_state", state, lastError: client.lastError });
         this.updateSnapshot({
           ...toSnapshotConnectionPatch(this.connectionMachineState, this.connectionEpoch),
@@ -1383,6 +1456,25 @@ export class HostRuntimeController {
     } catch (error) {
       await failConnection(error);
     }
+  }
+
+  // The active client is the one place every connection path meets: clients
+  // created here and probe clients adopted from `connectToDaemon` both land in
+  // `switchToConnection`. A protected handshake observed here becomes the
+  // persisted pin for that daemon identity.
+  private learnRelaySecurity(client: DaemonClient, connectionId: string): void {
+    const connection = findConnectionById(this.host, connectionId);
+    if (
+      connection?.type !== "relay" ||
+      connection.minimumSecurityMode === "protected" ||
+      client.relaySecurityFloor !== "protected"
+    ) {
+      return;
+    }
+    this.onRelayProtectedSecurityNegotiated?.({
+      serverId: this.host.serverId,
+      daemonPublicKeyB64: connection.daemonPublicKeyB64,
+    });
   }
 
   adoptReconciledServerId(newServerId: string): void {
@@ -1443,6 +1535,14 @@ function isSameLinkedConnection(left: ConnectionOffer, right: ConnectionOffer): 
     left.serverId === right.serverId &&
     equal(relayConnectionFromOffer(left), relayConnectionFromOffer(right))
   );
+}
+
+/** A direct (v3) offer in a `#offer=` link, or null for relay links and anything else. */
+function parseDirectOfferUrl(input: string): DirectConnectionOffer | null {
+  if (input.trim().startsWith("relay://") || input.includes("#connect=")) return null;
+  if (!input.includes("#offer=")) return null;
+  const parsed = parsePairingOfferFromUrl(input);
+  return parsed?.kind === "direct" ? parsed.offer : null;
 }
 
 function parseOfferConnectionUrl(input: string): { offer: ConnectionOffer; password?: string } {
@@ -1520,7 +1620,9 @@ export class HostRuntimeStore {
   }) {
     this.deps = input?.deps ?? createDefaultDeps();
     this.storage = input?.storage ?? AsyncStorage;
-    this.replicaCache = new ReplicaCache(input?.replicaRowStore ?? createReplicaRowStore());
+    this.replicaCache = new ReplicaCache(input?.replicaRowStore ?? createReplicaRowStore(), {
+      maxBytes: getReplicaCacheMaxBytes(),
+    });
     this.revokePushNotifications = input?.revokePushNotifications ?? revokePushNotifications;
   }
 
@@ -1928,39 +2030,6 @@ export class HostRuntimeStore {
     });
   }
 
-  private async upsertRelayConnection(input: {
-    serverId: string;
-    relayEndpoint: string;
-    useTls?: boolean;
-    daemonPublicKeyB64: string;
-    label?: string;
-    password?: string;
-  }): Promise<HostProfile> {
-    const relayEndpoint = normalizeHostPort(input.relayEndpoint);
-    const useTls = input.useTls ?? false;
-    const daemonPublicKeyB64 = input.daemonPublicKeyB64.trim();
-    if (!daemonPublicKeyB64) {
-      throw new Error("daemonPublicKeyB64 is required");
-    }
-    const explicitUseTls = input.useTls !== undefined;
-    const profile = await this.upsertHostConnection({
-      serverId: input.serverId,
-      label: input.label,
-      connection: {
-        id: useTls ? `relay:wss:${relayEndpoint}` : `relay:${relayEndpoint}`,
-        type: "relay",
-        relayEndpoint,
-        ...(explicitUseTls ? { useTls } : {}),
-        daemonPublicKeyB64,
-      },
-    });
-    if (input.password) {
-      await this.setHostPassword(profile.serverId, input.password);
-      return this.hosts.find((host) => host.serverId === profile.serverId) ?? profile;
-    }
-    return profile;
-  }
-
   // A pairing link (a URL, a QR code, or a pasted link) asks the user to
   // confirm when it adds a new host or changes a saved host's key, relay, or
   // TLS setting. The answer needs the saved hosts, so it waits for them to load.
@@ -1988,8 +2057,26 @@ export class HostRuntimeStore {
    */
   beginLinkPairing(): LinkPairing {
     let approvedOffer: ConnectionOffer | null = null;
+    let approvedDirect: string | null = null;
     return {
       submit: async (link, password) => {
+        const parsedDirect = parseDirectOfferUrl(link);
+        // Public flavour: Tailscale endpoints only (ReleasePolicy.tailnetOnly).
+        const direct =
+          parsedDirect && RELEASE_POLICY.tailnetOnly
+            ? { ...parsedDirect, endpoints: tailnetOnlyEndpoints(parsedDirect.endpoints) }
+            : parsedDirect;
+        if (direct) {
+          const key = JSON.stringify(direct.endpoints) + direct.serverId;
+          if (approvedDirect !== key) {
+            if (!(await this.confirmDirectLink(direct))) return { status: "cancelled" };
+            approvedDirect = key;
+          }
+          const result = await this.pairDirectOffer(direct, password ?? direct.password);
+          return { status: "connected", ...result };
+        }
+        // Public flavour: direct / Tailscale only, no relay (ReleasePolicy.relayPairing).
+        if (!RELEASE_POLICY.relayPairing) throw new Error(RELAY_PAIRING_OFF_MESSAGE);
         const { offer, password: linkPassword } = parseOfferConnectionUrl(link);
         if (!approvedOffer || !isSameLinkedConnection(approvedOffer, offer)) {
           if (!(await this.confirmLink(offer))) return { status: "cancelled" };
@@ -2005,7 +2092,8 @@ export class HostRuntimeStore {
     url: string,
     target: PairingNavigationTarget,
   ): Promise<ConnectionLinkImport> {
-    if (target === "openProject") {
+    if (target === "openProject" && !parseDirectOfferUrl(url)) {
+      if (!RELEASE_POLICY.relayPairing) throw new Error(RELAY_PAIRING_OFF_MESSAGE);
       const { offer, password } = parseOfferConnectionUrl(url);
       if (!(await this.confirmLink(offer))) return { status: "cancelled" };
       const profile = await this.upsertConnectionFromOffer(offer, undefined, password);
@@ -2022,20 +2110,78 @@ export class HostRuntimeStore {
     }
   }
 
+  private async confirmDirectLink(offer: DirectConnectionOffer): Promise<boolean> {
+    await this.loadRegistry();
+    return this.hostConfirmations.confirmDirectLink(offer, this.hosts);
+  }
+
+  /**
+   * Pairs from a direct (v3) offer: races every endpoint, keeps the first that answers as the
+   * offered server, then saves all endpoints as direct connections (winner preferred) so the host
+   * can fail over between tailnet, LAN and local addresses later.
+   */
+  private async pairDirectOffer(
+    offer: DirectConnectionOffer,
+    password: string | undefined,
+  ): Promise<{ profile: HostProfile; serverId: string; hostname: string | null }> {
+    const connections = directConnectionsFromOffer(offer);
+    const probeHost = (connection: HostConnection): HostProfile => ({
+      serverId: offer.serverId,
+      ...(password ? { password } : {}),
+      label: offer.serverId,
+      appearance: defaultHostAppearance(),
+      lifecycle: {},
+      connections: [connection],
+      preferredConnectionId: connection.id,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    });
+    const won = await raceDirectEndpoints({
+      serverId: offer.serverId,
+      connections,
+      probe: (connection) =>
+        this.deps.connectToDaemon({ host: probeHost(connection), connection, timeoutMs: 6000 }),
+      close: (client) => client.close().catch(() => undefined),
+    });
+    // Others first, winner last: the last upsert carries the live client and becomes preferred.
+    for (const connection of connections) {
+      if (connection.id === won.connection.id) continue;
+      await this.upsertHostConnection({
+        serverId: offer.serverId,
+        label: won.hostname ?? undefined,
+        password,
+        connection,
+      });
+    }
+    const profile = await this.upsertHostConnection({
+      serverId: offer.serverId,
+      label: won.hostname ?? undefined,
+      password,
+      connection: won.connection,
+      existingClient: won.client,
+    });
+    return { profile, serverId: offer.serverId, hostname: won.hostname };
+  }
+
   private async upsertConnectionFromOffer(
     offer: ConnectionOffer,
     label?: string,
     password?: string,
   ): Promise<HostProfile> {
     const connection = relayConnectionFromOffer(offer);
-    return this.upsertRelayConnection({
+    if (!connection.daemonPublicKeyB64) {
+      throw new Error("daemonPublicKeyB64 is required");
+    }
+    const profile = await this.upsertHostConnection({
       serverId: offer.serverId,
-      relayEndpoint: connection.relayEndpoint,
-      useTls: connection.useTls,
-      daemonPublicKeyB64: connection.daemonPublicKeyB64,
       label,
-      password,
+      connection,
     });
+    if (password) {
+      await this.setHostPassword(profile.serverId, password);
+      return this.hosts.find((host) => host.serverId === profile.serverId) ?? profile;
+    }
+    return profile;
   }
 
   private async probeAndUpsertOffer(
@@ -2079,6 +2225,13 @@ export class HostRuntimeStore {
       label: input.hostname ?? undefined,
       connection,
     });
+  }
+
+  private async pinRelayProtectedSecurity(input: RelaySecurityPin): Promise<void> {
+    const next = pinRelayProtectedSecurityInProfiles({ profiles: this.hosts, ...input });
+    if (next === this.hosts) return;
+    this.setHostsAndSync(next);
+    await this.persistHosts();
   }
 
   private async updateHost(
@@ -2143,6 +2296,7 @@ export class HostRuntimeStore {
 
   async removeHost(serverId: string): Promise<void> {
     await this.revokePushNotifications({ client: this.getClient(serverId), serverId });
+    getSessionTokenRegistry().forgetServer(serverId);
     const remaining = this.hosts.filter((daemon) => daemon.serverId !== serverId);
     this.setHostsAndSync(remaining);
     await this.persistHosts();
@@ -2285,6 +2439,7 @@ export class HostRuntimeStore {
         host,
         deps: this.deps,
         onReconcileServerId: (oldId, newId) => this.reconcileServerId(oldId, newId),
+        onRelayProtectedSecurityNegotiated: (pin) => void this.pinRelayProtectedSecurity(pin),
       });
       this.controllers.set(host.serverId, controller);
       useSessionStore.getState().initializeSession(host.serverId, null);
@@ -2515,6 +2670,10 @@ export class HostRuntimeStore {
     return this.controllers.get(serverId)?.getClient() ?? null;
   }
 
+  listServerIds(): string[] {
+    return [...this.controllers.keys()];
+  }
+
   subscribe(serverId: string, listener: () => void): () => void {
     const existing = this.serverListeners.get(serverId) ?? new Set<() => void>();
     existing.add(listener);
@@ -2638,6 +2797,23 @@ export class HostRuntimeStore {
       owner.applyTimelineResponse(page);
     }
     return page;
+  }
+
+  /**
+   * Scrolling up: prepend the sealed page that ends right before the loaded range, if this device
+   * has it. Returns false when the daemon has to be asked instead.
+   */
+  async loadOlderTimelineFromDisk(serverId: string, agentId: string): Promise<boolean> {
+    const timeline = selectAgentTimelineState(
+      useSessionStore.getState().sessions[serverId],
+      agentId,
+    );
+    if (timeline.status !== "synced" || !timeline.range) return false;
+    const page = await this.replicaCache.readTimelinePageBefore(serverId, agentId, {
+      epoch: timeline.range.epoch,
+      beforeSeq: timeline.range.startSeq,
+    });
+    return page ? applyCachedOlderTimelinePage(serverId, agentId, page) : false;
   }
 
   createViewedTimelineOwner(

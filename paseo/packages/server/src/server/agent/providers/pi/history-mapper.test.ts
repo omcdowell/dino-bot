@@ -15,7 +15,55 @@ async function collectHistory(
   return events;
 }
 
+const ONE_BY_ONE_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
 describe("Pi history mapper", () => {
+  test("replays images by reference: image-only user messages and read tool results", async () => {
+    const messages: PiAgentMessage[] = [
+      {
+        role: "user",
+        content: [{ type: "image", data: ONE_BY_ONE_PNG_BASE64, mimeType: "image/png" }],
+      },
+      {
+        role: "assistant",
+        responseId: "response-1",
+        content: [{ type: "toolCall", id: "tool-1", name: "read", arguments: { path: "a.png" } }],
+      },
+      {
+        role: "toolResult",
+        toolCallId: "tool-1",
+        toolName: "read",
+        content: [
+          { type: "text", text: "Read image file [image/png]" },
+          { type: "image", data: ONE_BY_ONE_PNG_BASE64, mimeType: "image/png" },
+        ],
+      },
+    ];
+    const events = await collectHistory(messages);
+    const items = events.flatMap((event) => (event.type === "timeline" ? [event.item] : []));
+    const user = items.find((item) => item.type === "user_message");
+    const completed = items.find(
+      (item) => item.type === "tool_call" && item.status === "completed",
+    );
+    const reference = {
+      id: expect.stringMatching(/^[0-9a-f]{64}$/),
+      mimeType: "image/png",
+      width: 1,
+      height: 1,
+      byteSize: 70,
+      source: expect.any(String),
+    };
+    // A thumbhash/display sidecar may already exist for this content-addressed image (the store
+    // is shared per user under TMPDIR), so extra fields are allowed.
+    expect(user).toMatchObject({ type: "user_message", text: "", images: [reference] });
+    expect(completed).toMatchObject({ images: [reference] });
+    expect(JSON.stringify(items)).not.toContain(ONE_BY_ONE_PNG_BASE64);
+    // Replaying again yields the same content-addressed reference.
+    const replay = await collectHistory(messages);
+    expect(replay[0]).toEqual(events[0]);
+  });
+
   test("renders visible custom messages as completed tools and hides private context", async () => {
     const events = await collectHistory([
       {
@@ -79,6 +127,7 @@ describe("Pi history mapper", () => {
         item: {
           type: "user_message",
           text: "read this\n\nthen answer",
+          images: [expect.objectContaining({ mimeType: "image/png", byteSize: 4 })],
         },
       },
       {

@@ -39,6 +39,7 @@ import type { PluginSidebarSection } from "../types";
 import { SidebarItemFrameContext, type SidebarItemFrame } from "./frame";
 import { LegacyPluginSidebarRow } from "./legacy";
 import { resolvePluginPlatform } from "../platform";
+import { usePluginSidebarNavigation } from "../host-navigation";
 
 export { SidebarRow, SidebarSeparator } from "./kit";
 
@@ -93,7 +94,8 @@ function PluginSidebarItemHost({
   const [popoverOpen, setPopoverOpen] = useState(false);
   const environment = useMemo<PluginEnvironment | null>(
     () =>
-      client
+      // A cached install (plugin cache) renders before the host has a client.
+      client || plugin.source === "cache"
         ? {
             installation: plugin,
             toast,
@@ -177,12 +179,16 @@ function SidebarItemContent({
     }),
     [compact, hostLabel, plugin.serverId, theme],
   );
+  const beforeNavigate = useCallback(() => {
+    showPopover(null);
+    onBeforeNavigate?.();
+  }, [onBeforeNavigate, showPopover]);
+  const navigation = usePluginSidebarNavigation(plugin.serverId, beforeNavigate);
   const openScreen = useCallback(
     (input: PluginOpenScreenInput) => {
       const { screenId, params } = parsePluginOpenScreenInput(plugin, input);
       rememberPluginContributionHost(pluginScreensHostKey(plugin.id), plugin.serverId);
-      showPopover(null);
-      onBeforeNavigate?.();
+      beforeNavigate();
       router.push(
         buildPluginSurfaceRoute(
           plugin.serverId,
@@ -192,7 +198,7 @@ function SidebarItemContent({
         ),
       );
     },
-    [onBeforeNavigate, plugin, showPopover],
+    [beforeNavigate, plugin],
   );
   const openPopover = useCallback(
     (Content: PopoverContent) => {
@@ -217,8 +223,8 @@ function SidebarItemContent({
     [anchorTo, item.id, item.title, offerAnchor, plugin.id, releaseAnchor, section],
   );
   const itemProps = useMemo<PluginSidebarItemProps>(
-    () => ({ ...hostProps, currentScreen, openScreen, openPopover }),
-    [currentScreen, hostProps, openPopover, openScreen],
+    () => ({ ...hostProps, currentScreen, navigation, openScreen, openPopover }),
+    [currentScreen, hostProps, navigation, openPopover, openScreen],
   );
   const Item = item.Component;
   const Popover = popover;

@@ -1,5 +1,6 @@
-import type { ConnectionOffer } from "@getpaseo/protocol/connection-offer";
+import type { ConnectionOffer, DirectConnectionOffer } from "@getpaseo/protocol/connection-offer";
 import {
+  directConnectionsFromOffer,
   hostHasConnection,
   relayConnectionFromOffer,
   type HostProfile,
@@ -64,6 +65,27 @@ export class HostConfirmations {
       serverId: offer.serverId,
       keyFingerprint: formatDaemonKeyFingerprint(connection.daemonPublicKeyB64),
       relayEndpoint: connection.relayEndpoint,
+      kind: savedHost ? "changedConnection" : "newHost",
+    });
+  }
+
+  /**
+   * Same question for a direct (v3) link. The sheet's "relay" row shows the first endpoint (and how
+   * many more). A saved host that already has every endpoint is not asked again.
+   */
+  confirmDirectLink(offer: DirectConnectionOffer, savedHosts: HostProfile[]): Promise<boolean> {
+    const connections = directConnectionsFromOffer(offer);
+    const savedHost = savedHosts.find((host) => host.serverId === offer.serverId);
+    if (savedHost && connections.every((c) => hostHasConnection(savedHost, c))) {
+      return Promise.resolve(true);
+    }
+    const first = connections[0]?.endpoint ?? offer.endpoints[0] ?? "";
+    const more = connections.length > 1 ? ` (+${connections.length - 1} more)` : "";
+    return this.ask({
+      id: this.nextRequestId++,
+      serverId: offer.serverId,
+      keyFingerprint: formatDaemonKeyFingerprint(offer.daemonPublicKeyB64),
+      relayEndpoint: `direct ${first}${more}`,
       kind: savedHost ? "changedConnection" : "newHost",
     });
   }

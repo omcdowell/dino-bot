@@ -129,6 +129,11 @@ export interface DesktopAgentNavigationBridge {
   ready?: () => Promise<{ serverId: string; agentId: string } | null>;
 }
 
+/** Pairing / provider links the OS opened the app with (public flavour; desktop/src/app-links.ts). */
+export interface DesktopAppLinksBridge {
+  take?: () => Promise<string | null>;
+}
+
 export type DesktopBrowserShortcutEvent =
   | { browserId?: string; action: "focus-url" }
   | { browserId: string; action: "new-tab" };
@@ -168,6 +173,12 @@ export interface DesktopBrowserBridge {
   copyElement?: (payload: { text?: string; imageDataUrl?: string }) => Promise<boolean>;
 }
 
+export interface DesktopNetworkProbeBridge {
+  listInterfaces?: () => Promise<unknown>;
+  resolve?: (host: string) => Promise<unknown>;
+  tcpConnect?: (host: string, port: number, timeoutMs: number) => Promise<unknown>;
+}
+
 export interface DesktopInvokeBridge {
   invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 }
@@ -178,6 +189,7 @@ export interface DesktopHostBridge {
   invoke?: DesktopInvokeBridge["invoke"];
   getPendingOpenProject?: () => Promise<string | null>;
   agentNavigation?: DesktopAgentNavigationBridge;
+  appLinks?: DesktopAppLinksBridge;
   events?: DesktopEventsBridge;
   window?: DesktopWindowModuleBridge;
   dialog?: DesktopDialogBridge;
@@ -187,6 +199,7 @@ export interface DesktopHostBridge {
   webUtils?: DesktopWebUtilsBridge;
   menu?: DesktopMenuBridge;
   browser?: DesktopBrowserBridge;
+  networkProbe?: DesktopNetworkProbeBridge;
 }
 
 declare global {

@@ -18,6 +18,7 @@ const testTheme = {
     statusDotRunning: "#268ae0",
     accent: "#2563eb",
     accentForeground: "#ffffff",
+    accentText: "#2563eb",
     destructive: "#dc2626",
     destructiveForeground: "#ffffff",
     surface1: "#fafafa",

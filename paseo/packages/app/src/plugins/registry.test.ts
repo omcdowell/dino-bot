@@ -24,10 +24,11 @@ const pluginRegistry = {
   getSnapshot: registry.getSnapshot,
   subscribe: registry.subscribe,
   removeHost: registry.removeHost.bind(registry),
+  hasCatalog: registry.hasCatalog,
   installCatalog(
     serverId: string,
     catalog: Parameters<typeof registry.installCatalog>[1],
-    options: { replacePluginId?: string } = {},
+    options: Omit<Partial<Parameters<typeof registry.installCatalog>[2]>, "client" | "audio"> = {},
   ) {
     return registry.installCatalog(
       serverId,
@@ -221,5 +222,104 @@ describe("PluginRegistry", () => {
 
     expect(() => pluginRegistry.removeHost("host-a")).not.toThrow();
     expect(pluginRegistry.getSnapshot()).toEqual([]);
+  });
+});
+
+describe("PluginRegistry: phone-home device cache", () => {
+  const persisted = (data: unknown) => ({
+    mutations: [],
+    queries: [
+      {
+        queryKey: ["bots", "list"],
+        queryHash: JSON.stringify(["bots", "list"]),
+        meta: { persist: true },
+        state: {
+          data,
+          dataUpdateCount: 1,
+          dataUpdatedAt: 1,
+          error: null,
+          errorUpdateCount: 0,
+          errorUpdatedAt: 0,
+          fetchFailureCount: 0,
+          fetchFailureReason: null,
+          fetchMeta: null,
+          isInvalidated: false,
+          status: "success" as const,
+          fetchStatus: "idle" as const,
+        },
+      },
+    ],
+  });
+
+  it("starts a cached install from the persisted queries", () => {
+    pluginRegistry.installCatalog("host-a", [{ id: "bots", clientBundle: bundle("one") }], {
+      source: "cache",
+      queries: new Map([["bots", persisted(["flint"])]]),
+    });
+    const cached = pluginRegistry.getSnapshot()[0];
+    expect(cached?.source).toBe("cache");
+    expect(cached?.queryClient.getQueryData(["bots", "list"])).toEqual(["flint"]);
+  });
+
+  it("keeps a cached install when the live bundle is the same, and replaces a changed one without a gap", () => {
+    pluginRegistry.installCatalog("host-a", [{ id: "bots", clientBundle: bundle("one") }], {
+      source: "cache",
+      queries: new Map([["bots", persisted(["flint"])]]),
+    });
+    const cached = pluginRegistry.getSnapshot()[0];
+    pluginRegistry.installCatalog("host-a", [{ id: "bots", clientBundle: bundle("one") }]);
+    expect(pluginRegistry.getSnapshot()[0]).toBe(cached);
+    expect(cached?.source).toBe("live");
+
+    pluginRegistry.removeHost("host-a");
+    pluginRegistry.installCatalog("host-a", [{ id: "bots", clientBundle: bundle("one") }], {
+      source: "cache",
+      queries: new Map([["bots", persisted(["flint"])]]),
+    });
+    const cachedAgain = pluginRegistry.getSnapshot()[0];
+    const snapshots: string[][] = [];
+    const unsubscribe = pluginRegistry.subscribe(() => snapshots.push(installedPluginIds()));
+    pluginRegistry.installCatalog("host-a", [{ id: "bots", clientBundle: bundle("two") }]);
+    unsubscribe();
+    const live = pluginRegistry.getSnapshot()[0];
+    expect(live).not.toBe(cachedAgain);
+    expect(live?.source).toBe("live");
+    expect(live?.queryClient.getQueryData(["bots", "list"])).toEqual(["flint"]);
+    expect(snapshots.every((ids) => ids.includes("bots"))).toBe(true);
+    expect(cachedAgain?.lifetime.signal.aborted).toBe(true);
+  });
+
+  it("restores the cached home with a host forwarder before the host has a client", async () => {
+    const { createHostClientForwarder, restoreCachedPlugins } =
+      await import("./plugin-cache-runtime");
+    const entry = {
+      id: "bots",
+      clientBundle: bundle("one"),
+      requirements: { paseo: `>=${appPackage.version}` },
+    } as Parameters<typeof registry.installCatalog>[1][number];
+    const cache = {
+      load: async () => ({
+        serverId: "host-a",
+        savedAt: 1,
+        plugins: [{ entry, queries: persisted(["flint"]) }],
+      }),
+      forget: async () => {},
+    };
+
+    const restored = await restoreCachedPlugins({
+      serverId: "host-a",
+      client: createHostClientForwarder(() => null),
+      audio,
+      isCancelled: () => false,
+      cache,
+      registry,
+    });
+
+    const cached = pluginRegistry.getSnapshot()[0];
+    expect(restored).toBe(true);
+    expect(cached?.source).toBe("cache");
+    expect(cached?.queryClient.getQueryData(["bots", "list"])).toEqual(["flint"]);
+    await expect(cached?.invoke("bots.list", {})).rejects.toThrow("not connected");
+    expect(pluginRegistry.hasCatalog("host-a")).toBe(true);
   });
 });

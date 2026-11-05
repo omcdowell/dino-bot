@@ -2,6 +2,7 @@ import { resampleToPcm16 } from "@/audio/pcm";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parsePcm16Wav } from "@/utils/pcm16-wav";
 import { isElectronRuntime } from "@/desktop/host";
+import { DICTATION_PCM_FORMAT } from "@getpaseo/protocol/dictation-audio-format";
 
 import type {
   DictationAudioSource,
@@ -136,13 +137,13 @@ async function finalizeRecorderStoppedPromise(input: {
 export function useDictationAudioSource(config: DictationAudioSourceConfig): DictationAudioSource {
   const [volume, setVolume] = useState(0);
 
-  const onPcmSegmentRef = useRef(config.onPcmSegment);
+  const onAudioSegmentRef = useRef(config.onAudioSegment);
   const onErrorRef = useRef(config.onError);
 
   useEffect(() => {
-    onPcmSegmentRef.current = config.onPcmSegment;
+    onAudioSegmentRef.current = config.onAudioSegment;
     onErrorRef.current = config.onError;
-  }, [config.onPcmSegment, config.onError]);
+  }, [config.onAudioSegment, config.onError]);
 
   const refs = useRef<{
     stream: MediaStream | null;
@@ -192,10 +193,10 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
     while (pending.length >= chunkSamples) {
       const chunk = pending.slice(0, chunkSamples);
       pending = pending.slice(chunkSamples);
-      onPcmSegmentRef.current(int16ToBase64(chunk));
+      onAudioSegmentRef.current(int16ToBase64(chunk));
     }
     if (pending.length > 0) {
-      onPcmSegmentRef.current(int16ToBase64(pending));
+      onAudioSegmentRef.current(int16ToBase64(pending));
     }
   }, []);
 
@@ -279,7 +280,7 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
         while (refs.current.pending.length >= chunkSamples) {
           const chunk = refs.current.pending.slice(0, chunkSamples);
           refs.current.pending = refs.current.pending.slice(chunkSamples);
-          onPcmSegmentRef.current(int16ToBase64(chunk));
+          onAudioSegmentRef.current(int16ToBase64(chunk));
         }
       };
 
@@ -399,7 +400,7 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
     }
 
     if (pending.length > 0) {
-      onPcmSegmentRef.current(int16ToBase64(pending));
+      onAudioSegmentRef.current(int16ToBase64(pending));
     }
 
     refs.current = {
@@ -442,6 +443,9 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
       },
       stop,
       volume,
+      // Web stays on PCM16: MediaRecorder's webm/opus is not cut into independently
+      // decodable chunks, and the uplink is usually not a phone plan here.
+      prepareFormat: () => DICTATION_PCM_FORMAT,
     }),
     [start, stop, volume],
   );

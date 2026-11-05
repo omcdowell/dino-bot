@@ -18,6 +18,9 @@ import {
   createDesktopDaemonTransportFactory,
 } from "@/desktop/daemon/desktop-daemon-transport";
 import type { DesktopDaemonTransportTarget } from "@/desktop/daemon/desktop-daemon";
+import { directEndpointProblem } from "./direct-endpoint-policy";
+import { RELEASE_POLICY } from "@/constants/flavour";
+import { directTcpE2eeConfig } from "./direct-e2ee";
 
 export interface DaemonProbeClient {
   readonly lastError: string | null;
@@ -119,14 +122,30 @@ export function getConnectionAuthFailureReason(error: unknown): DaemonAuthFailur
 function resolveConnectionCredentials(
   connection: HostConnection,
   options:
-    | { password?: string; localCredential?: DaemonClientConfig["localCredential"] }
+    | {
+        password?: string;
+        localCredential?: DaemonClientConfig["localCredential"];
+        sessionTokens?: DaemonClientConfig["sessionTokens"];
+      }
     | undefined,
-): Pick<DaemonClientConfig, "password" | "localCredential"> {
+): Pick<DaemonClientConfig, "password" | "localCredential" | "sessionTokens"> {
   const password = options?.password;
   return {
     ...(password ? { password } : {}),
     ...(options?.localCredential ? { localCredential: options.localCredential } : {}),
+    ...(options?.sessionTokens ? { sessionTokens: options.sessionTokens } : {}),
   };
+}
+
+/** Public build: no socket (and so no password) to an address outside Tailscale (rel-security B1). */
+function assertDirectEndpointAllowed(
+  connection: Parameters<typeof directEndpointProblem>[0],
+  policy: Parameters<typeof directEndpointProblem>[1],
+): void {
+  const refused = directEndpointProblem(connection, policy);
+  if (refused) {
+    throw new DaemonConnectionTestError(refused, { reason: refused, lastError: null });
+  }
 }
 
 export async function buildClientConfig(
@@ -137,6 +156,10 @@ export async function buildClientConfig(
     trace?: DaemonClientConfig["trace"];
     password?: string;
     localCredential?: DaemonClientConfig["localCredential"];
+    /** The host connection's session token store, shared with its main client. */
+    sessionTokens?: DaemonClientConfig["sessionTokens"];
+    /** Defaults to RELEASE_POLICY; tests pass their own. */
+    policy?: { tailnetOnly: boolean };
   },
   deps: Pick<
     DaemonConnectionDependencies<DaemonProbeClient>,
@@ -146,6 +169,7 @@ export async function buildClientConfig(
     | "buildDesktopTransportUrl"
   > = defaultDaemonConnectionDependencies,
 ): Promise<DaemonClientConfig> {
+  assertDirectEndpointAllowed(connection, options?.policy);
   const clientId = await deps.getClientId();
   const desktopTransportFactory = deps.createDesktopTransportFactory();
   const base = {
@@ -186,6 +210,7 @@ export async function buildClientConfig(
     return {
       ...base,
       url: buildDaemonWebSocketUrl(connection.endpoint, { useTls: connection.useTls ?? false }),
+      ...directTcpE2eeConfig(connection, { required: RELEASE_POLICY.directE2eeRequired }),
     };
   }
 
@@ -200,7 +225,11 @@ export async function buildClientConfig(
       useTls: connection.useTls ?? shouldUseTlsForDefaultHostedRelay(connection.relayEndpoint),
       serverId,
     }),
-    e2ee: { enabled: true, daemonPublicKeyB64: connection.daemonPublicKeyB64 },
+    e2ee: {
+      enabled: true,
+      daemonPublicKeyB64: connection.daemonPublicKeyB64,
+      ...(connection.minimumSecurityMode ? { minimumMode: connection.minimumSecurityMode } : {}),
+    },
   };
 }
 
@@ -279,9 +308,11 @@ interface ProbeOptions {
   serverId?: string;
   timeoutMs?: number;
   password?: string;
+  sessionTokens?: DaemonClientConfig["sessionTokens"];
   localCredential?: DaemonClientConfig["localCredential"];
   capabilities?: DaemonClientConfig["capabilities"];
   trace?: DaemonClientConfig["trace"];
+  policy?: { tailnetOnly: boolean };
 }
 
 function resolveTimeout(connection: HostConnection, options?: ProbeOptions): number {

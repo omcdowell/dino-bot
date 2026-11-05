@@ -16,6 +16,11 @@ import { HostFilter } from "@/components/hosts/host-filter";
 import { ALL_HOSTS_OPTION_ID } from "@/components/hosts/host-picker";
 import { ScheduleFormSheet } from "@/components/schedules/schedule-form-sheet";
 import { SchedulesTable, type ScheduleRowView } from "@/components/schedules/schedules-table";
+import {
+  SystemdTimersSection,
+  useSystemdTimers,
+} from "@/components/schedules/systemd-timers-section";
+import type { SystemdTimer } from "@/schedules/systemd-timers";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -94,6 +99,7 @@ function SchedulesScreenContent(): ReactElement {
   const [form, setForm] = useState<FormState>({ mode: "closed" });
   const [selectedHost, setSelectedHost] = useState(ALL_HOSTS_OPTION_ID);
   const [statusFilter, setStatusFilter] = useState<ScheduleBucket>("runnable");
+  const timers = useSystemdTimers(selectedHost);
 
   useEffect(() => {
     if (
@@ -168,6 +174,7 @@ function SchedulesScreenContent(): ReactElement {
       <MenuHeader title="Schedules" />
       <SchedulesScreenBody
         rows={visibleRows}
+        timers={timers}
         loadState={loadState}
         hostErrors={hostErrors}
         showLoadError={showLoadError}
@@ -194,6 +201,7 @@ function SchedulesScreenContent(): ReactElement {
 
 function SchedulesScreenBody({
   rows,
+  timers,
   loadState,
   hostErrors,
   showLoadError,
@@ -208,6 +216,7 @@ function SchedulesScreenBody({
   onEdit,
 }: {
   rows: ScheduleRowView[];
+  timers: SystemdTimer[];
   loadState: AggregateLoadState<AggregatedSchedule>;
   hostErrors: ScheduleHostError[];
   showLoadError: boolean;
@@ -242,7 +251,7 @@ function SchedulesScreenBody({
     );
   }
 
-  if (bodyState.kind === "empty") {
+  if (bodyState.kind === "empty" && timers.length === 0) {
     return (
       <View style={styles.centered}>
         {hostErrors.length > 0 ? <ScheduleHostErrorsBanner errors={hostErrors} /> : null}
@@ -251,11 +260,13 @@ function SchedulesScreenBody({
     );
   }
 
-  let schedulesContent: ReactElement;
+  let schedulesContent: ReactElement | null;
   if (rows.length > 0) {
     schedulesContent = <SchedulesTable rows={rows} onEditSchedule={onEdit} />;
   } else if (statusFilter === "ended") {
     schedulesContent = <SchedulesEndedEmptyState />;
+  } else if (timers.length > 0) {
+    schedulesContent = null;
   } else {
     schedulesContent = (
       <View style={styles.filterEmpty}>
@@ -303,6 +314,9 @@ function SchedulesScreenBody({
       >
         {hostErrors.length > 0 ? <ScheduleHostErrorsBanner errors={hostErrors} /> : null}
         {schedulesContent}
+        {statusFilter === "runnable" ? (
+          <SystemdTimersSection timers={timers} showHost={hosts.length > 1} />
+        ) : null}
       </ScrollView>
     </View>
   );

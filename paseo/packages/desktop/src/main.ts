@@ -1,5 +1,7 @@
 process.emitWarning = (() => {}) as typeof process.emitWarning;
 
+import { registerNetworkProbeHandlers } from "./features/network-probe";
+import { registerPowerResumeEvents } from "./features/power-resume";
 import log from "electron-log/main";
 log.transports.console.level = "info";
 log.initialize({ spyRendererConsole: true });
@@ -106,12 +108,17 @@ import {
   type AgentDeepLinkTarget,
 } from "@getpaseo/protocol/agent-deep-link";
 import { AgentNavigationInbox, parseAgentDeepLinkFromArgv } from "./agent-navigation.js";
+import { AppLinkInbox, parseAppLinkFromArgv, readAppLink } from "./app-links.js";
+import { getDesktopFlavour } from "./flavour.js";
 
+const FLAVOUR = getDesktopFlavour();
 const DEV_SERVER_URL = process.env.EXPO_DEV_URL ?? "http://localhost:8081";
+// In-app scheme the renderer is served from (paseo://app/…); not registered with the OS. The OS
+// link scheme is FLAVOUR.linkScheme (electron-builder `protocols`).
 const APP_SCHEME = "paseo";
 const PASEO_DEBUG = process.env.PASEO_DEBUG === "1";
 const DISABLE_SINGLE_INSTANCE_LOCK = process.env.PASEO_DISABLE_SINGLE_INSTANCE_LOCK === "1";
-const APP_NAME = process.env.PASEO_TEST_APP_NAME?.trim() || "Paseo";
+const APP_NAME = process.env.PASEO_TEST_APP_NAME?.trim() || FLAVOUR.appName;
 const DESKTOP_WINDOW_CHROME_MODE = resolveDesktopWindowChromeMode({
   platform: process.platform,
   override: process.env.PASEO_DESKTOP_WINDOW_CONTROLS,
@@ -120,6 +127,7 @@ const DESKTOP_WINDOW_CHROME_MODE = resolveDesktopWindowChromeMode({
 const UPDATE_QUIT_DEADLINE_MS = 5_000;
 const pendingBrowserWindowOpenRequests = new PendingBrowserWindowOpenRequests();
 const agentNavigationInbox = new AgentNavigationInbox();
+const appLinkInbox = new AppLinkInbox();
 
 // A second-instance launch can arrive before the packaged protocol handler,
 // IPC handlers, and first window exist. Wait for full bootstrap, not just
@@ -131,8 +139,17 @@ const bootstrapComplete = new Promise<void>((resolve) => {
 let bootstrapIsComplete = false;
 
 app.setName(APP_NAME);
+// Public build: the About panel shows DinoBot's version (app/dinobot-version.js). app.getVersion()
+// stays package.json's engine version (daemon version checks).
+if (FLAVOUR.displayVersion) {
+  app.setAboutPanelOptions({
+    applicationName: APP_NAME,
+    applicationVersion: FLAVOUR.displayVersion,
+  });
+}
 log.info("[desktop] app startup", {
   version: app.getVersion(),
+  displayVersion: FLAVOUR.displayVersion,
   platform: process.platform,
   arch: process.arch,
   isPackaged: app.isPackaged,
@@ -320,7 +337,10 @@ if (forcedUserDataDir) {
     );
     const isWorktree = path.resolve(topLevel, ".git") !== commonDir;
     if (isWorktree) {
-      app.setPath("userData", path.join(app.getPath("appData"), `Paseo-${devWorktreeName}`));
+      app.setPath(
+        "userData",
+        path.join(app.getPath("appData"), `${FLAVOUR.appName}-${devWorktreeName}`),
+      );
       log.info("[worktree] isolated userData for worktree:", devWorktreeName);
     } else {
       devWorktreeName = null;
@@ -344,8 +364,10 @@ if (electronFlags) {
 
 if (process.platform === "linux") {
   // Keep the desktop/dock identity independent of the wrapped Electron filename.
-  app.setDesktopName("Paseo.desktop");
-  if (!app.commandLine.hasSwitch("class")) app.commandLine.appendSwitch("class", "Paseo");
+  app.setDesktopName(FLAVOUR.linuxDesktopName);
+  if (!app.commandLine.hasSwitch("class")) {
+    app.commandLine.appendSwitch("class", FLAVOUR.linuxWmClass);
+  }
   log.info("[linux-sandbox]", {
     enabled: !app.commandLine.hasSwitch("no-sandbox"),
     reason: process.env.PASEO_DESKTOP_SANDBOX_REASON ?? "Chromium default",
@@ -357,6 +379,11 @@ let pendingOpenProjectPath = parseOpenProjectPathFromArgv({
   isDefaultApp: process.defaultApp,
 });
 let pendingAgentNavigation = parseAgentDeepLinkFromArgv(process.argv);
+// A pairing link on the command line (Linux/Windows first launch from the OS link handler).
+const argvAppLink = FLAVOUR.appLinks
+  ? parseAppLinkFromArgv(process.argv, FLAVOUR.linkScheme)
+  : null;
+if (argvAppLink) appLinkInbox.push(argvAppLink);
 
 // Each window pulls its own pending open-project path on mount, keyed by
 // webContents id, so deep-linked windows (second-instance launches, the
@@ -384,6 +411,14 @@ ipcMain.handle("paseo:get-pending-open-project", (event) => {
 
 ipcMain.handle("paseo:agent-navigation:ready", (event) => {
   return agentNavigationInbox.windowReady(event.sender.id);
+});
+
+// Pairing / provider links (public flavour): the renderer takes the waiting link on mount and on
+// each "open-app-link" event, then routes it (packages/app/src/desktop/app-link-navigation.tsx).
+ipcMain.handle("paseo:app-link:take", (event) => {
+  const link = FLAVOUR.appLinks ? appLinkInbox.take() : null;
+  if (link) log.info("[app-link] taken", { webContentsId: event.sender.id });
+  return link;
 });
 
 ipcMain.handle("paseo:browser:register-attached", (event, rawInput: unknown) => {
@@ -829,7 +864,36 @@ desktopWindowOwner = createDesktopWindowOwner<AgentDeepLinkTarget>({
 // App lifecycle
 // ---------------------------------------------------------------------------
 
+/** A pairing or provider link from the OS: focus a window and tell its renderer to take it. */
+function receiveAppLink(link: string): void {
+  const fresh = appLinkInbox.receive(link, Date.now());
+  log.info("[app-link] received", { bootstrapped: bootstrapIsComplete, duplicate: !fresh });
+  if (!fresh) return;
+  if (!bootstrapIsComplete) return; // the first window takes it when it mounts
+  void (async () => {
+    const win =
+      BrowserWindow.getFocusedWindow() ??
+      BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed()) ??
+      null;
+    if (!win) {
+      await desktopWindowOwner.openAdditional();
+      return;
+    }
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    win.webContents.send("paseo:event:open-app-link", {});
+  })().catch((error) => log.error("[window] failed to route app link", error));
+}
+
 function receiveAgentDeepLink(input: string): void {
+  if (FLAVOUR.appLinks) {
+    const link = readAppLink(input, FLAVOUR.linkScheme);
+    if (link) {
+      receiveAppLink(link);
+      return;
+    }
+  }
   const target = parseAgentDeepLink(input);
   if (!target) {
     return;
@@ -873,6 +937,11 @@ function setupSingleInstanceLock(): boolean {
   }
 
   app.on("second-instance", (_event, commandLine) => {
+    const appLink = FLAVOUR.appLinks ? parseAppLinkFromArgv(commandLine, FLAVOUR.linkScheme) : null;
+    if (appLink) {
+      void bootstrapComplete.then(() => receiveAppLink(appLink));
+      return;
+    }
     const agentTarget = parseAgentDeepLinkFromArgv(commandLine);
     if (agentTarget) {
       void bootstrapComplete
@@ -965,6 +1034,8 @@ async function bootstrap(): Promise<void> {
   registerWindowManager({ mode: DESKTOP_WINDOW_CHROME_MODE });
   registerDialogHandlers();
   registerNotificationHandlers();
+  registerNetworkProbeHandlers();
+  registerPowerResumeEvents();
   const openExternalUrl = createExternalUrlOpener({ open: shell.openExternal });
   ipcMain.handle("paseo:opener:openUrl", (_event, value: unknown) => openExternalUrl(value));
   registerEditorTargetHandlers();
@@ -1010,7 +1081,9 @@ async function bootstrap(): Promise<void> {
 }
 
 void runDesktopStartup({
-  hasPendingGuiLaunchRequest: Boolean(pendingOpenProjectPath || pendingAgentNavigation),
+  hasPendingGuiLaunchRequest: Boolean(
+    pendingOpenProjectPath || pendingAgentNavigation || argvAppLink,
+  ),
   runCliPassthroughIfRequested,
   inheritLoginShellEnv,
   bootstrapGui: bootstrap,
@@ -1037,6 +1110,7 @@ const quitLifecycle = createQuitLifecycle({
       showShutdownFeedback: showDaemonShutdownDialog,
     }),
   installAppUpdateOnQuit: async (signal) => {
+    if (!FLAVOUR.appUpdates) return false;
     const settings = await getDesktopSettingsStore().get();
     return installAppUpdateOnQuit({
       currentVersion: app.getVersion(),

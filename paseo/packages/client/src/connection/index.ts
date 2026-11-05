@@ -126,6 +126,7 @@ export class ConnectionSubscriptions extends OwnedSubscriptions {
 // a resource supplied by the caller. Keep this exhaustive as the protocol evolves.
 export const DEFAULT_CLIENT_CAPABILITIES = {
   [CLIENT_CAPS.helloRejection]: true,
+  [CLIENT_CAPS.sessionTokens]: true,
   [CLIENT_CAPS.ownedSubscriptions]: true,
   [CLIENT_CAPS.allProviders]: true,
   [CLIENT_CAPS.selectiveAgentTimeline]: true,
@@ -140,6 +141,11 @@ export const DEFAULT_CLIENT_CAPABILITIES = {
   [CLIENT_CAPS.timelineReplacementInvalidation]: true,
   [CLIENT_CAPS.timelineNotifications]: true,
   [CLIENT_CAPS.pluginTimelineItems]: true,
+  [CLIENT_CAPS.messageReceivedAck]: true,
+  [CLIENT_CAPS.compressedFrames]: true,
+  [CLIENT_CAPS.checkedFrames]: true,
+  [CLIENT_CAPS.zstdFrames]: true,
+  [CLIENT_CAPS.agentPatches]: true,
   [CLIENT_CAPS.workspaceSetupBlocked]: true,
   [CLIENT_CAPS.explicitEventSubscriptions]: true,
 } satisfies Record<Exclude<ClientCapability, typeof CLIENT_CAPS.browserHost>, true>;

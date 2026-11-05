@@ -556,3 +556,32 @@ test("a hung login records its own timeout and still tries the next login", asyn
     { harness: "OpenCode", report: { status: "error", error: "Login rejected" } },
   ]);
 });
+
+test("a source registered after an agent's first lookup is discovered on its next lookup", async () => {
+  let fetches = 0;
+  const registry = new UsageSourceRegistry(Date.now, 300_000, undefined, {
+    hasAgent: (id) => id === "agent",
+    usageSession: () => ({ provider: "pi", env: {}, sessionKey: "launch" }),
+  });
+  registry.register(
+    source({
+      id: "early",
+      discover: async () => [{ key: "a", input: "a" }],
+      fetch: async () => {
+        fetches++;
+        return { status: "available", windows: [] };
+      },
+    }),
+  );
+  expect((await registry.listReports({ agentId: "agent" })).map((r) => r.id)).toEqual(["early:a"]);
+  registry.register(source({ id: "late", discover: async () => [{ key: "b", input: "b" }] }));
+  // Until the agent is queried again, its earlier accounts stay in the host listing.
+  expect((await registry.listReports({ reportIds: ["early:a"] })).map((r) => r.id)).toEqual([
+    "early:a",
+  ]);
+  expect((await registry.listReports({ agentId: "agent" })).map((r) => r.id)).toEqual([
+    "early:a",
+    "late:b",
+  ]);
+  expect(fetches).toBe(1);
+});

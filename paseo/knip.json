@@ -51,13 +51,8 @@
       "project": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}"]
     },
     "packages/relay": {
-      "entry": ["src/index.ts", "src/e2ee.ts", "src/cloudflare-adapter.ts", "src/**/*.test.ts"],
+      "entry": ["src/index.ts", "src/e2ee.ts", "src/**/*.test.ts"],
       "project": ["src/**/*.ts"]
-    },
-    "packages/website": {
-      "entry": ["src/router.tsx", "vite.config.ts", "src/routes/**/*.tsx"],
-      "project": ["src/**/*.{ts,tsx}"],
-      "ignore": ["src/routeTree.gen.ts"]
     },
     "packages/desktop": {
       "entry": ["src/main.ts", "src/preload.ts", "src/**/*.test.ts"],
@@ -91,7 +86,6 @@
     "xed",
     "eas",
     "playwright",
-    "wrangler",
     "powershell",
     "tsx",
     "vitest",

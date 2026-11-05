@@ -36,6 +36,36 @@ describe("JsonlFrameDecoder", () => {
     expect(problems).toEqual([]);
   });
 
+  it("publishes several frames from one chunk and keeps a trailing partial line", () => {
+    const { decoder, frames, problems } = decoderHarness();
+    decoder.write('{"a":1}\n\n{"b":2}\r\n{"c"');
+    expect(frames).toEqual([{ a: 1 }, { b: 2 }]);
+    decoder.write(":3}");
+    expect(frames).toHaveLength(2);
+    decoder.write("\n");
+    expect(frames).toEqual([{ a: 1 }, { b: 2 }, { c: 3 }]);
+    expect(problems).toEqual([]);
+  });
+
+  // A Pi get_messages reply for a long bot chat is one 60+ MB line. Rescanning the whole
+  // buffered line on every pipe read made decoding quadratic (64 MB took ~57 s, past the
+  // 60 s RPC timeout under load), so history replay failed.
+  it("decodes a very long single line in linear time", () => {
+    const { decoder, frames, problems } = decoderHarness();
+    const value = "x".repeat(32 * 1024 * 1024);
+    const line = `${JSON.stringify({ type: "response", id: "req_1", data: { value } })}\n`;
+    const startedAt = performance.now();
+    for (let offset = 0; offset < line.length; offset += 64 * 1024) {
+      decoder.write(line.slice(offset, offset + 64 * 1024));
+    }
+    const elapsedMs = performance.now() - startedAt;
+    expect(frames).toHaveLength(1);
+    expect((frames[0]?.data as { value: string }).value.length).toBe(value.length);
+    expect(problems).toEqual([]);
+    // The quadratic decoder needed ~5 s for 32 MB; a linear one needs well under a second.
+    expect(elapsedMs).toBeLessThan(2_000);
+  });
+
   it("reassembles a large ordered v2 frame", () => {
     const { decoder, frames, problems } = decoderHarness();
     const frame = { type: "models", value: "x".repeat(1024 * 1024) };

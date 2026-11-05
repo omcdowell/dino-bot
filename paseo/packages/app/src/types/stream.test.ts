@@ -1460,6 +1460,89 @@ describe("stream reducer canonical tool calls", () => {
     },
   );
 
+  it("takes the daemon's image references and keeps the local copy for preview", () => {
+    const messageId = "msg-user-image-refs";
+    const local = {
+      id: "att-local",
+      mimeType: "image/png",
+      storageType: "web-indexeddb" as const,
+      storageKey: "att-local",
+      createdAt: 1,
+    };
+    const ref = {
+      id: "b".repeat(64),
+      mimeType: "image/png",
+      source: `/home/u/.paseo/chat-images/bb/${"b".repeat(64)}.png`,
+      width: 10,
+      height: 10,
+    };
+    const initialState: StreamItem[] = [
+      {
+        kind: "user_message",
+        id: messageId,
+        clientMessageId: messageId,
+        text: "",
+        timestamp: new Date("2025-01-01T11:10:00Z"),
+        images: [local],
+      },
+    ];
+    const state = reduceStreamUpdate(
+      initialState,
+      {
+        type: "timeline",
+        provider: "pi",
+        item: { type: "user_message", text: "", messageId, images: [ref] },
+      },
+      new Date("2025-01-01T11:10:01Z"),
+    );
+    const message = state.find((item) => item.kind === "user_message");
+    assert.ok(message);
+    assert.deepStrictEqual(message.images, [{ ...ref, local }]);
+  });
+
+  it("keeps an image-only user message from history", () => {
+    const ref = {
+      id: "c".repeat(64),
+      mimeType: "image/jpeg",
+      source: `/x/${"c".repeat(64)}.jpg`,
+    };
+    const state = reduceStreamUpdate(
+      [],
+      {
+        type: "timeline",
+        provider: "pi",
+        item: { type: "user_message", text: "", messageId: "m-1", images: [ref] },
+      },
+      new Date("2025-01-01T11:10:01Z"),
+    );
+    expect(state).toHaveLength(1);
+    expect(state[0]).toMatchObject({ kind: "user_message", images: [ref] });
+  });
+
+  it("carries tool result images onto the tool call row", () => {
+    const ref = { id: "d".repeat(64), mimeType: "image/png", source: "/x/d.png" };
+    const state = reduceStreamUpdate(
+      [],
+      {
+        type: "timeline",
+        provider: "pi",
+        item: {
+          type: "tool_call",
+          callId: "call-img",
+          name: "read",
+          status: "completed",
+          error: null,
+          detail: { type: "read", filePath: "/tmp/a.png" },
+          images: [ref],
+        },
+      },
+      new Date("2025-01-01T11:10:01Z"),
+    );
+    const call = state.find(isAgentToolCallItem);
+    assert.ok(call);
+    expect(call.payload.data.images).toEqual([ref]);
+  });
+
   it("preserves submitted user message images when authoritative user message arrives", () => {
     const messageId = "msg-user-images";
     const submittedTimestamp = new Date("2025-01-01T11:10:00Z");

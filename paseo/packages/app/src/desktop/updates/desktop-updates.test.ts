@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 async function loadModuleForPlatform(platform: "web" | "ios" | "android") {
   vi.resetModules();
-  vi.doMock("react-native", () => ({ Platform: { OS: platform } }));
+  // i18n reaches constants/flavour, which reads expo-constants (needs NativeModules).
+  vi.doMock("react-native", () => ({ Platform: { OS: platform }, NativeModules: {} }));
   return import("./desktop-updates");
 }
 

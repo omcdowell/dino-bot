@@ -23,7 +23,11 @@ function listPublishedFiles(): Set<string> {
     cwd: RELAY_PACKAGE_ROOT,
     encoding: "utf8",
   });
-  const [pack] = JSON.parse(output) as Array<{ files: Array<{ path: string }> }>;
+  // npm <= 11 prints an array of packs; npm 12 an object keyed by package name.
+  const parsed = JSON.parse(output) as
+    | Array<{ files: Array<{ path: string }> }>
+    | Record<string, { files: Array<{ path: string }> }>;
+  const [pack] = Array.isArray(parsed) ? parsed : Object.values(parsed);
   return new Set(pack.files.map((file) => file.path));
 }
 

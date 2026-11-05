@@ -12,6 +12,7 @@ export function toPluginTheme(theme: Theme): PluginTheme {
       foregroundMuted: theme.colors.foregroundMuted,
       accent: theme.colors.accent,
       accentForeground: theme.colors.accentForeground,
+      accentText: theme.colors.accentText,
       statusSuccess: theme.colors.statusSuccess,
       statusWarning: theme.colors.statusWarning,
       statusDanger: theme.colors.statusDanger,

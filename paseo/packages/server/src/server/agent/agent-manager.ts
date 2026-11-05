@@ -47,6 +47,7 @@ import {
   type AgentSessionConfig,
   type SteerResult,
   type AgentStreamEvent,
+  type AgentTimelineImage,
   type AgentTimelineItem,
   type AgentUsage,
   type AgentRuntimeInfo,
@@ -80,6 +81,7 @@ import {
 } from "./agent-run-state.js";
 import { invokeRewindCapability, type RewindMode } from "./rewind/rewind.js";
 import { projectAgentMessage } from "./agent-messages/index.js";
+import { storeChatImages } from "./chat-images/store.js";
 import { isStaleProviderSessionError } from "./stale-provider-session-error.js";
 import { stripInternalPaseoMcpServer, withRuntimePaseoMcpServer } from "./runtime-mcp-config.js";
 import { resolveCreateAgentTitles } from "./create-agent-title.js";
@@ -109,6 +111,18 @@ const STORED_AGENT_CAPABILITIES: AgentCapabilityFlags = {
 };
 
 type TimeoutResult = "completed" | "timed_out";
+
+/** References for the images the user attached; the bytes go to the chat image store. */
+function submittedPromptImages(prompt: AgentPromptInput): AgentTimelineImage[] {
+  if (typeof prompt === "string") return [];
+  return storeChatImages(
+    prompt.flatMap((block) =>
+      block.type === "image" && "data" in block && typeof block.data === "string"
+        ? [{ data: block.data, mimeType: block.mimeType }]
+        : [],
+    ),
+  );
+}
 
 function submittedPromptText(prompt: AgentPromptInput): string {
   if (typeof prompt === "string") {
@@ -443,6 +457,11 @@ interface ManagedAgentBase {
    * User-defined labels for categorizing agents (e.g., { surface: "workspace" }).
    */
   labels: Record<string, string>;
+  /** Messages the daemon holds until the agent is idle (agent-queue). */
+  messageQueue?: {
+    revision: number;
+    items: Array<{ messageId: string; text: string; createdAt: string }>;
+  };
 }
 
 type ManagedAgentWithSession = ManagedAgentBase & {
@@ -742,6 +761,8 @@ export class AgentManager {
   private readonly providerDefinitions = new Map<AgentProvider, ProviderEnabledFlag>();
   private readonly agents = new Map<string, LiveManagedAgent>();
   private readonly timelineStore = new InMemoryAgentTimelineStore();
+  /** Client message ids whose turn start definitely failed, per agent (in memory). */
+  private readonly rejectedSubmissions = new Map<string, Set<string>>();
   private readonly providerSubagents = new ProviderSubagentStore();
   private readonly agentsAwaitingInitialSnapshotPersist = new Set<string>();
   private readonly sessionEventTails = new Map<string, Promise<void>>();
@@ -1199,6 +1220,26 @@ export class AgentManager {
   usageSession(id: string) {
     const agent = this.agents.get(id);
     return agent?.session?.usageSession?.() ?? null;
+  }
+
+  /**
+   * Whether the agent took a client message: "accepted" once its canonical user message is
+   * recorded, "rejected" when its turn start definitely failed, "none" when this daemon has no
+   * record of it (never seen, or lost with a restart).
+   */
+  getSubmittedMessageOutcome(
+    agentId: string,
+    clientMessageId: string,
+  ): "accepted" | "rejected" | "none" {
+    if (this.rejectedSubmissions.get(agentId)?.has(clientMessageId)) return "rejected";
+    if (!this.agents.has(agentId)) return "none";
+    try {
+      return this.timelineStore.getSubmittedUserMessage(agentId, clientMessageId)
+        ? "accepted"
+        : "none";
+    } catch {
+      return "none";
+    }
   }
 
   getAgent(id: string): ManagedAgent | null {
@@ -1785,6 +1826,12 @@ export class AgentManager {
     await agent.session.close();
     this.cancelRunningProviderSubagents(agentId);
     const closedAgent = this.prepareAgentForClosure(agent, "agent closed");
+    if (!agent.historyPrimed) {
+      // A timeline whose provider history never loaded (a timed-out replay) must not
+      // outlive its runtime: the next resume would read its presence as "primed" and
+      // skip the replay, leaving the chat without its history.
+      this.timelineStore.delete(agentId);
+    }
 
     let persistError: unknown;
     try {
@@ -2209,6 +2256,20 @@ export class AgentManager {
       throw new Error(`Agent not found in storage after detach: ${agentId}`);
     }
     return { record: result.record, live: false, previousParentAgentId };
+  }
+
+  /** Publishes the daemon-held message queue on the agent snapshot. */
+  setMessageQueue(
+    agentId: string,
+    queue: {
+      revision: number;
+      items: Array<{ messageId: string; text: string; createdAt: string }>;
+    },
+  ): void {
+    const agent = this.agents.get(agentId);
+    if (!agent || agent.internal) return;
+    agent.messageQueue = queue.items.length > 0 ? queue : undefined;
+    this.emitState(agent, { persist: false });
   }
 
   notifyAgentState(agentId: string): void {
@@ -4809,13 +4870,20 @@ export class AgentManager {
     outcome: "accepted" | "rejected",
     options?: { messageId?: string; providerMessageId?: string; turnId?: string },
   ): void {
+    const images = submittedPromptImages(prompt);
     const item = projectAgentMessage({
       type: "user_message",
       text: submittedPromptText(prompt),
       clientMessageId,
       ...(options?.messageId ? { messageId: options.messageId } : {}),
+      ...(images.length > 0 ? { images } : {}),
     });
     if (!item) return;
+    const rejected = this.rejectedSubmissions.get(agent.id) ?? new Set<string>();
+    if (outcome === "rejected") rejected.add(clientMessageId);
+    else rejected.delete(clientMessageId);
+    if (rejected.size > 0) this.rejectedSubmissions.set(agent.id, rejected);
+    else this.rejectedSubmissions.delete(agent.id);
     // Human attempts stay in history on rejection; delivery notifications require acceptance.
     if (outcome === "rejected" && item.type !== "user_message") return;
     this.recordSubmittedPromptItem(agent, item, options);

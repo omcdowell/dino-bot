@@ -65,6 +65,13 @@ export interface PluginSurfaceProps extends PluginNavigableHostProps {}
 export interface PluginScreenProps extends PluginSurfaceProps {
   /** The params the screen was opened with; `{}` when none. */
   params: PluginScreenParams;
+  /**
+   * Set when the host draws this screen's `mobileFloatingHeader` (phones, on hosts that support
+   * it): the points at the top of the screen it covers. Scroll views from `react-native` already
+   * leave this room; lay out other top-pinned content below it. Undefined when the host draws its
+   * own header bar instead (wide layouts, older hosts), so keep your own header controls then.
+   */
+  floatingHeaderInset?: number;
 }
 
 export interface PluginPopoverProps extends PluginHostProps {
@@ -72,7 +79,11 @@ export interface PluginPopoverProps extends PluginHostProps {
   openScreen(input: PluginOpenScreenInput): void;
 }
 
-export interface PluginSidebarItemProps extends PluginHostProps {
+/**
+ * `navigation` opens agents and workspaces straight from a row, closing the popover and compact drawer
+ * first. Undefined on hosts older than this field.
+ */
+export interface PluginSidebarItemProps extends PluginNavigableHostProps {
   /** This plugin's screen open on this item's host, with its params, else null. */
   currentScreen: PluginScreenLocation | null;
   openScreen(input: PluginOpenScreenInput): void;
@@ -151,6 +162,18 @@ export interface PluginClientContext extends PluginCommandCapabilities, PluginCl
     contribution: PluginTimelineRendererContribution<Schema>,
   ): PluginCleanup;
   openPanel(id: string, options: PluginClientOpenPanelOptions): void;
+  /** Events this plugin's server emits (`server.emit`). Missing on older apps: check first. */
+  events?: PluginClientEvents;
+}
+
+export interface PluginClientEvents {
+  /**
+   * True while this app receives the plugin's events from the host. False on hosts that cannot
+   * push, so poll instead. Events are not replayed: refetch when it turns true.
+   */
+  readonly live: boolean;
+  on(name: string, listener: (data: unknown) => void): PluginCleanup;
+  onLiveChange(listener: (live: boolean) => void): PluginCleanup;
 }
 
 export type PluginClientContribution = (client: PluginClientContext) => PluginCleanup;
@@ -179,6 +202,45 @@ export interface PluginScreenContribution {
   id: string;
   title: PluginScreenTitle;
   Component: ComponentType<PluginScreenProps>;
+  /**
+   * On phones, this screen is the app's start screen and replaces the main menu: the menu button
+   * becomes Back to this screen. It renders without the host header; the host draws a top bar with
+   * the app menu instead. Ignored on wide layouts. The first installed plugin that sets it wins.
+   */
+  mobileHome?: boolean;
+  /**
+   * On phones, open this screen like a bot chat: no header bar, but floating glass controls over
+   * the content as in the chat (back, a title pill with `Avatar` and the screen title, `Controls`
+   * on the right), and, when opened from the phone home, the chat's slide in and edge swipe back.
+   * The screen gets `floatingHeaderInset`. Ignored on wide layouts and by older hosts.
+   */
+  mobileFloatingHeader?: PluginScreenFloatingHeader;
+  /**
+   * With `mobileHome`: entries at the top of the phone home's "⋯" menu, under `title`, above the
+   * app's own entries. `onSelect` runs after the menu closes. Ignored by older hosts and elsewhere.
+   */
+  mobileHomeMenu?: PluginMobileHomeMenu;
+}
+
+export interface PluginMobileHomeMenu {
+  /** Small section label above the items. */
+  title?: string;
+  items: readonly PluginMobileHomeMenuItem[];
+}
+
+export interface PluginMobileHomeMenuItem {
+  id: string;
+  title: string;
+  /** Lucide icon name. */
+  icon: string;
+  onSelect(): void;
+}
+
+export interface PluginScreenFloatingHeader {
+  /** Drawn before the title in the title pill; at most 28 pt tall. */
+  Avatar?: ComponentType<PluginScreenProps>;
+  /** Buttons for the glass pill on the right (each about 40 x 36 pt). No pill when absent. */
+  Controls?: ComponentType<PluginScreenProps>;
 }
 
 export interface PluginSurfaceContribution {

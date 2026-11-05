@@ -5,8 +5,6 @@ const { smokePackagedDesktopApp } = require("../e2e/packaged-app-smoke.js");
 
 const { installLinuxLauncher } = require("./linux-sandbox");
 
-const EXECUTABLE_NAME = "Paseo";
-
 // electron-builder arch enum → Node.js arch string
 const ARCH_MAP = { 0: "ia32", 1: "x64", 2: "armv7l", 3: "arm64", 4: "universal" };
 
@@ -75,10 +73,10 @@ function pruneSharpLibvips(nodeModules, platform, arch) {
   }
 }
 
-function pruneNativeModules(appOutDir, platform, arch) {
+function pruneNativeModules(appOutDir, platform, arch, productFilename) {
   const resourcesDir =
     platform === "darwin"
-      ? path.join(appOutDir, `${EXECUTABLE_NAME}.app`, "Contents", "Resources")
+      ? path.join(appOutDir, `${productFilename}.app`, "Contents", "Resources")
       : path.join(appOutDir, "resources");
 
   const nodeModules = path.join(resourcesDir, "app.asar.unpacked", "node_modules");
@@ -115,10 +113,15 @@ exports.default = async function afterPack(context) {
   const platform = context.electronPlatformName;
   const arch = ARCH_MAP[context.arch] || process.arch;
 
-  pruneNativeModules(context.appOutDir, platform, arch);
+  // "Paseo" for the own build, "DinoBot" for the public one (electron-builder.dinobot.cjs).
+  const productFilename = context.packager?.appInfo?.productFilename ?? "Paseo";
+  const executableName = context.packager?.executableName ?? "Paseo";
+  process.env.PASEO_DESKTOP_EXECUTABLE_NAME = executableName;
+
+  pruneNativeModules(context.appOutDir, platform, arch, productFilename);
 
   if (platform === "linux") {
-    installLinuxLauncher(context.appOutDir);
+    installLinuxLauncher(context.appOutDir, executableName);
   }
 
   if (platform === "linux" || platform === "win32") {

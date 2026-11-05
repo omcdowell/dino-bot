@@ -23,6 +23,7 @@ import type { StreamItem } from "@/types/stream";
 import type { Theme } from "@/styles/theme";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { useKeyboardStreamInset } from "@/keyboard/shift";
+import { useFloatingHeaderInset } from "@/components/headers/floating-header-inset";
 import { useRevisedHistoryRows } from "./history-row-revision";
 import { useBottomAnchorController } from "./bottom-anchor-controller";
 import { useScrollKeyboardDismiss } from "./scroll-keyboard-dismiss/use-scroll-keyboard-dismiss";
@@ -104,7 +105,10 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
   const scrollOffsetYRef = useRef(0);
   const isUserScrollActiveRef = useRef(false);
   const scrollKeyboardDismiss = useScrollKeyboardDismiss();
-  const streamKeyboardInset = useKeyboardStreamInset();
+  // The phone's floating header covers the top of the chat; history scrolls under it but must be
+  // able to come out below it, so it is scroll room at the inverted list's far end.
+  const floatingHeaderInset = useFloatingHeaderInset();
+  const streamKeyboardInset = useKeyboardStreamInset(floatingHeaderInset);
   const userScrollEndFrameIdRef = useRef<number | null>(null);
   const programmaticScrollEventBudgetRef = useRef(0);
   const isNativeViewportSettlingRef = useRef(false);
@@ -335,6 +339,12 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
   useEffect(() => {
     const handle: StreamViewportHandle = {
       scrollToBottom: (reason = "jump-to-bottom") => {
+        if (reason === "jump-to-bottom" || reason === "message-sent") {
+          // Explicit intent beats in-flight momentum: drop the gesture so a late
+          // drag-end/momentum-end cannot detach the anchor we are about to apply.
+          clearPendingUserScrollEnd();
+          isUserScrollActiveRef.current = false;
+        }
         bottomAnchorController.requestLocalAnchor({
           agentId,
           reason,
@@ -351,7 +361,13 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
         viewportRef.current = null;
       }
     };
-  }, [agentId, bottomAnchorController, markNativeViewportSettling, viewportRef]);
+  }, [
+    agentId,
+    bottomAnchorController,
+    clearPendingUserScrollEnd,
+    markNativeViewportSettling,
+    viewportRef,
+  ]);
 
   const isScrollEventNearBottom = useStableEvent(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {

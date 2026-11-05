@@ -501,6 +501,42 @@ describe("PiRpcAgentSession", () => {
     );
   });
 
+  test("attaches the image a read returns to the tool call, by reference", async () => {
+    const png =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const { pi, session, events } = await createSession();
+    const fakeSession = pi.latestSession();
+    await session.startTurn("look at a.png");
+    fakeSession.emit({
+      type: "tool_execution_start",
+      toolCallId: "read-1",
+      toolName: "read",
+      args: { path: "a.png" },
+    });
+    fakeSession.emit({
+      type: "tool_execution_end",
+      toolCallId: "read-1",
+      toolName: "read",
+      result: {
+        content: [
+          { type: "text", text: "Read image file [image/png]" },
+          { type: "image", data: png, mimeType: "image/png" },
+        ],
+      },
+      isError: false,
+    });
+    fakeSession.finishTurn();
+    await events.nextTurnCompletion();
+    const read = events
+      .timelineItems()
+      .find((item) => item.type === "tool_call" && item.status === "completed");
+    expect(read).toMatchObject({
+      detail: { type: "read", filePath: "a.png", content: "Read image file [image/png]" },
+      images: [{ mimeType: "image/png", width: 1, height: 1, byteSize: 70 }],
+    });
+    expect(JSON.stringify(read)).not.toContain(png);
+  });
+
   test("close resolves after rejected child hydration", async () => {
     const { pi, session } = await createSession();
     Object.assign(session, {
@@ -1931,6 +1967,38 @@ describe("PiRpcAgentSession", () => {
       model: "kimi-coding/kimi-k3",
       thinkingOptionId: "high",
     });
+  });
+
+  test("tells the manager when a model change moves Pi's thinking level", async () => {
+    const { pi, session } = await createSession();
+    onTestFinished(() => session.close());
+    const fakeSession = pi.latestSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    fakeSession.setModelResult = RESTRICTED_THINKING_MODEL;
+    // Pi applies the new model's own thinking level (settings modelThinkingLevels / default).
+    fakeSession.state = { ...fakeSession.state, thinkingLevel: "high" };
+
+    await session.setModel("kimi-coding/kimi-k3");
+
+    expect(events).toContainEqual({
+      type: "thinking_option_changed",
+      provider: "pi",
+      thinkingOptionId: "high",
+    });
+  });
+
+  test("stays quiet when a model change keeps Pi's thinking level", async () => {
+    const { pi, session } = await createSession();
+    onTestFinished(() => session.close());
+    const fakeSession = pi.latestSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    fakeSession.setModelResult = { provider: "openrouter", id: "model-a", name: "Model A" };
+
+    await session.setModel("openrouter/model-a");
+
+    expect(events.filter((event) => event.type === "thinking_option_changed")).toEqual([]);
   });
 
   test("reports updated Pi thinking state instead of a cached selection", async () => {

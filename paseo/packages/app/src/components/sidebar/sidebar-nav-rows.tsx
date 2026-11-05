@@ -1,11 +1,13 @@
 import { router, usePathname } from "expo-router";
-import { CalendarClock, History, Plus, Search } from "lucide-react-native";
+import { Bot, CalendarClock, History, Plus, Search } from "lucide-react-native";
 import { memo, useCallback, useMemo, useRef, type ComponentType } from "react";
 import { useTranslation } from "react-i18next";
 import { View, type StyleProp, type ViewStyle } from "react-native";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
 import { PluginSidebarItem } from "@/plugins/sidebar-items";
+import { isMobileHomePathname } from "@/plugins/mobile-home";
+import { goToMobileHome, useMobileHome, useStartHome } from "@/plugins/mobile-home-runtime";
 import { canCreateWorktreeForProjectKind } from "@/projects/host-projects";
 import { useHostFeature } from "@/runtime/host-features";
 import {
@@ -46,6 +48,7 @@ export function SidebarNavRows({ style, onBeforeNavigate }: SidebarNavRowsProps)
 
   return (
     <View ref={groupRef} collapsable={false} style={style}>
+      <SidebarStartHomeRow onBeforeNavigate={onBeforeNavigate} />
       {visibleItems.map((item) => {
         if (item.kind === "plugin") {
           return (
@@ -111,6 +114,32 @@ const SidebarNewWorkspaceRow = memo(function SidebarNewWorkspaceRow({
     />
   );
 });
+
+/**
+ * DinoBot desktop app: a "Bots" row back to the start home (the plugin's Bots home). Only where the
+ * start home is not the phone home (phones have their own top bar), so nowhere in the own build.
+ */
+function SidebarStartHomeRow({ onBeforeNavigate }: SidebarNavRowProps) {
+  const pathname = usePathname();
+  const phoneHome = useMobileHome();
+  const startHome = useStartHome();
+  const handlePress = useCallback(() => {
+    if (!startHome) return;
+    onBeforeNavigate?.();
+    goToMobileHome(startHome);
+  }, [onBeforeNavigate, startHome]);
+  if (!startHome || phoneHome) return null;
+  return (
+    <SidebarHeaderRow
+      icon={Bot}
+      label="Bots"
+      onPress={handlePress}
+      isActive={isMobileHomePathname(pathname, startHome)}
+      testID="sidebar-bots-home"
+      variant="compact"
+    />
+  );
+}
 
 function SidebarHistoryRow({ onBeforeNavigate }: SidebarNavRowProps) {
   const { t } = useTranslation();

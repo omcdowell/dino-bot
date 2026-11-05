@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="packages/website/public/logo.svg" width="64" height="64" alt="Paseo logo">
-</p>
-
 <h1 align="center">Paseo</h1>
 
 <p align="center">
@@ -130,7 +126,6 @@ Monorepo 包结构速览：
 - `packages/cli`：用于 daemon 和 agent 工作流的 `paseo` CLI
 - `packages/desktop`：Electron 桌面 app
 - `packages/relay`：用于远程连接的 relay 包
-- `packages/website`：营销站点和文档（`paseo.sh`）
 
 常用命令：
 
@@ -142,7 +137,6 @@ npm run dev
 npm run dev:server
 npm run dev:app
 npm run dev:desktop
-npm run dev:website
 
 # 构建 server stack
 npm run build:server
@@ -155,7 +149,7 @@ npm run typecheck
 
 Paseo 由一个人开发，靠使用它的人来资助。你可以通过 [GitHub Sponsors](https://github.com/sponsors/boudra) 支持这项工作。公司也可以按月[赞助 Paseo](https://paseo.sh/sponsor#spot)，logo 会展示在这里和 paseo.sh 首页上。
 
-<!-- Sponsor logos go here, in the same order as packages/website/src/data/sponsors.ts -->
+<!-- Sponsor logos go here -->
 
 ## 相关项目
 

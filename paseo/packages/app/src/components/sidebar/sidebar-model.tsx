@@ -20,6 +20,10 @@ import { buildSidebarProjection } from "./sidebar-projection";
 import type { SidebarProjectIconTarget } from "@/utils/sidebar-project-row-model";
 import { filterWorkspacesByLabels, type SidebarWorkspaceGroup } from "./sidebar-labels";
 import { filterWorkspacesByProjects, resolveActiveProjectFilters } from "./sidebar-project-filter";
+import { isBotPlacement, withoutBotWorkspaces } from "./bot-workspaces";
+import { isPublicDesktopApp } from "@/desktop/public-desktop";
+import { useIsCompactFormFactor } from "@/constants/layout";
+import { useBotDirectoryKeys } from "@/plugins/use-bot-directories";
 import {
   hasAuthoritativeWorkspaceLabelCatalog,
   useWorkspaceLabelProjection,
@@ -56,7 +60,23 @@ export function SidebarModelProvider({
   children: ReactNode;
 }) {
   const { t } = useTranslation();
-  const list = useSidebarWorkspacesList({ enabled: active });
+  const rawList = useSidebarWorkspacesList({ enabled: active });
+  // DinoBot desktop app: bots are in the Bots list; their workspaces are not listed again.
+  const compact = useIsCompactFormFactor();
+  const botDirectoryKeys = useBotDirectoryKeys(!compact && isPublicDesktopApp());
+  const list = useMemo(
+    () =>
+      botDirectoryKeys.size === 0
+        ? rawList
+        : {
+            ...rawList,
+            projects: withoutBotWorkspaces(rawList.projects, botDirectoryKeys),
+            workspacePlacements: rawList.workspacePlacements.filter(
+              (placement) => !isBotPlacement(placement, botDirectoryKeys),
+            ),
+          },
+    [botDirectoryKeys, rawList],
+  );
   const showBackground = useSidebarViewStore((state) => state.showBackground);
   const groupMode = useSidebarViewStore((state) => state.groupMode);
   const labelFilter = useSidebarViewStore((state) => state.labelFilter);

@@ -288,10 +288,21 @@ export async function readExplorerFileBytes({
   }
 }
 
+/** Smallest chunk a client may ask for: progress granularity, not a throughput knob. */
+export const FILE_EXPLORER_MIN_CHUNK_BYTES = 8 * 1024;
+
 export async function streamExplorerFile(
   { root, relativePath }: ReadFileParams,
   consume: (file: FileExplorerFileStream) => Promise<void>,
+  options: { chunkBytes?: number } = {},
 ): Promise<void> {
+  const chunkBytes = Math.max(
+    FILE_EXPLORER_MIN_CHUNK_BYTES,
+    Math.min(
+      FILE_EXPLORER_STREAM_CHUNK_BYTES,
+      options.chunkBytes ?? FILE_EXPLORER_STREAM_CHUNK_BYTES,
+    ),
+  );
   const filePath = await resolveScopedPath({ root, relativePath });
   const handle = await openFileForRead(filePath.resolvedPath);
 
@@ -324,7 +335,7 @@ export async function streamExplorerFile(
       size: advertisedSize,
       modifiedAt: stats.mtime.toISOString(),
       revision: advertisedRevision,
-      chunks: readFileHandleChunks(handle, advertisedSize, advertisedRevision),
+      chunks: readFileHandleChunks(handle, advertisedSize, advertisedRevision, chunkBytes),
     });
   } finally {
     await handle.close();
@@ -371,12 +382,11 @@ async function* readFileHandleChunks(
   handle: FileHandle,
   advertisedSize: number,
   advertisedRevision: string,
+  chunkBytes: number,
 ): AsyncIterable<Uint8Array> {
   let position = 0;
   while (position < advertisedSize) {
-    const chunk = Buffer.allocUnsafe(
-      Math.min(FILE_EXPLORER_STREAM_CHUNK_BYTES, advertisedSize - position),
-    );
+    const chunk = Buffer.allocUnsafe(Math.min(chunkBytes, advertisedSize - position));
     const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, position);
     if (bytesRead === 0) {
       throw new Error("File changed during transfer");

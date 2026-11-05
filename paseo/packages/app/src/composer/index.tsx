@@ -1,4 +1,6 @@
+import type { ActiveTurnBehavior } from "@getpaseo/protocol/messages";
 import type { ComposerTextSource } from "./text-source";
+import { stopSquareSize } from "./stop-square";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { useStore } from "zustand";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
@@ -107,17 +109,27 @@ import {
 } from "@/attachments/service";
 import { resolveAgentControlsMode } from "@/composer/agent-controls/mode";
 import { resolveComposerInputMode, type ComposerInputMode } from "@/composer/input-mode";
-import { resolveActiveSendBehavior } from "./input/state";
+import {
+  resolveActiveSendBehavior,
+  resolveAgentSendBehavior,
+  resolveSubmitTurnBehavior,
+  SEND_BEHAVIOR_LABEL,
+  type SendBehavior,
+} from "./input/state";
+import { supportsDaemonQueue, supportsOutbox } from "./outbox/features";
 import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
 import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
 import type { MessageInputKeyboardActionKind } from "@/keyboard/actions";
 import { submitAgentInput } from "@/composer/submit";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
+import { enqueueOutboxMessage } from "@/composer/outbox/sender";
+import { consumeOutboxEdit, useOutboxStore } from "@/stores/outbox-store";
 import { ComposerKeyboardScopeProvider, useComposerKeyboardScope } from "@/composer/keyboard-scope";
 import { useAppSettings } from "@/hooks/use-settings";
 import { RenderProfile } from "@/utils/render-profiler";
 import { AfterPaintPublication } from "@/composer/after-paint-publication";
 import { isWeb, isNative } from "@/constants/platform";
+import { useComposerSwipeDismiss } from "@/composer/swipe-keyboard-dismiss/use-composer-swipe-dismiss";
 import type { ForgeSearchItem } from "@getpaseo/protocol/messages";
 import type {
   AttachmentMetadata,
@@ -127,7 +139,10 @@ import type {
   WorkspaceComposerAttachment,
 } from "@/attachments/types";
 import type { SelectedFile } from "@/attachments/selected-file";
-import { resolveComposerAttachmentSubmitFormat } from "@/composer/attachments/submit";
+import {
+  resolveComposerAttachmentSubmitFormat,
+  splitComposerAttachmentsForSubmit,
+} from "@/composer/attachments/submit";
 import { composerWorkspaceAttachment } from "@/composer/attachments/workspace";
 import { useWorkspaceAttachmentsForScopes } from "@/attachments/workspace-attachments-store";
 import { droppedItemsToSelectedFiles } from "@/composer/attachments/drop";
@@ -1072,7 +1087,7 @@ function ComposerCancelButton({
   const icon = isCancellingAgent ? (
     <LoadingSpinner size="small" color="white" />
   ) : (
-    <Square size={buttonIconSize} color="white" fill="white" />
+    <Square size={stopSquareSize(buttonIconSize)} color="white" fill="white" />
   );
   const shortcutNode = agentInterruptKeys ? <Shortcut chord={agentInterruptKeys} /> : null;
   return (
@@ -1431,12 +1446,14 @@ function ComposerContentImpl({
   const { pickImages } = useImageAttachmentPicker();
   const { pickFiles } = useFilePicker();
   const agentIdRef = useRef(agentId);
+  const sendBehaviorRef = useRef<SendBehavior>("interrupt");
+  const isAgentRunningRef = useRef(false);
   const sendAgentMessageRef = useRef<
     | ((
         agentId: string,
         text: string,
         attachments: ComposerAttachment[],
-        activeTurnBehavior: "interrupt" | "steer",
+        activeTurnBehavior: ActiveTurnBehavior,
       ) => Promise<void>)
     | null
   >(null);
@@ -1503,10 +1520,14 @@ function ComposerContentImpl({
         agentIdRef.current,
         text,
         submitAttachments,
-        appSettings.sendBehavior === "steer" ? "steer" : "interrupt",
+        resolveSubmitTurnBehavior({
+          sendBehavior: sendBehaviorRef.current,
+          isAgentRunning: isAgentRunningRef.current,
+          daemonQueue: supportsDaemonQueue(serverId),
+        }),
       );
     },
-    [appSettings.sendBehavior, cwd, onMessageSent, t],
+    [cwd, onMessageSent, serverId, t],
   );
 
   useEffect(() => {
@@ -1518,8 +1539,28 @@ function ComposerContentImpl({
       targetAgentId: string,
       text: string,
       sendAttachments: ComposerAttachment[],
-      activeTurnBehavior: "interrupt" | "steer",
+      activeTurnBehavior: ActiveTurnBehavior,
     ) => {
+      if (supportsOutbox(serverId)) {
+        // Saved first, delivered by the outbox sender (also while offline); the pinned bubble
+        // shows its ticks.
+        const wirePayload = splitComposerAttachmentsForSubmit(sendAttachments, {
+          format: resolveComposerAttachmentSubmitFormat({
+            supportsForgeAttachments: supportsForgeSearch,
+          }),
+        });
+        await enqueueOutboxMessage({
+          serverId,
+          agentId: targetAgentId,
+          text,
+          images: wirePayload.images,
+          attachments: wirePayload.attachments,
+          composerAttachments: sendAttachments,
+          activeTurnBehavior,
+        });
+        onAttentionPromptSend?.();
+        return;
+      }
       if (!client) {
         throw new Error(t("workspace.terminal.hostDisconnected"));
       }
@@ -1544,7 +1585,7 @@ function ComposerContentImpl({
       });
       onAttentionPromptSend?.();
     };
-  }, [appSettings.sendBehavior, client, onAttentionPromptSend, serverId, supportsForgeSearch, t]);
+  }, [client, onAttentionPromptSend, serverId, supportsForgeSearch, t]);
 
   useEffect(() => {
     onSubmitMessageRef.current = onSubmitMessage;
@@ -1567,10 +1608,16 @@ function ComposerContentImpl({
     }
     return false;
   });
-  const activeSendBehavior = resolveActiveSendBehavior(
-    appSettings.sendBehavior,
-    hasPendingPermission,
+  const agentSendBehaviorLabel = useSessionStore(
+    (state) => state.sessions[serverId]?.agents.get(agentId)?.labels?.[SEND_BEHAVIOR_LABEL],
   );
+  const effectiveSendBehavior = resolveAgentSendBehavior(
+    appSettings.sendBehavior,
+    agentSendBehaviorLabel,
+  );
+  sendBehaviorRef.current = effectiveSendBehavior;
+  isAgentRunningRef.current = isAgentRunning;
+  const activeSendBehavior = resolveActiveSendBehavior(effectiveSendBehavior, hasPendingPermission);
   const hasAgent = agentState.status !== null;
 
   const queueWriter = useMemo<QueueWriter>(
@@ -1583,6 +1630,20 @@ function ComposerContentImpl({
 
   const queueMessage = useCallback(
     (queuedMessage: string, queuedAttachments: ComposerAttachment[]) => {
+      if (supportsDaemonQueue(serverId) && sendAgentMessageRef.current) {
+        // The daemon holds it (grey double tick) and hands it over when the agent is idle.
+        const send = sendAgentMessageRef.current;
+        replaceUserInput("");
+        setSelectedAttachments([]);
+        resetSuppression();
+        clearSentAttachments(queuedAttachments);
+        void send(agentId, queuedMessage, queuedAttachments, "queue").catch((error) => {
+          console.error("[AgentInput] Failed to queue message:", error);
+          replaceUserInput(queuedMessage);
+          setSendError(error instanceof Error ? error.message : t("composer.errors.failedToSend"));
+        });
+        return;
+      }
       const result = queueComposerMessage({
         agentId,
         text: queuedMessage,
@@ -1601,10 +1662,23 @@ function ComposerContentImpl({
       clearSentAttachments,
       queueWriter,
       resetSuppression,
+      serverId,
       setSelectedAttachments,
       replaceUserInput,
+      t,
     ],
   );
+
+  // A pinned bubble's Edit hands its text back here.
+  const outboxEditRequest = useOutboxStore((state) => state.editRequest);
+  useEffect(() => {
+    if (!outboxEditRequest) return;
+    const request = consumeOutboxEdit(serverId, agentId);
+    if (!request) return;
+    replaceUserInput(request.text);
+    setSelectedAttachments(composerWorkspaceAttachment.userAttachmentsOnly(request.attachments));
+    focusInput();
+  }, [agentId, focusInput, outboxEditRequest, replaceUserInput, serverId, setSelectedAttachments]);
 
   const sendMessageWithContent = useCallback(
     async (
@@ -2342,6 +2416,7 @@ function ComposerContentImpl({
       ) : null,
     [sendError],
   );
+  const composerSwipeDismiss = useComposerSwipeDismiss();
   const githubEmptyText = githubSearchResultsQuery.isFetching
     ? t("composer.github.searching")
     : t("composer.github.noResults");
@@ -2361,7 +2436,7 @@ function ComposerContentImpl({
       <View style={animatedStaticStyles.container}>
         <AttachmentLightbox source={lightboxSource} onClose={handleLightboxClose} />
         {/* Input area */}
-        <View style={inputAreaContainerStyle}>
+        <View style={inputAreaContainerStyle} {...composerSwipeDismiss}>
           <View style={styles.inputAreaContent}>
             {queueList}
             {sendErrorNode}

@@ -10,7 +10,11 @@ const __dirname = path.dirname(__filename);
 
 function main() {
   const repoRoot = path.resolve(__dirname, "../../..");
-  const outPath = path.join(repoRoot, "packages/website/public/schemas/paseo.config.v1.json");
+  // DinoBot fork: packages/website is not in this repo; write next to the repo root
+  // (or to the path given as the first argument) instead.
+  const outPath = process.argv[2]
+    ? path.resolve(process.argv[2])
+    : path.join(repoRoot, "schemas/paseo.config.v1.json");
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
 
   const schema = z.toJSONSchema(PersistedConfigSchema, {

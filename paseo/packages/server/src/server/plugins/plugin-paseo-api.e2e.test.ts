@@ -323,10 +323,20 @@ export default function contribute(server: PluginServerContext) {
     }
     process.on("message", closed);
     reconnected = new Promise<void>((connected) => {
-      function ready(message: { type: string; data?: unknown }) {
-        if (message.type !== "paseo_frame" || typeof message.data !== "string") return;
-        const frame = JSON.parse(message.data);
-        if (frame.type !== "session" || frame.message.type !== "status" || frame.message.payload.status !== "server_info") return;
+      // The daemon's first frame on the redialled link is its server_info. Frames may be
+      // compressed (binary), so recognise it by position, not by parsing it: the first frame
+      // after the close that names another link. The transport decodes it synchronously in a
+      // later listener, so the client is connected before this promise's continuation runs.
+      let closedLink: number | undefined;
+      let sawClose = false;
+      function ready(message: { type: string; link?: number }) {
+        if (message.type === "paseo_close") {
+          sawClose = true;
+          closedLink = message.link;
+          return;
+        }
+        if (!sawClose || message.type !== "paseo_frame") return;
+        if (closedLink !== undefined && message.link === closedLink) return;
         process.off("message", ready);
         connected();
       }

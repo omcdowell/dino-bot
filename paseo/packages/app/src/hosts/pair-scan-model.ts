@@ -94,6 +94,27 @@ export function openPairScan(deps: PairScanDependencies): PairScanModel {
   };
 }
 
+/**
+ * Deep-link pairing attempts (the /pair screen), one per attempt key (`<at>|<link>`). The screen can
+ * be unmounted and mounted again while an attempt runs (the DinoBot desktop app on a Mac did this
+ * while the host was connecting): it must re-attach to the running attempt, not start a second one,
+ * which asked "Connect to this host?" again after the user had already answered. A new key (a new
+ * link, or the same link opened again) ends the older attempt.
+ */
+export function createPairAttempts(
+  open: (deps: PairScanDependencies) => PairScanModel = openPairScan,
+) {
+  let current: { key: string; model: PairScanModel } | null = null;
+  return {
+    acquire(key: string, deps: PairScanDependencies): PairScanModel {
+      if (current?.key === key) return current.model;
+      current?.model.close();
+      current = { key, model: open(deps) };
+      return current.model;
+    },
+  };
+}
+
 function pairingLinkFromScan(data: string): string | null {
   const raw = data.trim();
   if (raw.includes("#offer=") || raw.includes("#connect=") || raw.startsWith("relay://")) {

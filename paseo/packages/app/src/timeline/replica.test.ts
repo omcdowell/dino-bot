@@ -12,6 +12,7 @@ import { selectAgentTimelineState, useSessionStore } from "@/stores/session-stor
 import { useCreateFlowStore, type PendingCreateAttempt } from "@/stores/create-flow-store";
 import type { StreamItem } from "@/types/stream";
 import {
+  applyCachedOlderTimelinePage,
   createTimelineReplica,
   createViewedTimelineOwner,
   type TimelineReplicaStorage,
@@ -180,25 +181,26 @@ describe("viewed timeline persistence", () => {
     owner.dispose();
   });
 
-  it("reopens painted live mutations without persisting authoritative coverage", async () => {
+  it("holds painted live mutations and keeps the cached cursor on disk", async () => {
+    // A painted chat is not a base to merge live rows into (chat-desync, cold start mid-reply):
+    // live rows wait for the first authoritative page, and nothing is saved over the cache.
     useSessionStore.getState().initializeSession(SERVER_ID, null);
-    let durable: CachedTimeline | undefined = cachedTimeline();
     let pending: CachedTimeline | undefined;
     const storage: TimelineReplicaStorage = {
-      readTimeline: async () => durable,
+      readTimeline: async () => cachedTimeline(),
       commitTimeline: (_serverId, _agentId, timeline) => {
         pending = timeline;
       },
     };
-    const first = createOwner(storage);
-    first.replaceVisibleAgentIds("test", [AGENT_ID]);
+    const owner = createOwner(storage);
+    owner.replaceVisibleAgentIds("test", [AGENT_ID]);
     await expect
       .poll(() =>
         selectAgentTimelineState(useSessionStore.getState().sessions[SERVER_ID], AGENT_ID),
       )
       .toMatchObject({ status: "painted" });
 
-    first.enqueueStreamEvent(AGENT_ID, {
+    owner.enqueueStreamEvent(AGENT_ID, {
       event: {
         type: "timeline",
         provider: "codex",
@@ -208,29 +210,44 @@ describe("viewed timeline persistence", () => {
       epoch: "epoch-1",
       timestamp: new Date("2026-08-26T10:00:01.000Z"),
     });
-    first.flushStreamAgent(AGENT_ID);
+    owner.flushStreamAgent(AGENT_ID);
 
-    expect(pending).toMatchObject({ range: null, hasOlder: false });
-    expect(pending?.items.map((entry) => entry.id)).toEqual(["cached", expect.any(String)]);
-    durable = pending;
-    first.dispose();
-    useSessionStore.getState().clearSession(SERVER_ID);
-    useSessionStore.getState().initializeSession(SERVER_ID, null);
+    expect(pending).toBeUndefined();
+    expect(
+      selectAgentTimelineState(useSessionStore.getState().sessions[SERVER_ID], AGENT_ID),
+    ).toEqual({ status: "painted", items: cachedTimeline().items });
+    expect(useSessionStore.getState().sessions[SERVER_ID]?.agentStreamHead.get(AGENT_ID)).toBe(
+      undefined,
+    );
 
-    const reopened = createOwner(storage);
-    reopened.replaceVisibleAgentIds("test", [AGENT_ID]);
-    await expect
-      .poll(() =>
-        selectAgentTimelineState(useSessionStore.getState().sessions[SERVER_ID], AGENT_ID),
-      )
-      .toMatchObject({
-        status: "painted",
-        items: [
-          expect.objectContaining({ id: "cached" }),
-          expect.objectContaining({ text: "live" }),
-        ],
-      });
-    reopened.dispose();
+    // The first page (nothing newer than the cache) syncs the chat; the held row then applies.
+    owner.applyTimelineResponse({
+      requestId: "page-after-cache",
+      agentId: AGENT_ID,
+      agent: null,
+      direction: "after",
+      projection: "projected",
+      reset: false,
+      epoch: "epoch-1",
+      window: { minSeq: 1, maxSeq: 4, nextSeq: 5 },
+      startCursor: null,
+      endCursor: null,
+      entries: [],
+      error: null,
+      hasNewer: false,
+      hasOlder: false,
+      staleCursor: false,
+      gap: false,
+    });
+    const session = useSessionStore.getState().sessions[SERVER_ID];
+    expect(
+      [
+        ...(session?.agentStreamTail.get(AGENT_ID) ?? []),
+        ...(session?.agentStreamHead.get(AGENT_ID) ?? []),
+      ].map((entry) => (entry.kind === "assistant_message" ? entry.text : entry.kind)),
+    ).toEqual(["cached", "live"]);
+    expect(pending).toMatchObject({ range: { epoch: "epoch-1", startSeq: 1, endSeq: 5 } });
+    owner.dispose();
   });
 
   it("does not let a late cache read overwrite newer network state", async () => {
@@ -583,7 +600,7 @@ function createSqliteCache() {
       }
     },
   };
-  const storage = createSqliteReplicaRowStore({ open: async () => connection }, 1);
+  const storage = createSqliteReplicaRowStore({ open: async () => connection }, 2);
   const cache = new ReplicaCache(storage, { clearLegacyCache: async () => {} });
   return {
     cache,
@@ -663,5 +680,80 @@ describe("SQLite baseline restoration", () => {
       await preparation;
       database.close();
     }
+  });
+});
+
+describe("sealed history paging and the in-memory bound", () => {
+  function run(count: number, start = 1): StreamItem[] {
+    return Array.from({ length: count }, (_, index) =>
+      item(`row-${start + index}`, `row ${start + index}`, start + index),
+    );
+  }
+
+  it("pages older history in from disk and trims hidden chats to what disk holds", async () => {
+    useSessionStore.getState().initializeSession(SERVER_ID, null);
+    const { cache } = createSqliteCache();
+    cache.setHosts([SERVER_ID]);
+    const items = run(260);
+    useSessionStore.getState().applyAgentTimelineResponseState(SERVER_ID, AGENT_ID, {
+      items,
+      head: [],
+      range: { epoch: "epoch-1", startSeq: 1, endSeq: 260 },
+      older: "none",
+      newer: false,
+      synchronized: true,
+      acknowledgedClientMessageIds: [],
+    });
+    const replica = createTimelineReplica({
+      serverId: SERVER_ID,
+      storage: cache,
+      prepareAgent: async () => undefined,
+    });
+    replica.timelineUpdated(AGENT_ID);
+    await cache.flush();
+
+    // Pages hold 1..100 and 101..200; the head keeps 201..260.
+    expect(replica.trimToArchive(AGENT_ID)).toBe(true);
+    let timeline = selectAgentTimelineState(
+      useSessionStore.getState().sessions[SERVER_ID],
+      AGENT_ID,
+    );
+    if (timeline.status !== "synced") throw new Error("expected synced");
+    expect(timeline.items).toHaveLength(60);
+    expect(timeline.range).toMatchObject({ startSeq: 201, endSeq: 260 });
+    expect(timeline.older).toBe("available");
+
+    const page = await cache.readTimelinePageBefore(SERVER_ID, AGENT_ID, {
+      epoch: "epoch-1",
+      beforeSeq: 201,
+    });
+    if (!page) throw new Error("expected a sealed page");
+    expect(applyCachedOlderTimelinePage(SERVER_ID, AGENT_ID, page)).toBe(true);
+    // A stale page (not adjacent any more) is refused.
+    expect(applyCachedOlderTimelinePage(SERVER_ID, AGENT_ID, page)).toBe(false);
+    timeline = selectAgentTimelineState(useSessionStore.getState().sessions[SERVER_ID], AGENT_ID);
+    if (timeline.status !== "synced") throw new Error("expected synced");
+    expect(timeline.items.map((entry) => entry.id).slice(0, 2)).toEqual(["row-101", "row-102"]);
+    expect(timeline.items).toHaveLength(160);
+    expect(timeline.range).toMatchObject({ startSeq: 101, endSeq: 260 });
+
+    const first = await cache.readTimelinePageBefore(SERVER_ID, AGENT_ID, {
+      epoch: "epoch-1",
+      beforeSeq: 101,
+    });
+    if (!first) throw new Error("expected the first page");
+    expect(applyCachedOlderTimelinePage(SERVER_ID, AGENT_ID, first)).toBe(true);
+    timeline = selectAgentTimelineState(useSessionStore.getState().sessions[SERVER_ID], AGENT_ID);
+    if (timeline.status !== "synced") throw new Error("expected synced");
+    expect(timeline.items).toHaveLength(260);
+    expect(timeline.older).toBe("none");
+
+    // Re-persisting does not reseal or duplicate pages.
+    replica.timelineUpdated(AGENT_ID);
+    await cache.flush();
+    expect(replica.trimToArchive(AGENT_ID)).toBe(true);
+    timeline = selectAgentTimelineState(useSessionStore.getState().sessions[SERVER_ID], AGENT_ID);
+    if (timeline.status !== "synced") throw new Error("expected synced");
+    expect(timeline.range).toMatchObject({ startSeq: 201 });
   });
 });

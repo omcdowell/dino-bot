@@ -383,6 +383,7 @@ it("does not surface fire-and-forget send timeouts as unhandled rejections", asy
   manager = createWorkerTerminalManager({
     requestTimeoutMs: 5,
     forkWorker: () => worker,
+    startWorker: "eager",
   });
 
   worker.emitWorkerMessage({
@@ -537,6 +538,7 @@ it("lists terminals locally without waiting on the worker", async () => {
   manager = createWorkerTerminalManager({
     requestTimeoutMs: 5,
     forkWorker: () => worker,
+    startWorker: "eager",
   });
 
   worker.emitWorkerMessage({
@@ -578,6 +580,7 @@ it("includes only stamped terminals in workspace-scoped local reads", async () =
   manager = createWorkerTerminalManager({
     requestTimeoutMs: 5,
     forkWorker: () => worker,
+    startWorker: "eager",
   });
 
   worker.emitWorkerMessage({
@@ -630,6 +633,7 @@ it("rejects non-absolute cwd in getTerminals", async () => {
   manager = createWorkerTerminalManager({
     requestTimeoutMs: 5,
     forkWorker: () => worker,
+    startWorker: "eager",
   });
 
   await expect(manager.getTerminals("relative/path")).rejects.toThrow("cwd must be absolute path");
@@ -640,6 +644,7 @@ it("surfaces worker activity changes via getActivity, onActivityChange, and term
   manager = createWorkerTerminalManager({
     requestTimeoutMs: 50,
     forkWorker: () => worker,
+    startWorker: "eager",
   });
 
   worker.emitWorkerMessage({
@@ -703,6 +708,7 @@ it("sets terminal activity through a worker request", async () => {
   manager = createWorkerTerminalManager({
     requestTimeoutMs: 50,
     forkWorker: () => worker,
+    startWorker: "eager",
   });
   worker.emitWorkerMessage({
     type: "terminalCreated",
@@ -736,6 +742,7 @@ it("clears terminal attention through a worker request", async () => {
   manager = createWorkerTerminalManager({
     requestTimeoutMs: 50,
     forkWorker: () => worker,
+    startWorker: "eager",
   });
   worker.emitWorkerMessage({
     type: "terminalCreated",
@@ -828,6 +835,7 @@ it("produces one terminals-changed snapshot per title change", async () => {
   manager = createWorkerTerminalManager({
     requestTimeoutMs: 50,
     forkWorker: () => worker,
+    startWorker: "eager",
   });
 
   worker.emitWorkerMessage({
@@ -865,6 +873,7 @@ it("produces one terminals-changed snapshot and one contribution event per activ
   manager = createWorkerTerminalManager({
     requestTimeoutMs: 50,
     forkWorker: () => worker,
+    startWorker: "eager",
   });
 
   worker.emitWorkerMessage({
@@ -915,6 +924,7 @@ it("removes a killed worker terminal from terminalExit without duplicate snapsho
   manager = createWorkerTerminalManager({
     requestTimeoutMs: 50,
     forkWorker: () => worker,
+    startWorker: "eager",
   });
   const workingActivity = { state: "working" as const, changedAt: 1000 };
 
@@ -967,4 +977,43 @@ it("removes a killed worker terminal from terminalExit without duplicate snapsho
       workspaceId: "ws-test",
     },
   ]);
+});
+
+it("forks the worker on the first request, not at creation", async () => {
+  const worker = new FakeTerminalWorker();
+  let forks = 0;
+  manager = createWorkerTerminalManager({
+    requestTimeoutMs: 5,
+    forkWorker: () => {
+      forks += 1;
+      return worker;
+    },
+  });
+
+  expect(await manager.getTerminals("/workspace")).toEqual([]);
+  expect(manager.listDirectories()).toEqual([]);
+  expect(forks).toBe(0);
+
+  await expect(manager.captureTerminal("terminal-1")).rejects.toThrow("timed out");
+  expect(forks).toBe(1);
+  expect(worker.sentMessages.map((message) => message.type)).toEqual(["captureTerminal"]);
+
+  await expect(manager.captureTerminal("terminal-1")).rejects.toThrow("timed out");
+  expect(forks).toBe(1);
+});
+
+it("never forks a worker that killAll stops before any request", async () => {
+  let forks = 0;
+  manager = createWorkerTerminalManager({
+    requestTimeoutMs: 5,
+    forkWorker: () => {
+      forks += 1;
+      return new FakeTerminalWorker();
+    },
+  });
+
+  manager.killAll();
+
+  await expect(manager.captureTerminal("terminal-1")).rejects.toThrow("not running");
+  expect(forks).toBe(0);
 });

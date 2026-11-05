@@ -53,6 +53,7 @@ function registry() {
         openPanel: () => {},
         addComposerPill: () => ({ update() {}, remove() {} }),
         addHeaderButton: () => ({ update() {}, remove() {} }),
+        events: installation.events,
       };
     },
   });
@@ -144,4 +145,32 @@ test("an invalid async client entry is disposed and its rejected continuation is
   await expect.poll(() => h.open.size).toBe(0);
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(h.plugins.getSnapshot()).toEqual([]);
+});
+
+test("pushed plugin events reach the installation from that host, and live follows the host", () => {
+  const h = registry();
+  h.plugins.setEventsLive("host", true);
+  h.plugins.installCatalog(
+    "host",
+    [
+      catalog(
+        "deploys",
+        `const seen = []; globalThis.__deploysSeen = seen; const live = []; globalThis.__deploysLive = live;
+         plugin.events.on("changed", (data) => seen.push(data));
+         plugin.events.onLiveChange((value) => live.push(value));
+         globalThis.__deploysInitiallyLive = plugin.events.live;
+         return function() {};`,
+      ),
+    ],
+    { client: h.client, audio },
+  );
+  const scope = globalThis as unknown as Record<string, unknown>;
+  expect(scope.__deploysInitiallyLive).toBe(true);
+  h.plugins.dispatchEvent("host", "deploys", "changed", { n: 1 });
+  h.plugins.dispatchEvent("host", "deploys", "other", { n: 2 });
+  h.plugins.dispatchEvent("elsewhere", "deploys", "changed", { n: 3 });
+  expect(scope.__deploysSeen).toEqual([{ n: 1 }]);
+  h.plugins.setEventsLive("host", false);
+  expect(scope.__deploysLive).toEqual([false]);
+  expect(h.plugins.isEventsLive("host")).toBe(false);
 });

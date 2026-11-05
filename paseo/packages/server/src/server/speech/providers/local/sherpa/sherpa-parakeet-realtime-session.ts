@@ -145,8 +145,8 @@ export class SherpaParakeetRealtimeTranscriptionSession
     try {
       const floatSamples = pcm16leToFloat32(this.pcm16, gain);
       this.engine.acceptWaveform(stream, this.engine.sampleRate, floatSamples);
-      this.engine.recognizer.decode(stream);
-      const result = this.engine.recognizer.getResult(stream);
+      this.engine.decode(stream);
+      const result = this.engine.getResult(stream);
       return String(
         (typeof result === "object" && result && "text" in result ? result.text : undefined) ??
           result ??

@@ -56,7 +56,7 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.foregroundMuted,
   },
   railWorkspace: {
-    backgroundColor: theme.colors.accent,
+    backgroundColor: theme.colors.accentText,
   },
   marker: {
     width: MARKER_SIZE,
@@ -70,8 +70,8 @@ const styles = StyleSheet.create((theme) => ({
     borderColor: theme.colors.foregroundMuted,
   },
   markerWorkspace: {
-    backgroundColor: theme.colors.accent,
-    borderColor: theme.colors.accent,
+    backgroundColor: theme.colors.accentText,
+    borderColor: theme.colors.accentText,
   },
   markerRing: {
     backgroundColor: theme.colors.surface0,

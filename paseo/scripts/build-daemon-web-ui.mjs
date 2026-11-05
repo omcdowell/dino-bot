@@ -37,7 +37,14 @@ function run(command, args, options) {
 
 async function exportBrowserWebApp() {
   console.log("Exporting browser web app...");
-  await run("npm", ["run", "build:web", "--workspace=@getpaseo/app"], {
+  // --clear: a cached Metro manifest can carry another flavour (PASEO_FLAVOUR=public came out as
+  // the own build without it). PASEO_WEB_UI_MAX_WORKERS caps Metro's workers on small machines
+  // (the 13 MB ws-outbound validator OOMs a worker otherwise; with NODE_OPTIONS=--max-old-space-size).
+  const exportArgs = ["--clear"];
+  if (process.env.PASEO_WEB_UI_MAX_WORKERS) {
+    exportArgs.push("--max-workers", process.env.PASEO_WEB_UI_MAX_WORKERS);
+  }
+  await run("npm", ["run", "build:web", "--workspace=@getpaseo/app", "--", ...exportArgs], {
     cwd: REPO_ROOT,
   });
 }

@@ -25,6 +25,7 @@ import {
 import { ChangesSurface } from "@/git/diff-pane";
 import { changesStateSchema, defaultChangesState, type ChangesState } from "@/panels/changes/state";
 import { FileExplorerPane } from "./file-explorer-pane";
+import { ExplorerNetworkTab } from "./explorer-network-tab";
 import { useKeyboardShiftStyle } from "@/keyboard/shift";
 import { shouldUseCompactExplorerKeyboardPadding } from "@/keyboard/shift";
 import { WindowChromeSafeArea } from "@/utils/desktop-window";
@@ -47,6 +48,9 @@ import {
 import { ToolbarButton } from "@/components/ui/pane-content-toolbar";
 import { mutedIconColorMapping } from "@/components/ui/icon-button-chrome";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
+import { useInstalledPlugins } from "@/plugins/registry";
+import { resolvePluginIcon } from "@/plugins/icons";
+import { PluginWorkspacePanelView } from "@/plugins/workspace-panels/panel";
 
 const ThemedX = withUnistyles(X);
 
@@ -303,6 +307,119 @@ function ExplorerTabButton({
   );
 }
 
+interface PluginExplorerPanel {
+  key: string;
+  pluginId: string;
+  panelId: string;
+  title: string;
+  icon: string;
+}
+
+/**
+ * Plugin workspace panels that offer the Explorer (`locations: ["explorer"]`), e.g. the bots
+ * plugin's DMs. On wide layouts they are Explorer tabs; on phones they sit after the built-in tabs.
+ */
+function usePluginExplorerPanels(serverId: string): PluginExplorerPanel[] {
+  const plugins = useInstalledPlugins();
+  return useMemo(
+    () =>
+      plugins
+        .filter((plugin) => plugin.serverId === serverId)
+        .flatMap((plugin) =>
+          plugin.workspacePanels
+            .filter(
+              (panel) => panel.context === "workspace" && panel.locations.includes("explorer"),
+            )
+            .map((panel) => ({
+              key: `${plugin.id}/${panel.id}`,
+              pluginId: plugin.id,
+              panelId: panel.id,
+              title: panel.title,
+              icon: panel.icon,
+            })),
+        ),
+    [plugins, serverId],
+  );
+}
+
+function PluginExplorerTabButton({
+  panel,
+  active,
+  onPress,
+}: {
+  panel: PluginExplorerPanel;
+  active: boolean;
+  onPress: (key: string) => void;
+}) {
+  const { theme } = useUnistyles();
+  const isCompact = useIsCompactFormFactor();
+  const Icon = resolvePluginIcon(panel.icon);
+  const handlePress = useCallback(() => onPress(panel.key), [onPress, panel.key]);
+  const tabStyle = useMemo(
+    () => [styles.tab(isCompact), active && styles.tabActive],
+    [active, isCompact],
+  );
+  const tabTextStyle = useMemo(() => [styles.tabText, active && styles.tabTextActive], [active]);
+  return (
+    <Pressable testID={`explorer-tab-plugin-${panel.key}`} style={tabStyle} onPress={handlePress}>
+      <Icon size={13} color={active ? theme.colors.foreground : theme.colors.foregroundMuted} />
+      <Text style={tabTextStyle}>{panel.title}</Text>
+    </Pressable>
+  );
+}
+
+/**
+ * Phones only: which plugin tab is selected (local to the sidebar; the built-in tab store is
+ * untouched). Selecting a built-in tab clears it.
+ */
+function usePluginExplorerTab(input: {
+  serverId: string;
+  workspaceId?: string | null;
+  onTabPress: (tab: ExplorerTab) => void;
+}) {
+  const { serverId, workspaceId, onTabPress } = input;
+  const isCompact = useIsCompactFormFactor();
+  const panels = usePluginExplorerPanels(serverId);
+  const pluginPanels = isCompact && workspaceId ? panels : NO_PLUGIN_PANELS;
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const pluginTab = pluginPanels.find((panel) => panel.key === selectedKey) ?? null;
+  const handleBuiltinTabPress = useCallback(
+    (tab: ExplorerTab) => {
+      setSelectedKey(null);
+      onTabPress(tab);
+    },
+    [onTabPress],
+  );
+  return { pluginPanels, pluginTab, selectPluginTab: setSelectedKey, handleBuiltinTabPress };
+}
+
+const NO_PLUGIN_PANELS: PluginExplorerPanel[] = [];
+
+function PluginExplorerContent({
+  serverId,
+  workspaceId,
+  panel,
+}: {
+  serverId: string;
+  workspaceId: string;
+  panel: PluginExplorerPanel;
+}) {
+  const target = useMemo(
+    () => ({
+      kind: "plugin" as const,
+      pluginId: panel.pluginId,
+      panelId: panel.panelId,
+      context: "workspace" as const,
+    }),
+    [panel.panelId, panel.pluginId],
+  );
+  return (
+    <View style={styles.contentArea} testID="explorer-plugin-panel">
+      <PluginWorkspacePanelView serverId={serverId} workspaceId={workspaceId} target={target} />
+    </View>
+  );
+}
+
 interface SidebarContentProps {
   activeTab: ExplorerTab;
   onTabPress: (tab: ExplorerTab) => void;
@@ -354,6 +471,7 @@ function ExplorerSidebarContent({
   const availableTabs = useMemo<ExplorerTab[]>(() => {
     const tabs: ExplorerTab[] = isGit ? ["changes", "files"] : ["files"];
     if (isGit && showPrTab) tabs.push("pr");
+    tabs.push("network");
     return tabs;
   }, [isGit, showPrTab]);
   const { mountedTabIds } = useMountedTabSet({
@@ -361,6 +479,13 @@ function ExplorerSidebarContent({
     allTabIds: availableTabs,
     cap: availableTabs.length,
   });
+  const { pluginPanels, pluginTab, selectPluginTab, handleBuiltinTabPress } = usePluginExplorerTab({
+    serverId,
+    workspaceId,
+    onTabPress,
+  });
+  // The built-in tab on show, or null while a plugin tab is.
+  const shownTab: ExplorerTab | null = pluginTab ? null : resolvedTab;
 
   return (
     <View style={styles.sidebarContent} pointerEvents="auto">
@@ -371,25 +496,25 @@ function ExplorerSidebarContent({
           {isGit && (
             <ExplorerTabButton
               tab="changes"
-              active={resolvedTab === "changes"}
+              active={shownTab === "changes"}
               label={t("workspace.tabs.explorerSidebar.changes")}
-              onTabPress={onTabPress}
+              onTabPress={handleBuiltinTabPress}
               testID="explorer-tab-changes"
             />
           )}
           <ExplorerTabButton
             tab="files"
-            active={resolvedTab === "files"}
+            active={shownTab === "files"}
             label={t("workspace.tabs.explorerSidebar.files")}
-            onTabPress={onTabPress}
+            onTabPress={handleBuiltinTabPress}
             testID="explorer-tab-files"
           />
           {isGit && showPrTab && (
             <ExplorerTabButton
               tab="pr"
-              active={resolvedTab === "pr"}
+              active={shownTab === "pr"}
               label={prTabLabel}
-              onTabPress={onTabPress}
+              onTabPress={handleBuiltinTabPress}
               testID="explorer-tab-pr"
             >
               <PullRequestTabIcon
@@ -401,6 +526,21 @@ function ExplorerSidebarContent({
               />
             </ExplorerTabButton>
           )}
+          <ExplorerTabButton
+            tab="network"
+            active={shownTab === "network"}
+            label={t("network.tabLabel")}
+            onTabPress={handleBuiltinTabPress}
+            testID="explorer-tab-network"
+          />
+          {pluginPanels.map((panel) => (
+            <PluginExplorerTabButton
+              key={panel.key}
+              panel={panel}
+              active={pluginTab?.key === panel.key}
+              onPress={selectPluginTab}
+            />
+          ))}
         </View>
         <View style={headerRightSectionStyle}>
           <ToolbarButton
@@ -420,7 +560,7 @@ function ExplorerSidebarContent({
       {/* Content based on active tab */}
       <View style={styles.contentArea} testID="explorer-content-area">
         {mountedTabIds.has("changes") ? (
-          <RetainedPanel active={resolvedTab === "changes"}>
+          <RetainedPanel active={shownTab === "changes"}>
             <ChangedFilesPane
               serverId={serverId}
               workspaceId={workspaceId}
@@ -431,7 +571,7 @@ function ExplorerSidebarContent({
           </RetainedPanel>
         ) : null}
         {mountedTabIds.has("files") ? (
-          <RetainedPanel active={resolvedTab === "files"}>
+          <RetainedPanel active={shownTab === "files"}>
             <FilesPane
               serverId={serverId}
               workspaceId={workspaceId}
@@ -440,8 +580,13 @@ function ExplorerSidebarContent({
             />
           </RetainedPanel>
         ) : null}
+        {mountedTabIds.has("network") ? (
+          <RetainedPanel active={shownTab === "network"}>
+            <ExplorerNetworkTab serverId={serverId} />
+          </RetainedPanel>
+        ) : null}
         {mountedTabIds.has("pr") ? (
-          <RetainedPanel active={resolvedTab === "pr"}>
+          <RetainedPanel active={shownTab === "pr"}>
             <PrTabContent
               serverId={serverId}
               workspaceId={workspaceId}
@@ -449,6 +594,9 @@ function ExplorerSidebarContent({
               prPane={prPane}
             />
           </RetainedPanel>
+        ) : null}
+        {pluginTab && workspaceId ? (
+          <PluginExplorerContent serverId={serverId} workspaceId={workspaceId} panel={pluginTab} />
         ) : null}
       </View>
     </View>

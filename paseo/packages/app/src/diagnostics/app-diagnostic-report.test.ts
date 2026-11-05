@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  brandDaemonDiagnostic,
   formatHostRuntimeSection,
   formatServerInfoSection,
   redactAppDiagnosticReport,
@@ -120,5 +121,20 @@ describe("app diagnostics report", () => {
     expect(redacted).not.toContain("\\\\.\\pipe\\paseo-secret");
     expect(redacted).not.toContain("tcp-password");
     expect(redacted).not.toContain("pairing-secret");
+  });
+});
+
+describe("brandDaemonDiagnostic", () => {
+  const report = "Paseo diagnostics\n  Server ID: srv\n\nLog tail\n  Paseo diagnostics requested";
+  test("debranded build: only the title line names the app", () => {
+    expect(brandDaemonDiagnostic(report, "DinoBot")).toBe(
+      "DinoBot host diagnostics\n  Server ID: srv\n\nLog tail\n  Paseo diagnostics requested",
+    );
+    expect(brandDaemonDiagnostic("Paseo diagnostics\n  Error: boom", "DinoBot")).toBe(
+      "DinoBot host diagnostics\n  Error: boom",
+    );
+  });
+  test("own build: unchanged", () => {
+    expect(brandDaemonDiagnostic(report, null)).toBe(report);
   });
 });

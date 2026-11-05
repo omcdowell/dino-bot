@@ -55,6 +55,27 @@ export declare function SettingsSelect<Value extends string>(
 export declare const SettingsInput: ComponentType<SettingsInputProps>;
 export declare const SettingsAction: ComponentType<SettingsActionProps>;
 
+export interface ModelPickerFieldValue {
+  modelId: string;
+  thinkingId: string | null;
+}
+export interface ModelPickerFieldProps extends ModelPickerFieldValue {
+  /** The host whose catalogue is shown (the plugin surface's `host.id`). */
+  serverId: string;
+  /** Agent provider, e.g. "optchat". */
+  provider: string;
+  onChange(value: ModelPickerFieldValue): void;
+  label?: string;
+  thinkingLabel?: string;
+  disabled?: boolean;
+  testID?: string;
+}
+/**
+ * The app's model picker as a form field (model, then thinking). Pi-based providers get the same
+ * Scoped / All lists as the composer. Missing on older apps: feature-detect before use.
+ */
+export declare const ModelPickerField: ComponentType<ModelPickerFieldProps> | undefined;
+
 export interface ExternalLinkProps {
   href: string;
   children: ReactNode;
@@ -84,3 +105,13 @@ export interface SidebarRowProps {
 export declare const SidebarRow: ComponentType<SidebarRowProps>;
 /** A line between groups of rows. Render it from a sidebar item's `Component`. */
 export declare const SidebarSeparator: ComponentType;
+
+export interface MarkdownProps {
+  children: string;
+}
+
+/**
+ * Renders Markdown using Paseo's theme, selection, and link behavior (upstream 995ad2f87).
+ * Missing on older apps: feature-detect before use.
+ */
+export declare const Markdown: ComponentType<MarkdownProps> | undefined;

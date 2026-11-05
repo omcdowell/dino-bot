@@ -327,6 +327,26 @@ function encodeDeterministicPng(width: number, height: number): Buffer {
   ]);
 }
 
+/** Encodes RGBA pixels (width * height * 4 bytes) as a PNG. */
+export function encodeRgbaPng(width: number, height: number, rgba: Buffer): Buffer {
+  const stride = width * 4 + 1;
+  const scanlines = Buffer.alloc(stride * height);
+  for (let row = 0; row < height; row += 1) {
+    rgba.copy(scanlines, row * stride + 1, row * width * 4, (row + 1) * width * 4);
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 6;
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", deflateSync(scanlines)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
 function pngChunk(type: string, data: Buffer): Buffer {
   const typeBytes = Buffer.from(type, "ascii");
   const chunk = Buffer.allocUnsafe(12 + data.byteLength);

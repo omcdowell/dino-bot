@@ -94,6 +94,7 @@ export class PluginService {
   private globalStartsBlocked = true;
   private started = false;
   private readonly settingsListeners = new Set<(pluginId: string, settingsId: string) => void>();
+  private readonly eventListeners = new Set<(pluginId: string, name: string, data: unknown) => void>();
 
   constructor(
     logger: pino.Logger,
@@ -114,6 +115,9 @@ export class PluginService {
         settingsDirectory: dependencies.settingsDirectory,
         onSettingsChanged: (pluginId, settingsId) => {
           for (const listener of this.settingsListeners) listener(pluginId, settingsId);
+        },
+        onPluginEvent: (pluginId, name, data) => {
+          for (const listener of this.eventListeners) listener(pluginId, name, data);
         },
       });
     this.managedSources = dependencies.managedSources ?? null;
@@ -141,6 +145,12 @@ export class PluginService {
     }
     return request;
   };
+
+  /** pluginEvents: events plugin servers emit for their clients (server.emit). */
+  subscribeEvents(listener: (pluginId: string, name: string, data: unknown) => void): () => void {
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
+  }
 
   subscribeSettings(listener: (pluginId: string, settingsId: string) => void): () => void {
     this.settingsListeners.add(listener);

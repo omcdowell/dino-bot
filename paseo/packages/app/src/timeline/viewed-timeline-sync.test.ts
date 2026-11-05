@@ -5,6 +5,7 @@ import type { ProjectedTimelineForwardFetchPlan } from "./timeline-sync-plan";
 import {
   consumeForcedTimelineTailReplacement,
   createViewedTimelineSync,
+  type TimelineFetchOptions,
   type TimelineResponsePayload,
   type ViewedTimelineStatus,
   type ViewedTimelineSyncPorts,
@@ -40,8 +41,10 @@ interface TimelineCurrentReport {
 interface TimelineFetch {
   agentId: string;
   request: ProjectedTimelineForwardFetchPlan;
+  options?: TimelineFetchOptions;
   respond(input: { hasNewer: boolean; seq?: number }): void;
   fail(message: string): void;
+  reject(error: Error): void;
 }
 
 test("split panes catch up together before hidden open chats start fetching", async () => {
@@ -125,6 +128,206 @@ test("switching chats promotes the newly visible catch-up while another visible 
   world.sync.dispose();
 });
 
+const flushTasks = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+class NotLoaded extends Error {
+  constructor() {
+    super("Agent is not loaded");
+    this.name = "AgentNotLoadedError";
+  }
+}
+
+test("keep-live chats subscribe at connect and open ready without a fetch", async () => {
+  const world = new TimelineWorld();
+  world.sync.replaceKeepLiveAgentIds(["bot-a"]);
+  world.sync.setConnected(true);
+  const membership = await world.nextMembership();
+  expect(membership.agentIds).toEqual(["bot-a"]);
+  membership.succeed();
+  const catchUp = await world.nextFetch("bot-a");
+  expect(catchUp.options).toEqual({ background: true, compact: true });
+  catchUp.respond({ hasNewer: false });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("bot-a")).toBe("ready"));
+  world.show("pane", ["bot-a"]);
+  expect(world.sync.getAgentTimelineStatus("bot-a")).toBe("ready");
+  world.expectNoPendingMembership();
+  world.expectNoPendingFetch();
+  world.sync.dispose();
+});
+
+test("keep-live catch-ups wait for the visible chat, then run one at a time by priority", async () => {
+  const world = new TimelineWorld();
+  world.sync.replaceKeepLiveAgentIds(["bot-z", "bot-a", "bot-m"]);
+  world.show("pane", ["visible"]);
+  world.sync.setConnected(true);
+  (await world.nextMembership()).succeed();
+  const visible = await world.nextFetch("visible");
+  expect(visible.options).toEqual({ background: false, compact: false });
+  world.expectNoPendingFetch();
+  visible.respond({ hasNewer: false });
+  const first = await world.nextFetch("bot-z");
+  world.expectNoPendingFetch();
+  first.respond({ hasNewer: false });
+  const second = await world.nextFetch("bot-a");
+  world.expectNoPendingFetch();
+  second.respond({ hasNewer: false });
+  (await world.nextFetch("bot-m")).respond({ hasNewer: false });
+  world.sync.dispose();
+});
+
+test("tapping a keep-live chat still queued starts its catch-up at once", async () => {
+  const world = new TimelineWorld();
+  world.sync.replaceKeepLiveAgentIds(["bot-a", "bot-b", "bot-c"]);
+  world.sync.setConnected(true);
+  (await world.nextMembership()).succeed();
+  const running = await world.nextFetch("bot-a");
+  world.expectNoPendingFetch();
+  world.show("pane", ["bot-c"]);
+  expect(world.sync.getAgentTimelineStatus("bot-c")).toBe("pending");
+  const tapped = await world.nextFetch("bot-c");
+  expect(tapped.options).toEqual({ background: false, compact: false });
+  tapped.respond({ hasNewer: false });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("bot-c")).toBe("ready"));
+  running.respond({ hasNewer: false });
+  (await world.nextFetch("bot-b")).respond({ hasNewer: false });
+  world.sync.dispose();
+});
+
+test("a keep-live agent the daemon has not loaded is dropped, never retried", async () => {
+  const world = new TimelineWorld();
+  world.sync.replaceKeepLiveAgentIds(["bot-gone", "bot-ok"]);
+  world.sync.setConnected(true);
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("bot-gone")).fail("unused");
+  await world.nextError();
+  world.sync.dispose();
+
+  const second = new TimelineWorld();
+  second.sync.replaceKeepLiveAgentIds(["bot-gone", "bot-ok"]);
+  second.sync.setConnected(true);
+  (await second.nextMembership()).succeed();
+  const gone = await second.nextFetch("bot-gone");
+  gone.reject(new NotLoaded());
+  const membership = await second.nextMembership();
+  expect(membership.agentIds).toEqual(["bot-ok"]);
+  membership.succeed();
+  (await second.nextFetch("bot-ok")).respond({ hasNewer: false });
+  second.expectNoPendingFetch();
+  expect(second.errors).toEqual([]);
+  second.sync.dispose();
+});
+
+test("removing the keep-live label releases the subscription", async () => {
+  const world = new TimelineWorld();
+  world.sync.replaceKeepLiveAgentIds(["bot-a", "bot-b"]);
+  world.sync.setConnected(true);
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("bot-a")).respond({ hasNewer: false });
+  (await world.nextFetch("bot-b")).respond({ hasNewer: false });
+  world.sync.replaceKeepLiveAgentIds(["bot-b"]);
+  const membership = await world.nextMembership();
+  expect(membership.agentIds).toEqual(["bot-b"]);
+  membership.succeed();
+  expect(world.sync.getAgentTimelineStatus("bot-a")).toBe("pending");
+  world.sync.dispose();
+});
+
+test("an opened keep-live chat stays subscribed after its label is removed", async () => {
+  const world = new TimelineWorld();
+  world.sync.replaceKeepLiveAgentIds(["bot-a"]);
+  world.sync.setConnected(true);
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("bot-a")).respond({ hasNewer: false });
+  await flushTasks();
+  world.openedEarlier(["bot-a"]);
+  world.sync.replaceKeepLiveAgentIds([]);
+  world.expectNoPendingMembership();
+  expect(world.sync.getAgentTimelineStatus("bot-a")).toBe("ready");
+  world.sync.dispose();
+});
+
+test("constrained mode drops background keep-live chats from the stream and pulls them at turn end", async () => {
+  const world = new TimelineWorld();
+  world.sync.replaceKeepLiveAgentIds(["bot-a", "bot-b"]);
+  world.sync.setConnected(true);
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("bot-a")).respond({ hasNewer: false });
+  (await world.nextFetch("bot-b")).respond({ hasNewer: false });
+
+  world.cursors.set("bot-a", { epoch: "e", endSeq: 7 });
+  world.cursors.set("bot-b", { epoch: "e", endSeq: 9 });
+  world.sync.setConstrained(true);
+  const narrowed = await world.nextMembership();
+  expect(narrowed.agentIds).toEqual([]);
+  narrowed.succeed();
+  // Entering constrained mode pulls each once, in priority order, one at a time.
+  const pullA = await world.nextFetch("bot-a");
+  expect(pullA.options).toEqual({ background: true, compact: true });
+  expect(pullA.request).toMatchObject({ direction: "after", cursor: { epoch: "e", seq: 7 } });
+  world.expectNoPendingFetch();
+  pullA.respond({ hasNewer: false });
+  (await world.nextFetch("bot-b")).respond({ hasNewer: false });
+
+  // Running → idle pulls the delta; a running agent is no longer fresh.
+  world.sync.notifyAgentActivity("bot-a", "running");
+  world.sync.notifyAgentActivity("bot-a", "idle");
+  (await world.nextFetch("bot-a")).respond({ hasNewer: false });
+  await flushTasks();
+
+  // Revealing a freshly pulled chat subscribes it without an "Updating messages" state.
+  world.show("pane", ["bot-a"]);
+  expect(world.sync.getAgentTimelineStatus("bot-a")).toBe("ready");
+  const revealed = await world.nextMembership();
+  expect(revealed.agentIds).toEqual(["bot-a"]);
+  revealed.succeed();
+  const catchUp = await world.nextFetch("bot-a");
+  expect(catchUp.options).toEqual({ background: false, compact: true });
+  catchUp.respond({ hasNewer: false });
+
+  // A chat that started running since its last pull owes a visible catch-up.
+  world.sync.notifyAgentActivity("bot-b", "running");
+  world.show("pane", ["bot-b"]);
+  expect(world.sync.getAgentTimelineStatus("bot-b")).toBe("pending");
+  world.sync.dispose();
+});
+
+test("leaving constrained mode puts keep-live chats back on the live stream", async () => {
+  const world = new TimelineWorld();
+  world.sync.replaceKeepLiveAgentIds(["bot-a"]);
+  world.sync.setConstrained(true);
+  world.sync.setConnected(true);
+  const pull = await world.nextFetch("bot-a");
+  pull.respond({ hasNewer: false });
+  world.sync.setConstrained(false);
+  const membership = await world.nextMembership();
+  expect(membership.agentIds).toEqual(["bot-a"]);
+  membership.succeed();
+  (await world.nextFetch("bot-a")).respond({ hasNewer: false });
+  world.sync.dispose();
+});
+
+test("reconnect catches keep-live chats up again in priority order after the visible chat", async () => {
+  const world = new TimelineWorld();
+  world.sync.replaceKeepLiveAgentIds(["bot-b", "bot-a"]);
+  world.show("pane", ["visible"]);
+  world.sync.setConnected(true);
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("visible")).respond({ hasNewer: false });
+  (await world.nextFetch("bot-b")).respond({ hasNewer: false });
+  (await world.nextFetch("bot-a")).respond({ hasNewer: false });
+  world.sync.setConnected(false);
+  world.sync.setConnected(true);
+  (await world.nextMembership()).succeed();
+  const visible = await world.nextFetch("visible");
+  world.expectNoPendingFetch();
+  visible.respond({ hasNewer: false });
+  const first = await world.nextFetch("bot-b");
+  world.expectNoPendingFetch();
+  first.respond({ hasNewer: false });
+  (await world.nextFetch("bot-a")).respond({ hasNewer: false });
+  world.sync.dispose();
+});
+
 class TimelineWorld {
   constructor(private readonly observeMembership?: ViewedTimelineSyncPorts["observe"]) {}
   readonly errors: string[] = [];
@@ -164,7 +367,7 @@ class TimelineWorld {
       };
     },
     readCursor: (agentId) => this.cursors.get(agentId),
-    fetchPage: async (agentId, request) => {
+    fetchPage: async (agentId, request, options) => {
       const result = deferred<{
         hasNewer: boolean;
         endCursor: { epoch: string; seq: number } | null;
@@ -172,12 +375,14 @@ class TimelineWorld {
       this.fetches.push({
         agentId,
         request,
+        options,
         respond: ({ hasNewer, seq = 1 }) =>
           result.resolve({
             hasNewer,
             endCursor: { epoch: `epoch-${agentId}`, seq },
           }),
         fail: (message) => result.reject(new Error(message)),
+        reject: (error) => result.reject(error),
       });
       this.releaseFetchWaiters();
       return result.promise;
@@ -268,6 +473,7 @@ class TimelineWorld {
       respond: ({ hasNewer, seq = 1 }) =>
         result.resolve({ hasNewer, endCursor: { epoch: `epoch-${agentId}`, seq } }),
       fail: (message) => result.reject(new Error(message)),
+      reject: (error) => result.reject(error),
     });
     this.releaseFetchWaiters();
     return result.promise;

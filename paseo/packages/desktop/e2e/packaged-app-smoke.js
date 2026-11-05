@@ -9,7 +9,8 @@ const { extractFile } = require("@electron/asar");
 const { WebSocket } = require("ws");
 const assert = require("node:assert/strict");
 
-const EXECUTABLE_NAME = "Paseo";
+// The public (DinoBot) build sets this from electron-builder's executable name (after-pack.js).
+const EXECUTABLE_NAME = process.env.PASEO_DESKTOP_EXECUTABLE_NAME || "Paseo";
 const SMOKE_TIMEOUT_MS = 60_000;
 const EXIT_TIMEOUT_MS = 10_000;
 const TERMINAL_CAPTURE_ATTEMPTS = 20;

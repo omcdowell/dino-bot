@@ -31,6 +31,7 @@ const {
     colors: {
       foreground: "#fff",
       foregroundMuted: "#aaa",
+      accentText: "#9cc963",
       surface2: "#222",
       borderAccent: "#444",
       palette: {
@@ -419,9 +420,7 @@ describe("WorkspaceScriptsButton", () => {
       }),
     ]);
 
-    expect(requirePrimaryIcon(requireRow("web")).dataset.color).toBe(
-      theme.colors.palette.green[500],
-    );
+    expect(requirePrimaryIcon(requireRow("web")).dataset.color).toBe(theme.colors.accentText);
     expect(requirePrimaryIcon(requireRow("api")).dataset.color).toBe(theme.colors.palette.red[500]);
     expect(requirePrimaryIcon(requireRow("worker")).dataset.color).toBe(
       theme.colors.palette.blue[500],

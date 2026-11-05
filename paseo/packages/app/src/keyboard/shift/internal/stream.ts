@@ -4,14 +4,15 @@ import { useSettledKeyboardShift } from "./context";
 import { resolveStreamKeyboardInset } from "./policy";
 
 /** Preserve the translated inverted list's far-end scroll range only after motion settles. */
-export function useKeyboardStreamInset() {
+export function useKeyboardStreamInset(farEndOverlayInset = 0) {
   const settledShift = useSettledKeyboardShift();
   return useMemo(
     () =>
       resolveStreamKeyboardInset({
         platform: Platform.OS === "ios" ? "ios" : "android",
         settledShift,
+        farEndOverlayInset,
       }),
-    [settledShift],
+    [settledShift, farEndOverlayInset],
   );
 }

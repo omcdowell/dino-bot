@@ -47,6 +47,7 @@ export function createPluginAgentSnapshot(agent: Agent, workspaceId: string): Pl
     thinkingOptionId: agent.thinkingOptionId ?? null,
     requiresAttention: agent.requiresAttention ?? false,
     attentionReason: agent.attentionReason ?? null,
+    pendingPermissionCount: agent.pendingPermissions.length,
     parentAgentId: agent.parentAgentId,
     labels: Object.freeze({ ...agent.labels }),
   });

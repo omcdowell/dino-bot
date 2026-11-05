@@ -34,6 +34,7 @@ import type {
   AgentPersistenceHandle,
 } from "@getpaseo/protocol/agent-types";
 import type {
+  AgentSnapshotPayload,
   ServerInfoStatusPayload,
   ProjectPlacementPayload,
   ServerCapabilities,
@@ -100,6 +101,8 @@ export interface Agent {
   parentAgentId: string | null;
   labels: Record<string, string>;
   projectPlacement?: ProjectPlacementPayload | null;
+  /** Messages the daemon holds for this agent until it is idle (agentMessageQueue). */
+  messageQueue?: AgentSnapshotPayload["messageQueue"];
 }
 
 export interface WorkspaceDescriptor {
@@ -282,6 +285,9 @@ export interface DaemonServerInfo {
   serverId: string;
   hostname: string | null;
   version: string | null;
+  /** DinoBot: shown for the host instead of `version` when set; never used for compat checks. */
+  displayVersion?: string | null;
+  productName?: string | null;
   desktopManaged?: boolean;
   capabilities?: ServerCapabilities;
   features?: ServerInfoStatusPayload["features"];
@@ -292,6 +298,8 @@ export function toDaemonServerInfo(serverInfo: ServerInfoStatusPayload): DaemonS
     serverId: serverInfo.serverId,
     hostname: serverInfo.hostname ?? null,
     version: serverInfo.version ?? null,
+    ...(serverInfo.displayVersion ? { displayVersion: serverInfo.displayVersion } : {}),
+    ...(serverInfo.productName ? { productName: serverInfo.productName } : {}),
     ...(serverInfo.desktopManaged !== undefined
       ? { desktopManaged: serverInfo.desktopManaged }
       : {}),
@@ -689,6 +697,8 @@ function isSessionServerInfoUnchanged(input: {
   currentServerInfo: SessionState["serverInfo"] | undefined;
   nextHostname: string | null;
   nextVersion: string | null;
+  nextDisplayVersion: string | null;
+  nextProductName: string | null;
   nextDesktopManaged: boolean | undefined;
   nextCapabilities: ServerCapabilities | undefined;
   nextFeatures: ServerInfoStatusPayload["features"] | undefined;
@@ -698,6 +708,8 @@ function isSessionServerInfoUnchanged(input: {
     currentServerInfo,
     nextHostname,
     nextVersion,
+    nextDisplayVersion,
+    nextProductName,
     nextDesktopManaged,
     nextCapabilities,
     nextFeatures,
@@ -708,6 +720,8 @@ function isSessionServerInfoUnchanged(input: {
     currentServerInfo?.serverId === input.nextServerId &&
     prevHostname === nextHostname &&
     prevVersion === nextVersion &&
+    (currentServerInfo?.displayVersion?.trim() || null) === nextDisplayVersion &&
+    (currentServerInfo?.productName?.trim() || null) === nextProductName &&
     currentServerInfo?.desktopManaged === nextDesktopManaged &&
     areServerCapabilitiesEqual(currentServerInfo?.capabilities, nextCapabilities) &&
     areServerInfoFeaturesEqual(currentServerInfo?.features, nextFeatures)
@@ -845,6 +859,8 @@ export const useSessionStore = create<SessionStore>()(
 
           const nextHostname = info.hostname?.trim() || null;
           const nextVersion = info.version?.trim() || null;
+          const nextDisplayVersion = info.displayVersion?.trim() || null;
+          const nextProductName = info.productName?.trim() || null;
           const nextDesktopManaged = info.desktopManaged;
           const nextCapabilities = info.capabilities;
           const nextFeatures = info.features;
@@ -854,6 +870,8 @@ export const useSessionStore = create<SessionStore>()(
               currentServerInfo: session.serverInfo,
               nextHostname,
               nextVersion,
+              nextDisplayVersion,
+              nextProductName,
               nextDesktopManaged,
               nextCapabilities,
               nextFeatures,
@@ -873,6 +891,8 @@ export const useSessionStore = create<SessionStore>()(
                   serverId: info.serverId,
                   hostname: nextHostname,
                   version: nextVersion,
+                  ...(nextDisplayVersion ? { displayVersion: nextDisplayVersion } : {}),
+                  ...(nextProductName ? { productName: nextProductName } : {}),
                   ...(nextDesktopManaged !== undefined
                     ? { desktopManaged: nextDesktopManaged }
                     : {}),

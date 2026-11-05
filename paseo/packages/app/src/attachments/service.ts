@@ -94,6 +94,7 @@ export async function persistAttachmentFromFileUri(input: {
 
 export async function encodeAttachmentsForSend(
   attachments: readonly AttachmentMetadata[] | undefined,
+  options?: { onEncoded?: (attachment: AttachmentMetadata, data: string) => Promise<unknown> },
 ): Promise<Array<{ data: string; mimeType: string }> | undefined> {
   if (!attachments || attachments.length === 0) {
     return undefined;
@@ -104,6 +105,7 @@ export async function encodeAttachmentsForSend(
     attachments.map(async (attachment) => {
       try {
         const data = await store.encodeBase64({ attachment });
+        await options?.onEncoded?.(attachment, data);
         return {
           data,
           mimeType: attachment.mimeType,

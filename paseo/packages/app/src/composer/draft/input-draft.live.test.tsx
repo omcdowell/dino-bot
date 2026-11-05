@@ -135,8 +135,9 @@ beforeAll(async () => {
     configurable: true,
   });
 
+  // The first import transforms a large module graph, slower than the 10 s hook default.
   ({ useAgentInputDraft } = await import("./input-draft"));
-});
+}, 60_000);
 
 describe("useAgentInputDraft live contract", () => {
   beforeEach(() => {

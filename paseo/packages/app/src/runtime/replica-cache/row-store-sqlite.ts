@@ -1,4 +1,11 @@
-import type { ReplicaHostRows, ReplicaRow, ReplicaRowChanges, ReplicaRowStore } from "./row-store";
+import type {
+  ReplicaHostRows,
+  ReplicaRow,
+  ReplicaRowChanges,
+  ReplicaRowIndexEntry,
+  ReplicaRowKey,
+  ReplicaRowStore,
+} from "./row-store";
 
 export type SqliteValue = string | number | null;
 
@@ -16,9 +23,11 @@ export interface ReplicaSqliteDriver {
 const CREATE_ROWS_SQL = `
   CREATE TABLE IF NOT EXISTS rows (
     server_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('agent', 'workspace', 'project', 'timeline', 'checkpoint')),
+    kind TEXT NOT NULL CHECK (kind IN ('agent', 'workspace', 'project', 'timeline', 'timeline_page', 'checkpoint')),
     id TEXT NOT NULL,
     payload TEXT NOT NULL,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    touched_at INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (server_id, kind, id)
   )
 `;
@@ -32,6 +41,29 @@ const CREATE_META_SQL = `
 
 interface StoredMeta {
   value: string;
+}
+
+interface StoredIndexRow {
+  server_id: string;
+  kind: ReplicaRow["kind"];
+  id: string;
+  bytes: number;
+  touched_at: number;
+}
+
+/** UTF-8 size without materialising a byte array (the Buffer polyfill does on Hermes). */
+export function utf8ByteLength(text: string): number {
+  let bytes = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      bytes += 4;
+      index += 1;
+    } else bytes += 3;
+  }
+  return bytes;
 }
 
 interface StoredRow {
@@ -107,6 +139,31 @@ export function createSqliteReplicaRowStore(
     return Array.from(hosts, ([serverId, rows]) => ({ serverId, rows }));
   }
 
+  async function readIndex(): Promise<ReplicaRowIndexEntry[]> {
+    const rows = await getConnection().all<StoredIndexRow>(
+      "SELECT server_id, kind, id, bytes, touched_at FROM rows",
+    );
+    return rows.map((row) => ({
+      serverId: row.server_id,
+      kind: row.kind,
+      id: row.id,
+      bytes: row.bytes,
+      touchedAt: row.touched_at,
+    }));
+  }
+
+  async function touch(keys: readonly ReplicaRowKey[], at: number): Promise<void> {
+    if (keys.length === 0) return;
+    await getConnection().transaction(async (transaction) => {
+      for (const key of keys) {
+        await transaction.run(
+          "UPDATE rows SET touched_at = ? WHERE server_id = ? AND kind = ? AND id = ?",
+          [at, key.serverId, key.kind, key.id],
+        );
+      }
+    });
+  }
+
   async function read(
     serverId: string,
     kinds: readonly ReplicaRow["kind"][],
@@ -138,11 +195,13 @@ export function createSqliteReplicaRowStore(
           key.id,
         ]);
       }
+      const now = Date.now();
       for (const row of changes.upserts) {
         await transaction.run(
-          `INSERT INTO rows (server_id, kind, id, payload) VALUES (?, ?, ?, ?)
-           ON CONFLICT (server_id, kind, id) DO UPDATE SET payload = excluded.payload`,
-          [row.serverId, row.kind, row.id, row.payload],
+          `INSERT INTO rows (server_id, kind, id, payload, bytes, touched_at) VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (server_id, kind, id) DO UPDATE SET payload = excluded.payload,
+             bytes = excluded.bytes, touched_at = excluded.touched_at`,
+          [row.serverId, row.kind, row.id, row.payload, utf8ByteLength(row.payload), now],
         );
       }
     });
@@ -156,9 +215,10 @@ export function createSqliteReplicaRowStore(
     if (oldServerId === newServerId) return;
     await getConnection().transaction(async (transaction) => {
       await transaction.run(
-        `INSERT INTO rows (server_id, kind, id, payload)
-         SELECT ?, kind, id, payload FROM rows WHERE server_id = ?
-         ON CONFLICT (server_id, kind, id) DO UPDATE SET payload = excluded.payload`,
+        `INSERT INTO rows (server_id, kind, id, payload, bytes, touched_at)
+         SELECT ?, kind, id, payload, bytes, touched_at FROM rows WHERE server_id = ?
+         ON CONFLICT (server_id, kind, id) DO UPDATE SET payload = excluded.payload,
+           bytes = excluded.bytes, touched_at = excluded.touched_at`,
         [newServerId, oldServerId],
       );
       await transaction.run("DELETE FROM rows WHERE server_id = ?", [oldServerId]);
@@ -169,5 +229,5 @@ export function createSqliteReplicaRowStore(
     await getConnection().run("DELETE FROM rows");
   }
 
-  return { open, read, readAll, apply, deleteHost, renameHost, clear };
+  return { open, read, readAll, readIndex, touch, apply, deleteHost, renameHost, clear };
 }

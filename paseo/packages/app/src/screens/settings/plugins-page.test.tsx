@@ -72,6 +72,8 @@ vi.mock("react-native-reanimated", () => ({
   useAnimatedStyle: (factory: () => unknown) => factory(),
   useDerivedValue: (factory: () => unknown) => ({ value: factory() }),
   withTiming: (value: unknown) => value,
+  FadeIn: { duration: () => ({}) },
+  FadeOut: { duration: () => ({}) },
 }));
 
 vi.mock("@gorhom/bottom-sheet", async () => {

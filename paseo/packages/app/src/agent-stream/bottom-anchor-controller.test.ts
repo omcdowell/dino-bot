@@ -441,6 +441,53 @@ describe("bottom anchor controller driver", () => {
     expect(harness.driver.getSnapshot().mode).toBe("sticky-bottom");
   });
 
+  it("lets an explicit jump-to-bottom win over in-flight scroll momentum", () => {
+    const harness = createDriverHarness({
+      isNearBottom: false,
+    });
+
+    // Fling away from the bottom; momentum still owns the viewport.
+    harness.driver.beginUserScroll();
+    harness.driver.handleScrollNearBottomChange({
+      nextIsNearBottom: false,
+      scrollDelta: 400,
+    });
+    harness.driver.requestLocalAnchor({
+      agentId: "agent-1",
+      reason: "jump-to-bottom",
+    });
+    harness.scheduler.flushAll();
+
+    expect(harness.scrollAttempts).toEqual([true]);
+    expect(harness.driver.getSnapshot()).toMatchObject({
+      mode: "sticky-bottom",
+      pendingRequest: null,
+    });
+
+    // A late momentum end from the superseded gesture must not detach again.
+    harness.driver.endUserScroll({ isNearBottom: false });
+    harness.scheduler.flushAll();
+
+    expect(harness.driver.getSnapshot().mode).toBe("sticky-bottom");
+    expect(harness.scrollAttempts).toEqual([true]);
+  });
+
+  it("lets a sent message re-anchor over in-flight scroll momentum", () => {
+    const harness = createDriverHarness({
+      isNearBottom: false,
+    });
+
+    harness.driver.beginUserScroll();
+    harness.driver.requestLocalAnchor({
+      agentId: "agent-1",
+      reason: "message-sent",
+    });
+    harness.scheduler.flushAll();
+
+    expect(harness.scrollAttempts).toHaveLength(1);
+    expect(harness.driver.getSnapshot().mode).toBe("sticky-bottom");
+  });
+
   it("schedules sticky maintenance on viewport and content growth", () => {
     const harness = createDriverHarness();
 

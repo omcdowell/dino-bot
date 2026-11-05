@@ -1505,7 +1505,7 @@ export function BrowserPane({
             <MousePointer2
               size={16}
               color={
-                selectorMode === "annotate" ? theme.colors.accent : theme.colors.foregroundMuted
+                selectorMode === "annotate" ? theme.colors.accentText : theme.colors.foregroundMuted
               }
             />
           </ToolbarButton>
@@ -1522,7 +1522,7 @@ export function BrowserPane({
             <Camera
               size={16}
               color={
-                selectorMode === "screenshot" ? theme.colors.accent : theme.colors.foregroundMuted
+                selectorMode === "screenshot" ? theme.colors.accentText : theme.colors.foregroundMuted
               }
             />
           </ToolbarButton>

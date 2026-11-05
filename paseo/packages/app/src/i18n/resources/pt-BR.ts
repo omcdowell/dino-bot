@@ -345,6 +345,7 @@ export const ptBR: TranslationResources = {
       closeImage: "Fechar imagem",
       imageLoadFailed: "Não foi possível carregar a imagem",
       imageUnavailable: "Imagem indisponível",
+      downloadImage: "Baixar imagem",
       imagePreviewUnavailable: "Prévia da imagem indisponível.",
       imagePreviewLoadFailed: "Não foi possível carregar a prévia da imagem.",
       review: "Revisão",
@@ -632,6 +633,8 @@ export const ptBR: TranslationResources = {
         trigger: "Alternar abas ({{count}} abertas)",
         title: "Alternar aba",
         searchPlaceholder: "Buscar abas",
+        groupLabel: "Abas",
+        groupCount: "{{count}} abertas",
       },
       menu: {
         openFor: "Abrir menu de {{label}}",
@@ -1674,6 +1677,11 @@ export const ptBR: TranslationResources = {
     retrying: "Tentando novamente...",
     noMatches: "Nenhum modelo corresponde à sua busca",
     noMatchesForQuery: "Nenhum modelo corresponde a «{{query}}»",
+    scopeScoped: "Seleção",
+    scopeAll: "Todos",
+    scopeAdd: "Adicionar à seleção",
+    scopeRemove: "Remover da seleção",
+    scopeEmpty: "A seleção está vazia. Marque modelos com a caixa de seleção em Todos.",
     searchAllPlaceholder: "Buscar em todos os modelos...",
     searchPlaceholder: "Buscar modelos...",
     openProviderSettings: "Abrir configurações de {{provider}}",
@@ -2136,6 +2144,8 @@ export const ptBR: TranslationResources = {
     general: {
       title: "Geral",
       sending: "Envio",
+      network: en.settings.general.network,
+      meteredNetwork: en.settings.general.meteredNetwork,
       browserData: {
         title: "Dados do navegador",
         siteData: "Cookies e dados de sites",
@@ -2851,4 +2861,6 @@ export const ptBR: TranslationResources = {
       },
     },
   },
+  delivery: en.delivery,
+  network: en.network,
 };

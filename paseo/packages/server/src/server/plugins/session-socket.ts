@@ -22,6 +22,11 @@ function frameByteLength(data: string | Uint8Array): number {
 export class PluginSessionSocket {
   readyState = 1;
   bufferedAmount = 0;
+  /**
+   * The child transport this session speaks to (see linkField in plugin-process-protocol). Taken
+   * from the first frame the child sends; undefined until then, and for an untagged child.
+   */
+  link: number | undefined;
   private readonly listeners = new Map<SocketEvent, Set<SocketListener>>();
   private readonly onceListeners = new Map<SocketEvent, Set<SocketListener>>();
 
@@ -37,7 +42,12 @@ export class PluginSessionSocket {
     this.bufferedAmount += byteLength;
     try {
       this.child.send(
-        { type: "paseo_frame", data: frame, isBinary: typeof frame !== "string" },
+        {
+          type: "paseo_frame",
+          data: frame,
+          isBinary: typeof frame !== "string",
+          ...(this.link !== undefined ? { link: this.link } : {}),
+        },
         (error) => {
           this.bufferedAmount = Math.max(0, this.bufferedAmount - byteLength);
           callback?.(error ?? undefined);
@@ -58,7 +68,10 @@ export class PluginSessionSocket {
     if (this.readyState === 3) return;
     this.readyState = 3;
     try {
-      this.child.send({ type: "paseo_close" });
+      this.child.send({
+        type: "paseo_close",
+        ...(this.link !== undefined ? { link: this.link } : {}),
+      });
     } catch {
       // The child has already gone; local session cleanup still has to run.
     }

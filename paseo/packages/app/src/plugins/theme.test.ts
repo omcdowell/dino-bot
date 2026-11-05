@@ -79,6 +79,7 @@ describe("toPluginTheme", () => {
         foregroundMuted: lightTheme.colors.foregroundMuted,
         accent: lightTheme.colors.accent,
         accentForeground: lightTheme.colors.accentForeground,
+        accentText: lightTheme.colors.accentText,
         statusSuccess: lightTheme.colors.statusSuccess,
         statusWarning: lightTheme.colors.statusWarning,
         statusDanger: lightTheme.colors.statusDanger,

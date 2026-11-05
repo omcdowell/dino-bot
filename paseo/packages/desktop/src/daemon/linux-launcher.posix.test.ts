@@ -121,3 +121,23 @@ it("applies a debugging environment sandbox override before Chromium starts", as
   expect(result.args).toEqual(["--no-sandbox", ...result.input]);
   expect(result.stderr).toContain("requested by PASEO_ELECTRON_FLAGS");
 });
+
+test("installs the launcher under the build's executable name (DinoBot for the public build)", async () => {
+  const root = mkdtempSync(join(tmpdir(), "paseo-launcher-"));
+  try {
+    writeFileSync(join(root, "DinoBot"), `#!/bin/sh\necho real\n`);
+    chmodSync(join(root, "DinoBot"), 0o755);
+    await afterPack({
+      appOutDir: root,
+      electronPlatformName: "linux",
+      arch: 1,
+      packager: { executableName: "DinoBot", appInfo: { productFilename: "DinoBot" } },
+    });
+    const launched = spawnSync(join(root, "DinoBot.bin"), [], { encoding: "utf8" });
+    expect(launched.stdout.trim()).toBe("real");
+    const launcher = spawnSync("head", ["-2", join(root, "DinoBot")], { encoding: "utf8" });
+    expect(launcher.stdout).toContain("#!/bin/sh");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

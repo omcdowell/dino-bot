@@ -1,8 +1,12 @@
+import { once } from "node:events";
+import type { AddressInfo } from "node:net";
 import { expect, test } from "vitest";
+import { WebSocket, WebSocketServer } from "ws";
 import {
   APPLICATION_SOCKET_LEASE_MS,
   ApplicationSocketLease,
   MAX_PHYSICAL_SOCKET_BUFFERED_BYTES,
+  onInboundBytes,
   sendBoundedPhysicalFrame,
   sendBoundedPhysicalFrameAndWait,
 } from "./physical-socket.js";
@@ -119,4 +123,35 @@ test("the awaitable physical send rejects callback errors", async () => {
       onHighWater: () => undefined,
     }),
   ).rejects.toThrow("send failed");
+});
+
+test("the bytes of a large message renew the lease before the message has fully arrived", async () => {
+  const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  await once(server, "listening");
+  const { port } = server.address() as AddressInfo;
+  const client = new WebSocket(`ws://127.0.0.1:${port}`);
+  try {
+    const [serverSocket] = (await once(server, "connection")) as [WebSocket];
+    await once(client, "open");
+    let chunks = 0;
+    let chunksBeforeMessage = -1;
+    onInboundBytes(serverSocket, () => {
+      chunks += 1;
+    });
+    const message = once(serverSocket, "message").then(() => {
+      chunksBeforeMessage = chunks;
+      return undefined;
+    });
+    client.send(Buffer.alloc(4 * 1024 * 1024, 7));
+    await message;
+    // The kernel hands a 4 MB frame over in many reads; each one counts as liveness.
+    expect(chunksBeforeMessage).toBeGreaterThan(1);
+  } finally {
+    client.terminate();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("sockets without a raw TCP socket are left alone", () => {
+  expect(() => onInboundBytes({}, () => {})).not.toThrow();
 });

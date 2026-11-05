@@ -149,8 +149,8 @@ export class SherpaOnnxParakeetSTT implements SpeechToTextProvider {
     try {
       const floatSamples = pcm16leToFloat32(pcmForModel, gain);
       this.engine.acceptWaveform(stream, inputRate, floatSamples);
-      this.engine.recognizer.decode(stream);
-      const result = this.engine.recognizer.getResult(stream);
+      this.engine.decode(stream);
+      const result = this.engine.getResult(stream);
       const text = String(
         (typeof result === "object" && result && "text" in result ? result.text : undefined) ??
           result ??

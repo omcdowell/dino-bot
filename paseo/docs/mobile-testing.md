@@ -12,7 +12,7 @@ agent-device open sh.paseo.debug \
   --session terminal-author \
   --save-script ./packages/app/e2e/mobile/agent-device/terminal.ios.ad
 agent-device snapshot -i --session terminal-author
-agent-device press 'id="workspace-header-menu-trigger"' --session terminal-author
+agent-device press 'id="workspace-tab-switcher-trigger"' --session terminal-author
 # Continue the flow and verify its result with wait/get/is/find.
 agent-device close --session terminal-author
 ```

@@ -9,17 +9,29 @@ import {
   getHostWorkspaceOpenParamFromPathname,
   parseHostWorkspaceRouteFromPathname,
 } from "@/utils/host-routes";
+import type { MobileHome } from "@/plugins/mobile-home";
+import { shouldPushWorkspaceOverMobileHome } from "./mobile-home-stack";
 
 const ROOT_HOST_ROUTE_NAME = "h/[serverId]";
 const HOST_WORKSPACE_ROUTE_NAME = "workspace/[workspaceId]/index";
 
 interface NavigateToHostWorkspaceRouteDeps {
   dismissTo(route: string): void;
+  push?(route: string): void;
 }
 
 const defaultNavigateToHostWorkspaceRouteDeps: NavigateToHostWorkspaceRouteDeps = {
   dismissTo: (route) => router.dismissTo(route as Href),
+  push: (route) => router.push(route as Href),
 };
+
+// Phones with a plugin home (kept current by MobileHomeSync); null elsewhere.
+let mobileHome: MobileHome | null = null;
+
+/** Phones: a chat opened while the home is on show is pushed over it (native slide, swipe back). */
+export function setWorkspaceNavigationMobileHome(home: MobileHome | null): void {
+  mobileHome = home;
+}
 
 let rootNavigationRef: NavigationContainerRefWithCurrent<ReactNavigation.RootParamList> | null =
   null;
@@ -157,5 +169,17 @@ function flushPendingIntent(): void {
 
   const { route, deps } = pendingIntent;
   pendingIntent = null;
+  if (
+    deps.push &&
+    shouldPushWorkspaceOverMobileHome({
+      rootState: navigation.getRootState(),
+      route,
+      home: mobileHome,
+    })
+  ) {
+    // Push, not replace: the home stays mounted underneath and iOS's edge swipe pops back to it.
+    deps.push(route);
+    return;
+  }
   if (!dispatchHostWorkspacePopTo(route, navigation)) deps.dismissTo(route);
 }

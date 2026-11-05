@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { Pressable, Text, View, ScrollView } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import {
   QrCode,
@@ -18,7 +18,7 @@ import { AddHostModal } from "./add-host-modal";
 import { AddRemoteSshHostModal } from "./add-remote-ssh-host-modal";
 import { PairLinkModal } from "./pair-link-modal";
 import { Button } from "@/components/ui/button";
-import { resolveAppVersion } from "@/utils/app-version";
+import { resolveDisplayVersion } from "@/utils/app-version";
 import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
 import { buildOpenProjectRoute } from "@/utils/host-routes";
 import { PaseoLogo } from "@/components/icons/paseo-logo";
@@ -26,6 +26,15 @@ import { openExternalUrl } from "@/utils/open-external-url";
 import { isFdroidBuild } from "@/constants/build-profile";
 import { isWeb, isNative } from "@/constants/platform";
 import { isElectronRuntime } from "@/desktop/host";
+import * as Clipboard from "expo-clipboard";
+import {
+  APP_INSTALL_URL,
+  APP_LINK_SCHEME,
+  RELEASE_POLICY,
+  installCommand,
+} from "@/constants/flavour";
+import { routeAfterPairing } from "@/onboarding/setup-store";
+import { useIsFocused } from "@react-navigation/native";
 
 interface WelcomeAction {
   key: "scan-qr" | "direct-connection" | "remote-ssh" | "paste-pairing-link";
@@ -107,9 +116,37 @@ const styles = StyleSheet.create((theme) => ({
     gap: 6,
   },
   setupLinkText: {
-    color: theme.colors.accent,
+    color: theme.colors.accentText,
     fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.medium,
+  },
+  installStep: {
+    width: "100%",
+    maxWidth: 420,
+    gap: theme.spacing[2],
+    marginBottom: theme.spacing[4],
+  },
+  installTitle: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.medium,
+  },
+  installCommand: {
+    padding: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface2,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  installCommandText: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
+    fontFamily: "Menlo",
+  },
+  installHint: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+    marginBottom: theme.spacing[2],
   },
   versionLabel: {
     color: theme.colors.foregroundMuted,
@@ -171,22 +208,37 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const appVersion = resolveAppVersion();
-  const appVersionText = formatVersionWithPrefix(appVersion);
+  const appVersionText = formatVersionWithPrefix(resolveDisplayVersion());
   const [isDirectOpen, setIsDirectOpen] = useState(false);
   const [isRemoteSshOpen, setIsRemoteSshOpen] = useState(false);
   const [isPasteLinkOpen, setIsPasteLinkOpen] = useState(false);
   const hosts = useHosts();
   const anyOnlineServerId = useAnyHostOnline(hosts.map((h) => h.serverId));
 
-  useEffect(() => {
-    if (!anyOnlineServerId) return;
-    router.replace(buildOpenProjectRoute());
-  }, [anyOnlineServerId, router]);
+  // Public flavour: a newly paired host goes through the one-time setup step first.
+  const finishOnboardingFor = useCallback(
+    (serverId: string | null) => {
+      if (!serverId || !RELEASE_POLICY.importOnboarding) {
+        router.replace(buildOpenProjectRoute());
+        return;
+      }
+      void routeAfterPairing(serverId)
+        .catch(() => buildOpenProjectRoute())
+        .then((route) => router.replace(route as Href));
+    },
+    [router],
+  );
 
-  const finishOnboarding = useCallback(() => {
-    router.replace(buildOpenProjectRoute());
-  }, [router]);
+  // Only while this screen is on top, and once per host: with /pair pushed over it (a pairing link),
+  // the pair screen routes on; repeating the redirect replaced the setup screens over and over
+  // (seen on the DinoBot desktop app, which restarted its sign-in check each time).
+  const isFocused = useIsFocused();
+  const routedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!anyOnlineServerId || !isFocused || routedFor.current === anyOnlineServerId) return;
+    routedFor.current = anyOnlineServerId;
+    finishOnboardingFor(anyOnlineServerId);
+  }, [anyOnlineServerId, finishOnboardingFor, isFocused]);
 
   const handleOpenPaseoSite = useCallback(() => {
     void openExternalUrl("https://paseo.sh");
@@ -207,11 +259,11 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
   }, [router]);
 
   const handleHostSaved = useCallback(
-    ({ profile }: { profile: HostProfile; serverId: string }) => {
+    ({ profile, serverId }: { profile: HostProfile; serverId: string }) => {
       onHostAdded?.(profile);
-      finishOnboarding();
+      finishOnboardingFor(serverId);
     },
-    [onHostAdded, finishOnboarding],
+    [onHostAdded, finishOnboardingFor],
   );
 
   const actions: WelcomeAction[] =
@@ -261,7 +313,15 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
           },
         ];
 
-  if (isElectronRuntime()) {
+  // Public flavour: Tailscale only, so no manual host:port entry (that is the LAN path); pairing
+  // is the setup QR (camera or phone camera deep link) or its pasted link.
+  if (RELEASE_POLICY.tailnetOnly) {
+    const index = actions.findIndex((action) => action.key === "direct-connection");
+    if (index >= 0) actions.splice(index, 1);
+    if (actions[0]) actions[0].primary = true;
+  }
+
+  if (isElectronRuntime() && RELEASE_POLICY.desktopRemoteSsh) {
     actions.splice(1, 0, {
       key: "remote-ssh",
       label: t("pairing.connectionMethods.remoteSsh.title"),
@@ -290,13 +350,16 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
           <View style={styles.copyBlock}>
             <Text style={styles.title}>{t("onboarding.title")}</Text>
             <Text style={styles.subtitle}>{t("onboarding.subtitle")}</Text>
-            {isNative ? (
+            {/* paseo.sh is upstream's site: not linked from the public app. */}
+            {isNative && !RELEASE_POLICY.debrand ? (
               <Pressable style={styles.setupLink} onPress={handleOpenPaseoSite}>
                 <Text style={styles.setupLinkText}>paseo.sh</Text>
-                <ExternalLink size={14} color={theme.colors.accent} />
+                <ExternalLink size={14} color={theme.colors.accentText} />
               </Pressable>
             ) : null}
           </View>
+
+          {APP_INSTALL_URL ? <InstallStep url={APP_INSTALL_URL} /> : null}
 
           <View style={styles.actions}>
             {actions.map((action) => (
@@ -337,6 +400,57 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
       </ScrollView>
     </View>
   );
+}
+
+/**
+ * Public flavour, step 1: the one command that installs the server on a Mac or Linux computer
+ * (release-flavour.js PUBLIC_INSTALL_URL). It ends in a QR code that the buttons below scan.
+ * Tapping the command copies it.
+ */
+function InstallStep({ url }: { url: string }) {
+  const command = installCommand(url);
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(() => {
+    void Clipboard.setStringAsync(command)
+      .then(() => setCopied(true))
+      .catch(() => undefined);
+  }, [command]);
+  return (
+    <View style={styles.installStep} testID="welcome-install-step">
+      <Text style={styles.installTitle}>1. On your Mac or Linux computer, run:</Text>
+      <Pressable
+        onPress={handleCopy}
+        style={styles.installCommand}
+        testID="welcome-install-command"
+      >
+        <Text style={styles.installCommandText} selectable>
+          {command}
+        </Text>
+      </Pressable>
+      <Text style={styles.installHint}>
+        {copied ? "Copied. Paste it into Terminal on your computer." : installHint()}
+      </Text>
+      <Text style={styles.installTitle}>{installNextStep()}</Text>
+    </View>
+  );
+}
+
+/** The phone scans the installer's QR; the desktop app (no camera) pastes its link instead. */
+function installHint(): string {
+  return isNative
+    ? "Tap to copy. It installs everything and shows a QR code at the end. You also need Tailscale on your computer and this phone; setup walks you through it."
+    : "Click to copy. It installs everything, then shows a QR code for a phone and the command for step 2. You also need Tailscale on that computer, and on this one if it is a different computer; setup walks you through it.";
+}
+
+function installNextStep(): string {
+  return isNative
+    ? "2. Scan the QR code it shows:"
+    : `2. Then run ${pairLinkCommand()} there and paste the link it prints:`;
+}
+
+/** Prints the pairing link as text (installer `pair --link`), for the desktop app's paste step. */
+function pairLinkCommand(): string {
+  return `~/.${APP_LINK_SCHEME}/bin/${APP_LINK_SCHEME} pair --link`;
 }
 
 interface WelcomeActionButtonProps {

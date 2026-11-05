@@ -44,6 +44,25 @@ describe("resolveStreamKeyboardInset", () => {
     });
   });
 
+  it("adds the floating header's inset at the list's far end on both platforms", () => {
+    expect(
+      resolveStreamKeyboardInset({ platform: "ios", settledShift: 0, farEndOverlayInset: 116 }),
+    ).toEqual({ contentContainerPaddingBottom: 0, contentInset: { bottom: 116 } });
+    expect(
+      resolveStreamKeyboardInset({ platform: "ios", settledShift: 311, farEndOverlayInset: 116 }),
+    ).toEqual({ contentContainerPaddingBottom: 0, contentInset: { bottom: 427 } });
+    expect(
+      resolveStreamKeyboardInset({
+        platform: "android",
+        settledShift: 311,
+        farEndOverlayInset: 116,
+      }),
+    ).toEqual({ contentContainerPaddingBottom: 427, contentInset: undefined });
+    expect(
+      resolveStreamKeyboardInset({ platform: "ios", settledShift: 0, farEndOverlayInset: -5 }),
+    ).toEqual({ contentContainerPaddingBottom: 0, contentInset: { bottom: 0 } });
+  });
+
   it("does not expose a negative inset", () => {
     expect(resolveStreamKeyboardInset({ platform: "ios", settledShift: -1 })).toEqual({
       contentContainerPaddingBottom: 0,

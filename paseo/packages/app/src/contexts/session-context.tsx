@@ -6,7 +6,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useClientActivity } from "@/hooks/use-client-activity";
 import { useAppVisible } from "@/hooks/use-app-visible";
-import { startPushNotifications } from "@/push-notifications";
+import {
+  isApnsPushBuild,
+  noteReplyForPushPrompt,
+  startPushNotifications,
+} from "@/push-notifications";
+import { startLiveActivity } from "@/live-activity";
 import {
   createSetAgentInitializing,
   refreshAgentInitializationTimeout,
@@ -15,7 +20,23 @@ import type { StreamItem } from "@/types/stream";
 import { deriveAgentStreamTurnLiveness } from "@/timeline/session-stream-reducers";
 import { planTimelineTailFetch } from "@/timeline/timeline-sync-plan";
 import { requestTimelineReplacement } from "@/timeline/timeline-replacement";
-import { type ViewedTimelineOwner } from "@/timeline/viewed-timeline-sync";
+import {
+  type TimelineFetchOptions,
+  type ViewedTimelineOwner,
+} from "@/timeline/viewed-timeline-sync";
+import {
+  diffKeepLivePhases,
+  selectKeepLiveAgentIds,
+  type KeepLivePhase,
+} from "@/timeline/keep-live";
+import {
+  INITIAL_LINK_QUALITY,
+  nextLinkQuality,
+  readBrowserConnection,
+} from "@/runtime/link-quality";
+import { useAppSettings } from "@/hooks/use-settings";
+import { setChatImageHostConstrained } from "@/chat-images/network-policy";
+import { useNetworkMonitorStore } from "@/runtime/network-monitor";
 import type { SessionOutboundMessage } from "@getpaseo/protocol/messages";
 import { parseServerInfoStatusPayload } from "@getpaseo/protocol/messages";
 import {
@@ -202,6 +223,27 @@ function SessionProviderWithClient({ children, serverId, client }: SessionProvid
 }
 
 // SessionProvider: Daemon client message handler that updates Zustand store
+
+/**
+ * Background and constrained fetches ask for compact pages; background ones never resume, and are
+ * lean where the host supports it (no reasoning, tool calls as stubs that load on expand): nobody
+ * is looking at those chats. Open chats keep their full rows.
+ */
+function withFetchOptions<Request extends object>(
+  request: Request,
+  options: TimelineFetchOptions | undefined,
+  serverId: string,
+): Request & { compact?: boolean; ifLoaded?: boolean; lean?: boolean } {
+  const features = useSessionStore.getState().sessions[serverId]?.serverInfo?.features;
+  if (!options || features?.compactTimeline !== true) return request;
+  return {
+    ...request,
+    ...(options.compact ? { compact: true } : {}),
+    ...(options.background ? { ifLoaded: true } : {}),
+    ...(options.background && features.leanTimeline === true ? { lean: true } : {}),
+  };
+}
+
 export function SessionProvider(props: SessionProviderProps) {
   return <SessionProviderWithClient {...props} />;
 }
@@ -213,6 +255,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
   const queryClient = useQueryClient();
   const isConnected = useHostRuntimeIsConnected(serverId);
   const toast = useToast();
+  const meteredNetwork = useAppSettings().settings.meteredNetwork;
 
   // Zustand store actions
   const setIsPlayingAudio = useSessionStore((state) => state.setIsPlayingAudio);
@@ -263,6 +306,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     focusedTerminalId,
   });
   useEffect(() => startPushNotifications({ client, serverId }), [client, serverId]);
+  useEffect(() => startLiveActivity({ client, serverId }), [client, serverId]);
 
   const notifyAgentAttention = useCallback(
     (params: {
@@ -271,6 +315,11 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       timestamp: string;
       notification?: AgentAttentionNotificationPayload;
     }) => {
+      // Own iOS build on paseo-apns: the only notifications are bot DMs to the owner, so agent
+      // attention never notifies (native local notifications are off upstream as well).
+      if (isApnsPushBuild()) {
+        return;
+      }
       const appState = appStateRef.current;
       const session = useSessionStore.getState().sessions[serverId];
       const attentionFocusedAgentId = session?.focusedAgentId ?? null;
@@ -387,6 +436,8 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       ) {
         voiceRuntime?.onTurnEvent(serverId, agentId, event.type);
       }
+      // First finished reply: the public flavour may now ask for notification permission.
+      if (event.type === "turn_completed") noteReplyForPushPrompt();
       const turnLiveness = deriveAgentStreamTurnLiveness([
         { event: streamEvent, seq, epoch, timestamp: parsedTimestamp },
       ]);
@@ -437,7 +488,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
           ? { epoch: timeline.range.epoch, endSeq: timeline.range.endSeq }
           : undefined;
       },
-      fetchPage: async (agentId, request) => {
+      fetchPage: async (agentId, request, options) => {
         const session = useSessionStore.getState().sessions[serverId];
         const initKey = getInitKey(serverId, agentId);
         const shouldInitialize = selectAgentTimelineState(session, agentId).status !== "synced";
@@ -454,7 +505,11 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
           setAgentInitializing(agentId, true);
         }
         try {
-          const page = await getHostRuntimeStore().fetchAgentTimeline(serverId, agentId, request);
+          const page = await getHostRuntimeStore().fetchAgentTimeline(
+            serverId,
+            agentId,
+            withFetchOptions(request, options, serverId),
+          );
           if (shouldInitialize && getInitDeferred(initKey)) {
             refreshAgentInitializationTimeout({ key: initKey, agentId, setAgentInitializing });
           }
@@ -467,8 +522,12 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
           throw error;
         }
       },
-      fetchLatestTail: (agentId) =>
-        getHostRuntimeStore().fetchAgentTimeline(serverId, agentId, planTimelineTailFetch()),
+      fetchLatestTail: (agentId, options) =>
+        getHostRuntimeStore().fetchAgentTimeline(
+          serverId,
+          agentId,
+          withFetchOptions(planTimelineTailFetch(), options, serverId),
+        ),
       reportError: (error) => {
         console.warn("[Session] viewed timeline synchronization failed", { serverId, error });
       },
@@ -483,8 +542,23 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     const stopObservingOpenChats = observeOpenWorkspaceAgentIds(serverId, (agentIds) =>
       sync.replaceOpenTabAgentIds(agentIds),
     );
+    // Keep-live tier: bot chats labelled paseo.keep-live stay subscribed from connect.
+    let keepLivePhases = new Map<string, KeepLivePhase>();
+    let lastAgents: unknown = null;
+    const syncKeepLive = () => {
+      const agents = useSessionStore.getState().sessions[serverId]?.agents;
+      if (!agents || agents === lastAgents) return;
+      lastAgents = agents;
+      sync.replaceKeepLiveAgentIds(selectKeepLiveAgentIds(agents.values()));
+      const diff = diffKeepLivePhases(keepLivePhases, agents.values());
+      keepLivePhases = diff.phases;
+      for (const change of diff.changes) sync.notifyAgentActivity(change.agentId, change.phase);
+    };
+    syncKeepLive();
+    const stopObservingKeepLive = useSessionStore.subscribe(syncKeepLive);
 
     return () => {
+      stopObservingKeepLive();
       stopObservingOpenChats();
       if (viewedTimelineSyncRef.current === sync) {
         viewedTimelineSyncRef.current = null;
@@ -494,9 +568,36 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     };
   }, [client, serverId, setInitializingAgents, setViewedTimelineSync, voiceRuntime]);
 
+  const disconnectsRef = useRef<number[]>([]);
+  const wasConnectedRef = useRef(false);
   useEffect(() => {
+    if (wasConnectedRef.current && !isConnected) {
+      disconnectsRef.current = [...disconnectsRef.current.slice(-9), Date.now()];
+    }
+    wasConnectedRef.current = isConnected;
     viewedTimelineSyncRef.current?.setConnected(isConnected);
   }, [isConnected]);
+
+  // Constrained mode: on a slow or flapping link, background keep-live chats are pulled at turn
+  // end instead of streamed live. The metered-network setting forces it (laptop on a hotspot).
+  useEffect(() => {
+    let state = INITIAL_LINK_QUALITY;
+    const evaluate = () => {
+      state = nextLinkQuality(state, {
+        now: Date.now(),
+        rttSamples: client.getLivenessRttSamples(),
+        cellularGeneration: useNetworkMonitorStore.getState().phone?.cellularGeneration ?? null,
+        disconnects: disconnectsRef.current,
+        browserConnection: readBrowserConnection(),
+        metered: meteredNetwork,
+      });
+      viewedTimelineSyncRef.current?.setConstrained(state.mode === "constrained");
+      setChatImageHostConstrained(serverId, state.mode === "constrained");
+    };
+    evaluate();
+    const timer = setInterval(evaluate, 5_000);
+    return () => clearInterval(timer);
+  }, [client, serverId, meteredNetwork]);
 
   // Daemon message handlers - directly update Zustand store
   useEffect(() => {

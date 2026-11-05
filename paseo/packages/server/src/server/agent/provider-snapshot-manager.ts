@@ -348,6 +348,24 @@ export class ProviderSnapshotManager {
     return Object.prototype.hasOwnProperty.call(this.generation.definitions, provider);
   }
 
+  /**
+   * The built-in provider a provider runs on: itself for a built-in, the `extends` base for a
+   * custom provider; null when it is not configured.
+   */
+  getProviderBaseId(provider: AgentProvider): string | null {
+    const definition = this.generation.definitions[provider];
+    if (!definition) return null;
+    return definition.derivedFromProviderId ?? provider;
+  }
+
+  /** The `env` the provider's config sets (a custom provider's own, else its base's). */
+  getProviderConfigEnv(provider: AgentProvider): Record<string, string> | undefined {
+    const own = this.providerOverrides?.[provider];
+    if (own?.env) return own.env;
+    const base = this.generation.definitions[provider]?.derivedFromProviderId;
+    return base ? this.providerOverrides?.[base]?.env : undefined;
+  }
+
   getProviderLabel(provider: AgentProvider): string {
     return this.generation.definitions[provider]?.label ?? provider;
   }

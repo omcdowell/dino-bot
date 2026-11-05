@@ -1,0 +1,23 @@
+context platform=ios timeout=90000 retries=1
+env APP_ID=com.example.paseo
+# Phone bot home <-> chat (Sam 2026-10-12: "a nice swipe between the bot home page and chats").
+# Preconditions: phone build with the bots plugin home, fixture host online, a bot named
+# "Emmet Brickowski" on the home. The chat is pushed over the home: the left-edge swipe tracks the
+# finger, a short swipe snaps back to the chat, a long one lands on the home, Back pops to it.
+
+open "${APP_ID}"
+wait "label=\"Emmet Brickowski\"" 30000
+press "label=\"Emmet Brickowski\""
+wait "id=\"back-to-home\"" 10000
+gesture pan 2 450 140 0 900
+wait 1500
+is visible "id=\"back-to-home\""
+gesture pan 2 450 300 0 350
+wait 1500
+is visible "label=\"Emmet Brickowski\""
+press "label=\"Emmet Brickowski\""
+wait "id=\"back-to-home\"" 10000
+press "id=\"back-to-home\""
+wait 1500
+is visible "label=\"Emmet Brickowski\""
+close

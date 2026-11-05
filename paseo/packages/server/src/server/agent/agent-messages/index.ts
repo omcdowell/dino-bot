@@ -172,6 +172,7 @@ export function projectAgentMessage(item: AgentTimelineItem): AgentTimelineItem 
     status: "completed",
     error: null,
     detail: { type: "plain_text", text: message.text, icon: "bot" },
+    ...(item.images?.length ? { images: item.images } : {}),
   };
 }
 

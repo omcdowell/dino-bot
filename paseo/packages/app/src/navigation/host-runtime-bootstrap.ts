@@ -117,6 +117,15 @@ export interface ResolveIndexStartupRouteInput extends ResolveStartupRouteBaseIn
   workspaceSelectionStatus: WorkspaceSelectionStatus;
   isWorkspaceSelectionLoaded: boolean;
   hasGivenUpWaitingForHost: boolean;
+  /** Phones: the plugin home screen to start on (see plugins/mobile-home.ts), when there is one. */
+  mobileHome?: MobileHomeStartTarget | null;
+  /** False until the persisted home record has been read; the start waits for it. Default true. */
+  isMobileHomeLoaded?: boolean;
+}
+
+export interface MobileHomeStartTarget {
+  serverId: string;
+  route: string;
 }
 
 export interface ResolveHostStartupRouteInput extends ResolveStartupRouteBaseInput {
@@ -156,7 +165,11 @@ export function resolveHostIndexRoute(input: {
   serverId: string;
   workspaceSelection: ActiveWorkspaceSelection | null;
   workspaceSelectionStatus: WorkspaceSelectionStatus;
+  mobileHome?: MobileHomeStartTarget | null;
 }): Href {
+  if (input.mobileHome?.serverId === input.serverId) {
+    return input.mobileHome.route as Href;
+  }
   if (
     input.workspaceSelection?.serverId === input.serverId &&
     shouldRestoreWorkspaceSelection(input)
@@ -182,8 +195,13 @@ function resolveReadyIndexStartupRoute(input: ResolveIndexStartupRouteInput): St
     return { kind: "render" };
   }
 
-  if (!input.isWorkspaceSelectionLoaded) {
+  if (!input.isWorkspaceSelectionLoaded || input.isMobileHomeLoaded === false) {
     return { kind: "splash" };
+  }
+
+  if (input.mobileHome && hostExists(input.hosts, input.mobileHome.serverId)) {
+    // Same host-boundary rule as below: the host index then opens the home.
+    return { kind: "redirect", href: buildHostRootRoute(input.mobileHome.serverId) };
   }
 
   if (

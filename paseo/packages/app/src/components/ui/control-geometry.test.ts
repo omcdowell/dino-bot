@@ -19,7 +19,8 @@ const theme = {
     1: 1,
   },
   colors: {
-    accent: "#20744A",
+    accent: "#9CC963",
+    accentText: "#9CC963",
     borderAccent: "#2F3534",
   },
   fontSize: {
@@ -62,7 +63,7 @@ describe("control geometry", () => {
     });
     expect(geometry.controlActive).toEqual({
       borderColor: "#2F3534",
-      outlineColor: "#20744A",
+      outlineColor: "#9CC963",
       outlineOffset: 1,
       outlineStyle: "solid",
       outlineWidth: 2,

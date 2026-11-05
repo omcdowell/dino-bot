@@ -123,15 +123,6 @@ jobs:
       - name: Typecheck all packages
         run: npm run typecheck
 
-      - name: Run website tests
-        run: npx vitest run packages/website/src --bail=1
-
-      - name: Install website test browsers
-        run: npx playwright install --with-deps chromium webkit
-
-      - name: Verify website mockups
-        run: npm run test:e2e --workspace=@getpaseo/website
-
       - name: Verify public package contents
         run: |
           npm pack --dry-run --ignore-scripts --workspace=@getpaseo/protocol

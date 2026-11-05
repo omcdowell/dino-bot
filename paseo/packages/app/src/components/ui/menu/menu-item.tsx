@@ -28,7 +28,7 @@ const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 
 const foregroundMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 const mutedMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
-const successMapping = (theme: Theme) => ({ color: theme.colors.palette.green[500] });
+const successMapping = (theme: Theme) => ({ color: theme.colors.accentText });
 
 /**
  * Height of the filled part of a row, which is also its hit target.
@@ -506,7 +506,7 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.destructive,
   },
   itemTextSuccess: {
-    color: theme.colors.palette.green[500],
+    color: theme.colors.accentText,
   },
   itemDescription: {
     marginTop: 2,

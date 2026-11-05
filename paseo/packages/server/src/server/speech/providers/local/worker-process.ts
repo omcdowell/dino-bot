@@ -1,12 +1,21 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
 import pino from "pino";
 
 import type { StreamingTranscriptionSession } from "../../speech-provider.js";
 import type { TurnDetectionSession } from "../../turn-detection-provider.js";
 import { getLocalSpeechModelDir, type LocalSttModelId, type LocalTtsModelId } from "./models.js";
-import { SherpaOfflineRecognizerEngine } from "./sherpa/sherpa-offline-recognizer.js";
+import {
+  probeSherpaCuda,
+  resolveSttExecutionProvider,
+  selectParakeetModel,
+  SherpaOfflineRecognizerEngine,
+  type SherpaExecutionProvider,
+} from "./sherpa/sherpa-offline-recognizer.js";
 import { SherpaOnnxParakeetSTT } from "./sherpa/sherpa-parakeet-stt.js";
 import { SherpaParakeetRealtimeTranscriptionSession } from "./sherpa/sherpa-parakeet-realtime-session.js";
 import { SherpaOnnxTTS } from "./sherpa/sherpa-tts.js";
+import { resolveBundledSileroVadModelPath } from "./sherpa/silero-vad-session.js";
 import {
   ensureSileroVadModel,
   SherpaSileroTurnDetectionProvider,
@@ -72,6 +81,25 @@ function ttsKey(config: LocalSpeechWorkerConfig): string {
   ].join(":");
 }
 
+// Resolved once per worker so the CUDA probe runs (and any fallback is logged) only once.
+let sttExecutionProvider: SherpaExecutionProvider | null = null;
+
+function cudaProbeModelPath(modelsDir: string): string {
+  const copied = path.join(modelsDir, "silero-vad", "silero_vad.onnx");
+  return existsSync(copied) ? copied : resolveBundledSileroVadModelPath();
+}
+
+function getSttExecutionProvider(config: LocalSpeechWorkerConfig): SherpaExecutionProvider {
+  if (!sttExecutionProvider) {
+    sttExecutionProvider = resolveSttExecutionProvider({
+      env: process.env,
+      probeCuda: () => probeSherpaCuda({ probeModelPath: cudaProbeModelPath(config.modelsDir) }),
+      logger,
+    });
+  }
+  return sttExecutionProvider;
+}
+
 function getSttEngine(
   config: LocalSpeechWorkerConfig,
   model: "voice" | "dictation",
@@ -83,16 +111,17 @@ function getSttEngine(
     return existing;
   }
   const modelDir = getLocalSpeechModelDir(config.modelsDir, modelId);
+  const selection = selectParakeetModel({
+    modelDir,
+    provider: getSttExecutionProvider(config),
+    logger,
+  });
   const created = new SherpaOfflineRecognizerEngine(
     {
-      model: {
-        kind: "nemo_transducer",
-        encoder: `${modelDir}/encoder.int8.onnx`,
-        decoder: `${modelDir}/decoder.int8.onnx`,
-        joiner: `${modelDir}/joiner.int8.onnx`,
-        tokens: `${modelDir}/tokens.txt`,
-      },
+      model: selection.model,
+      cpuFallbackModel: selection.cpuFallbackModel,
       numThreads: 2,
+      provider: selection.provider,
       debug: 0,
     },
     logger,

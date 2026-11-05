@@ -7,7 +7,11 @@ import { AdaptiveModalSheet, type SheetHeader } from "./adaptive-modal-sheet";
 import { isFdroidBuild } from "@/constants/build-profile";
 import { isNative } from "@/constants/platform";
 import { isElectronRuntime } from "@/desktop/host";
+import { RELEASE_POLICY } from "@/constants/flavour";
 import type { Theme } from "@/styles/theme";
+
+/** Relay pairing off (public flavour): the pasted link is a direct Tailscale offer, not a relay. */
+const PASTE_LINK_TAILNET_DESCRIPTION = "From your computer's setup. Connects through Tailscale.";
 
 const ThemedQrCode = withUnistyles(QrCode);
 const ThemedLink2 = withUnistyles(Link2);
@@ -84,23 +88,26 @@ export function AddHostMethodModal({
       onClose={onClose}
       testID="add-host-method-modal"
     >
-      <Pressable
-        style={styles.option}
-        onPress={handleDirect}
-        accessibilityRole="button"
-        accessibilityLabel={t("pairing.connectionMethods.direct.title")}
-        testID="add-host-method-direct"
-      >
-        <ThemedLink2 size={18} uniProps={foregroundIconMapping} />
-        <View style={styles.optionBody}>
-          <Text style={styles.optionText}>{t("pairing.connectionMethods.direct.title")}</Text>
-          <Text style={styles.optionSubtext}>
-            {t("pairing.connectionMethods.direct.description")}
-          </Text>
-        </View>
-      </Pressable>
+      {/* Public flavour: Tailscale only, so no manual host:port entry (as on the welcome screen). */}
+      {RELEASE_POLICY.tailnetOnly ? null : (
+        <Pressable
+          style={styles.option}
+          onPress={handleDirect}
+          accessibilityRole="button"
+          accessibilityLabel={t("pairing.connectionMethods.direct.title")}
+          testID="add-host-method-direct"
+        >
+          <ThemedLink2 size={18} uniProps={foregroundIconMapping} />
+          <View style={styles.optionBody}>
+            <Text style={styles.optionText}>{t("pairing.connectionMethods.direct.title")}</Text>
+            <Text style={styles.optionSubtext}>
+              {t("pairing.connectionMethods.direct.description")}
+            </Text>
+          </View>
+        </Pressable>
+      )}
 
-      {isElectronRuntime() ? (
+      {isElectronRuntime() && RELEASE_POLICY.desktopRemoteSsh ? (
         <Pressable
           style={styles.option}
           onPress={handleRemoteSsh}
@@ -146,7 +153,9 @@ export function AddHostMethodModal({
         <View style={styles.optionBody}>
           <Text style={styles.optionText}>{t("pairing.connectionMethods.pasteLink.title")}</Text>
           <Text style={styles.optionSubtext}>
-            {t("pairing.connectionMethods.pasteLink.description")}
+            {RELEASE_POLICY.relayPairing
+              ? t("pairing.connectionMethods.pasteLink.description")
+              : PASTE_LINK_TAILNET_DESCRIPTION}
           </Text>
         </View>
       </Pressable>

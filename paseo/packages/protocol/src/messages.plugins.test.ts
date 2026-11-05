@@ -23,6 +23,40 @@ describe("plugin protocol compatibility", () => {
       expect(SessionOutboundMessageSchema.parse(message)).toEqual(message);
     },
   );
+  it("carries the client bundles the app already has in a catalog request", () => {
+    const request = {
+      type: "plugin.catalog.get.request",
+      requestId: "catalog",
+      knownBundles: [{ id: "bots", hash: "abc" }],
+    };
+    expect(SessionInboundMessageSchema.parse(request)).toEqual(request);
+    // COMPAT(pluginBundleCache): requests from older apps carry no hashes.
+    expect(
+      SessionInboundMessageSchema.parse({ type: "plugin.catalog.get.request", requestId: "old" }),
+    ).toEqual({ type: "plugin.catalog.get.request", requestId: "old" });
+    expect(() =>
+      SessionInboundMessageSchema.parse({
+        type: "plugin.catalog.get.request",
+        requestId: "bad",
+        knownBundles: [{ id: "Bots!", hash: "abc" }],
+      }),
+    ).toThrow();
+  });
+
+  it("parses catalog entries with a bundle hash, and unchanged entries without a bundle", () => {
+    const message = {
+      type: "plugin.catalog.get.response",
+      payload: {
+        requestId: "catalog",
+        plugins: [
+          { id: "bots", clientBundle: "", clientBundleHash: "abc", clientBundleUnchanged: true },
+          { id: "apns", clientBundle: "bundle", clientBundleHash: "def" },
+        ],
+      },
+    };
+    expect(SessionOutboundMessageSchema.parse(message)).toEqual(message);
+  });
+
   it("preserves manifest metadata in plugin list responses", () => {
     const message = {
       type: "plugin.list.response",

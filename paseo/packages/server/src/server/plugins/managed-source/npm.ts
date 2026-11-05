@@ -66,6 +66,9 @@ export async function acquireNpm(source: string, installRoot: string, target?: N
       "--omit=dev",
       "--global=false",
       "--workspaces=false",
+      // npm 12 refuses URL dependencies by default; the reviewed artifact is pinned by its
+      // tarball URL in the root package.json, so allow URLs there only (older npm ignores it).
+      "--allow-remote=root",
     ],
     { cwd: installRoot, timeout: 120_000, maxBuffer: 1024 * 1024 },
   );

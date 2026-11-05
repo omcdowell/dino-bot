@@ -12,6 +12,7 @@ import { isPaseoDictationDebugEnabled } from "../../agent/recordings-debug.js";
 import {
   DictationStreamManager,
   type DictationStreamOutboundMessage,
+  type DictationStreamRegistry,
 } from "../../dictation/dictation-stream-manager.js";
 import { createVoiceTurnController, type VoiceTurnController } from "./voice-turn-controller.js";
 import { buildVoiceModeSystemPrompt, stripVoiceModeSystemPrompt } from "../../voice-config.js";
@@ -153,6 +154,10 @@ export interface VoiceSessionOptions {
     stt?: Resolvable<SpeechToTextProvider | null>;
     sttLanguage?: string;
     getSpeechReadiness?: () => SpeechReadinessSnapshot;
+    /** Session-wide, so a dictation stream survives its socket and can be resumed. */
+    streams?: DictationStreamRegistry;
+    /** How long a stream stays resumable after its socket left (default 90 s; 0 = close). */
+    resumeGraceMs?: number;
   };
 }
 
@@ -239,6 +244,8 @@ export class VoiceSession {
       language: dictation?.sttLanguage,
       finalTimeoutMs: dictation?.finalTimeoutMs,
       onIdle: this.onIdle,
+      streams: dictation?.streams,
+      resumeGraceMs: dictation?.resumeGraceMs,
     });
   }
 
@@ -290,7 +297,9 @@ export class VoiceSession {
       });
       return;
     }
-    await this.dictationStreamManager.handleStart(msg.dictationId, msg.format);
+    await this.dictationStreamManager.handleStart(msg.dictationId, msg.format, {
+      resume: msg.resume === true,
+    });
   }
 
   private toVoiceFeatureUnavailableContext(

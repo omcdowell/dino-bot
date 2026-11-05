@@ -1,14 +1,21 @@
+import {
+  CheckedJsonFrameCompressor,
+  JsonFrameCompressor,
+} from "@getpaseo/protocol/binary-frames/compressed-json-node";
+import { decodeCompressionReset } from "@getpaseo/protocol/binary-frames/compressed-json";
 import { readFileSync } from "node:fs";
-import { afterEach, expect, expectTypeOf, test, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, test, vi } from "vitest";
 import { z } from "zod";
 import {
   DaemonClient,
   supportsUsageReports,
+  uplinkDrainAllowanceMs,
   type DaemonClientTrace,
   type CreateAgentRequestOptions,
   type DaemonTransport,
   type Logger,
 } from "./daemon-client";
+import { DIRECT_E2EE_FAILED_MESSAGE, describeDirectE2eeFailure } from "./daemon-client-transport";
 import { CLIENT_CAPS } from "@getpaseo/protocol/client-capabilities";
 import { BROWSER_AUTOMATION_COMMAND_NAMES } from "@getpaseo/protocol/browser-automation/rpc-schemas";
 import {
@@ -559,9 +566,12 @@ class FakeDaemon {
   private pingsSentAt: number[] = [];
   private closeEvents: Array<{ code?: number; reason?: string }> = [];
 
+  readonly binarySent: Uint8Array[] = [];
+
   readonly transport: DaemonTransport = {
     send: (data) => {
       if (typeof data !== "string") {
+        this.binarySent.push(new Uint8Array(data as ArrayBufferLike));
         return;
       }
       const frame = JSON.parse(data) as {
@@ -645,6 +655,10 @@ class FakeDaemon {
     this.pongMode = { kind: "silent" };
   }
 
+  daemonSendsFrame(data: string | Uint8Array): void {
+    this.onMessage(data);
+  }
+
   daemonWithholdsNextPongThenAnswersFast(): void {
     this.withheldPongs += 1;
     this.daemonAnswersPingsAfter("fast");
@@ -704,6 +718,14 @@ class DaemonClientSession {
     this.daemon.daemonGoesSilent();
   }
 
+  daemonSendsFrame(data: string | Uint8Array): void {
+    this.daemon.daemonSendsFrame(data);
+  }
+
+  subscribeRaw(handler: (message: unknown) => void): void {
+    this.client.subscribeRawMessages(handler);
+  }
+
   daemonWithholdsNextPongThenAnswersFast(): void {
     this.daemon.daemonWithholdsNextPongThenAnswersFast();
   }
@@ -732,6 +754,10 @@ class DaemonClientSession {
     return this.daemon.closesFromClient();
   }
 
+  binaryFromClient(): Uint8Array[] {
+    return this.daemon.binarySent;
+  }
+
   lastLivenessRttMs(): number | null {
     return this.client.getLastLivenessRttMs();
   }
@@ -739,9 +765,31 @@ class DaemonClientSession {
   measureLatency(input: { timeoutMs: number }): Promise<number> {
     return this.client.measureLatency(input);
   }
+
+  /** Sends a message carrying a photo of `base64Chars` characters; settles like the client call. */
+  sendPhoto(base64Chars: number): { settled: () => boolean; error: () => unknown } {
+    let settled = false;
+    let error: unknown = null;
+    this.client
+      .sendAgentMessage("agent-1", "photo", {
+        messageId: "msg-photo",
+        images: [{ data: "A".repeat(base64Chars), mimeType: "image/jpeg" }],
+      })
+      .then(
+        () => {
+          settled = true;
+          return undefined;
+        },
+        (reason: unknown) => {
+          settled = true;
+          error = reason;
+        },
+      );
+    return { settled: () => settled, error: () => error };
+  }
 }
 
-function useHeartbeatClock(): void {
+function fakeHeartbeatClock(): void {
   vi.useFakeTimers({
     toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"],
   });
@@ -876,6 +924,72 @@ test("keeps relay upgrade credentials out of the socket request", async () => {
   void client.connect();
   await vi.waitFor(() => expect(requests).toHaveLength(1));
   expect(requests[0]).toEqual({ url: "ws://relay.test/ws?role=client&serverId=srv_test&v=2" });
+});
+
+test("direct E2EE upgrades carry only the E2EE subprotocol, never the password", async () => {
+  const mock = createMockTransport();
+  const requests: Array<{
+    url: string;
+    headers?: Record<string, string>;
+    protocols?: string[];
+  }> = [];
+  const client = new DaemonClient({
+    url: "ws://100.64.0.7:6767/ws",
+    clientId: "clsk_direct_e2ee_unit",
+    password: "shared-secret",
+    authHeader: "Bearer shared-secret",
+    e2ee: { enabled: true, daemonPublicKeyB64: "daemon-public-key" },
+    reconnect: { enabled: false },
+    transportFactory: (request) => {
+      requests.push(request);
+      return mock.transport;
+    },
+  });
+  clients.push(client);
+  void client.connect().catch(() => {});
+  await vi.waitFor(() => expect(requests).toHaveLength(1));
+  expect(requests[0]).toEqual({
+    url: "ws://100.64.0.7:6767/ws",
+    protocols: ["paseo.e2ee.v1"],
+  });
+});
+
+test("describeDirectE2eeFailure: refusals stop retrying, network drops do not", () => {
+  expect(describeDirectE2eeFailure({ code: 4002, reason: "Invalid hello" })).toBe(
+    DIRECT_E2EE_FAILED_MESSAGE,
+  );
+  expect(describeDirectE2eeFailure({ code: 4001, reason: "E2EE handshake failed" })).toBe(
+    DIRECT_E2EE_FAILED_MESSAGE,
+  );
+  expect(describeDirectE2eeFailure(new Error("Server sent no subprotocol"))).toBe(
+    DIRECT_E2EE_FAILED_MESSAGE,
+  );
+  expect(describeDirectE2eeFailure({ code: 1006, reason: "" })).toBeNull();
+  expect(describeDirectE2eeFailure(new Error("connect ECONNREFUSED"))).toBeNull();
+});
+
+test("keeps relay upgrade credentials out of the socket request without E2EE", async () => {
+  const mock = createMockTransport();
+  const requests: Array<{ url: string; headers?: Record<string, string>; protocols?: string[] }> =
+    [];
+  const client = new DaemonClient({
+    url: "ws://relay.test/ws?role=client&serverId=srv_test&v=2",
+    clientId: "clsk_relay_header_test",
+    authHeader: "Bearer synthetic-review-token",
+    reconnect: { enabled: false },
+    transportFactory: (request) => {
+      requests.push(request);
+      return mock.transport;
+    },
+  });
+  clients.push(client);
+  const connecting = client.connect();
+  void connecting.catch(() => {});
+  await vi.waitFor(() => expect(requests).toHaveLength(1));
+  expect(requests[0]).toEqual({ url: "ws://relay.test/ws?role=client&serverId=srv_test&v=2" });
+  // Upstream's close() also rejects a pending connect (#7370, not in this fork); here close()
+  // drops it, so the test checks only the request shape above.
+  await client.close();
 });
 
 test("refuses relay password auth without an encrypted hello", async () => {
@@ -1022,12 +1136,18 @@ test("advertises client capabilities in hello", async () => {
     clientType: "cli",
     protocolVersion: 1,
     capabilities: {
+      session_tokens: true,
       all_providers: true,
       selective_agent_timeline: true,
       timeline_replacement_invalidation: true,
       provider_snapshot_references: true,
       explicit_event_subscriptions: true,
       owned_subscriptions: true,
+      message_received_ack: true,
+      compressed_frames: true,
+      checked_frames: true,
+      zstd_frames: true,
+      agent_patches: true,
       compact_provider_snapshots: true,
       custom_mode_icons: true,
       project_updates: true,
@@ -1241,7 +1361,7 @@ test("does not reconnect after close when ensureConnected is called", async () =
 });
 
 test("ensureConnected reconnects immediately without leaving the scheduled retry armed", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   try {
     const first = createMockTransport();
     const second = createMockTransport();
@@ -1283,7 +1403,7 @@ test("ensureConnected reconnects immediately without leaving the scheduled retry
 });
 
 test("connect during a scheduled retry reconnects immediately without leaving the retry armed", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   try {
     const first = createMockTransport();
     const second = createMockTransport();
@@ -1326,7 +1446,7 @@ test("connect during a scheduled retry reconnects immediately without leaving th
 });
 
 test("disabling reconnect cancels a pending retry until explicitly resumed", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   try {
     const first = createMockTransport();
     const second = createMockTransport();
@@ -1417,7 +1537,7 @@ test("waits for the daemon to acknowledge push token revocation", async () => {
 });
 
 test("bounds the wait for push token revocation", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const mock = createMockTransport();
   const client = new DaemonClient({
     url: "ws://test",
@@ -1441,7 +1561,7 @@ test("bounds the wait for push token revocation", async () => {
 });
 
 test("defaults session RPC waiters to sixty seconds", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const logger = createMockLogger();
   const mock = createMockTransport();
 
@@ -1488,7 +1608,7 @@ test("defaults session RPC waiters to sixty seconds", async () => {
 });
 
 test("honors explicit fetchAgent timeout below the session RPC default", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const logger = createMockLogger();
   const mock = createMockTransport();
 
@@ -1576,7 +1696,7 @@ test("preserves legacy fetchAgent id overload", async () => {
 });
 
 test("honors explicit fetchAgentTimeline timeout below the session RPC default", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const logger = createMockLogger();
   const mock = createMockTransport();
 
@@ -1674,7 +1794,7 @@ test("lists the full agent prompt index", async () => {
 });
 
 test("honors explicit fetchAgents timeout below the session RPC default", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const logger = createMockLogger();
   const mock = createMockTransport();
 
@@ -1722,7 +1842,7 @@ test("honors explicit fetchAgents timeout below the session RPC default", async 
 });
 
 test("honors explicit shutdownServer timeout below the session RPC default", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const logger = createMockLogger();
   const mock = createMockTransport();
 
@@ -1768,7 +1888,7 @@ test("honors explicit shutdownServer timeout below the session RPC default", asy
 });
 
 test("honors explicit getDaemonStatus timeout below the session RPC default", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const logger = createMockLogger();
   const mock = createMockTransport();
 
@@ -1814,7 +1934,7 @@ test("honors explicit getDaemonStatus timeout below the session RPC default", as
 });
 
 test("honors explicit getDaemonPairingOffer timeout below the session RPC default", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const logger = createMockLogger();
   const mock = createMockTransport();
 
@@ -1964,7 +2084,7 @@ test("gets a structured plugin log snapshot", async () => {
 });
 
 test("keeps waitForAgentUpsert initial fetch inside the requested deadline", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const logger = createMockLogger();
   const mock = createMockTransport();
 
@@ -2008,7 +2128,7 @@ test("keeps waitForAgentUpsert initial fetch inside the requested deadline", asy
 });
 
 test("keeps default connect timeout shorter than session RPC waiters", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   try {
     const logger = createMockLogger();
     const mock = createMockTransport();
@@ -2054,7 +2174,7 @@ test("keeps default connect timeout shorter than session RPC waiters", async () 
 });
 
 test("foreground verification replaces a silently broken socket without waiting for heartbeats", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const first = new FakeDaemon();
   const second = new FakeDaemon();
   first.daemonGoesSilent();
@@ -2078,7 +2198,7 @@ test("foreground verification replaces a silently broken socket without waiting 
 });
 
 test("foreground verification preserves a healthy socket and deduplicates simultaneous checks", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const daemon = new FakeDaemon();
   daemon.daemonAnswersPingsAfter("0.1s");
   const client = new DaemonClient({
@@ -2100,7 +2220,7 @@ test("foreground verification preserves a healthy socket and deduplicates simult
 });
 
 test("an obsolete foreground probe cannot close a replacement connection", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const first = new FakeDaemon();
   const second = new FakeDaemon();
   first.daemonGoesSilent();
@@ -2126,7 +2246,7 @@ test("an obsolete foreground probe cannot close a replacement connection", async
 });
 
 test("stays online through ten minutes of pongs that arrive five seconds late", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const session = new DaemonClientSession();
   session.daemonAnswersPingsAfter("5.5s");
 
@@ -2141,22 +2261,57 @@ test("stays online through ten minutes of pongs that arrive five seconds late", 
 });
 
 test("tears down and reports a liveness timeout after the daemon goes silent for two cycles", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const session = new DaemonClientSession();
   session.daemonGoesSilent();
 
   await session.connect();
-  await session.advance(51_000);
+  // Ping at 10 s, silent until 16 s; the re-probe goes at once and is silent until 22 s.
+  await session.advance(21_900);
+  expect(session.state()).toEqual({ status: "connected" });
+  await session.advance(200);
 
   expect(session.state()).toEqual({
     status: "disconnected",
-    reason: "Liveness check timed out (15000ms)",
+    reason: "Liveness check timed out (6000ms)",
   });
   expect(session.teardownCount()).toBe(1);
 });
 
+test("a photo draining on a slow uplink holds pings back without tearing the socket down", async () => {
+  fakeHeartbeatClock();
+  const session = new DaemonClientSession();
+  await session.connect();
+  // The daemon gets no ping while the photo's bytes are still coming through.
+  session.daemonGoesSilent();
+  const send = session.sendPhoto(600_000);
+
+  await session.advance(90_000);
+  expect(session.state()).toEqual({ status: "connected" });
+  expect(session.teardownCount()).toBe(0);
+  // The send request waits for the upload instead of timing out (and the outbox resending it).
+  expect(send.settled()).toBe(false);
+
+  // The photo is through: pongs come again, which ends the allowance.
+  session.daemonAnswersPingsAfter("fast");
+  await session.advance(30_000);
+  expect(session.state()).toEqual({ status: "connected" });
+  expect(session.lastLivenessRttMs()).toBe(0);
+
+  // A link that then really goes silent is still detected as before.
+  session.daemonGoesSilent();
+  await session.advance(25_000);
+  expect(session.teardownCount()).toBe(1);
+});
+
+test("uplink drain allowance: none for small frames, ~16 kbit/s for large ones, capped", () => {
+  expect(uplinkDrainAllowanceMs(10_000)).toBe(0);
+  expect(uplinkDrainAllowanceMs(600_000)).toBe(300_000);
+  expect(uplinkDrainAllowanceMs(50_000_000)).toBe(10 * 60 * 1000);
+});
+
 test("survives a single missed pong when answers resume", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const session = new DaemonClientSession();
   session.daemonWithholdsNextPongThenAnswersFast();
 
@@ -2168,7 +2323,7 @@ test("survives a single missed pong when answers resume", async () => {
 });
 
 test("keeps the connection proven online from heartbeats alone when no other traffic flows", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const session = new DaemonClientSession();
   session.daemonAnswersPingsAfter("fast");
 
@@ -2180,7 +2335,7 @@ test("keeps the connection proven online from heartbeats alone when no other tra
 });
 
 test("starts pinging one interval after connecting and holds the cadence", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const session = new DaemonClientSession();
   session.daemonAnswersPingsAfter("fast");
 
@@ -2193,7 +2348,7 @@ test("starts pinging one interval after connecting and holds the cadence", async
 });
 
 test("stops pinging once the connection is gone", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const session = new DaemonClientSession();
   session.daemonAnswersPingsAfter("fast");
 
@@ -2206,9 +2361,9 @@ test("stops pinging once the connection is gone", async () => {
 });
 
 test("sends only one ping while a slow pong is still outstanding", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const session = new DaemonClientSession();
-  session.daemonAnswersPingsAfter("15.1s");
+  session.daemonAnswersPingsAfter("5.9s");
 
   await session.connect();
   await session.advance(20_000);
@@ -2217,7 +2372,7 @@ test("sends only one ping while a slow pong is still outstanding", async () => {
 });
 
 test("reports the round-trip time of the last successful heartbeat", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const session = new DaemonClientSession();
   session.daemonAnswersPingsAfter("2.3s");
 
@@ -2228,27 +2383,251 @@ test("reports the round-trip time of the last successful heartbeat", async () =>
 });
 
 test("treats a pong just under the timeout as alive and just over as a miss", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const alive = new DaemonClientSession();
-  alive.daemonAnswersPingsAfter("14.9s");
+  alive.daemonAnswersPingsAfter("5.9s");
 
   await alive.connect();
-  await alive.advance(24_900);
+  await alive.advance(15_900);
 
   expect(alive.state()).toEqual({ status: "connected" });
+  expect(alive.lastLivenessRttMs()).toBe(5900);
 
   const missed = new DaemonClientSession();
-  missed.daemonAnswersPingsAfter("15.1s");
+  missed.daemonAnswersPingsAfter("6.1s");
 
   await missed.connect();
-  await missed.advance(25_000);
+  await missed.advance(16_050);
 
   expect(missed.state()).toEqual({ status: "connected" });
   expect(missed.lastLivenessRttMs()).toBeNull();
 });
 
+test("keeps a busy link that is slow to answer pings", async () => {
+  fakeHeartbeatClock();
+  const session = new DaemonClientSession();
+  session.daemonGoesSilent();
+
+  await session.connect();
+  // The pong never comes, but the daemon keeps streaming other frames.
+  for (let second = 0; second < 60; second += 1) {
+    await session.advance(1_000);
+    session.daemonSendsFrame(
+      JSON.stringify({ type: "session", message: { type: "pong", payload: {} } }).replace(
+        '"pong"',
+        '"unknown_stream_frame"',
+      ),
+    );
+  }
+
+  expect(session.state()).toEqual({ status: "connected" });
+  expect(session.teardownCount()).toBe(0);
+});
+
+test("waits longer for pongs on a slow link", async () => {
+  fakeHeartbeatClock();
+  const session = new DaemonClientSession();
+  session.daemonAnswersPingsAfter("3s");
+
+  await session.connect();
+  await session.advance(60_000);
+  expect(session.lastLivenessRttMs()).toBe(3000);
+
+  // Smoothed RTT is now ~3 s, so the timeout is ~12 s: a 9 s pong is late but alive.
+  session.daemonAnswersPingsAfter("9s");
+  await session.advance(30_000);
+
+  expect(session.state()).toEqual({ status: "connected" });
+  expect(session.lastLivenessRttMs()).toBe(9000);
+});
+
+test("decodes compressed JSON frames through one stream per socket", async () => {
+  fakeHeartbeatClock();
+  const session = new DaemonClientSession();
+  const received: unknown[] = [];
+  session.subscribeRaw((message) => received.push(message));
+
+  await session.connect();
+  const compressor = new JsonFrameCompressor();
+  for (const n of [1, 2, 3]) {
+    session.daemonSendsFrame(
+      compressor.compress(
+        JSON.stringify({
+          type: "session",
+          message: {
+            type: "status",
+            payload: { status: "server_info", serverId: `srv_${n}`, hostname: null, version: null },
+          },
+        }),
+      ),
+    );
+  }
+
+  expect(
+    received.map((message) => (message as { payload: { serverId: string } }).payload.serverId),
+  ).toEqual(["srv_heartbeat_test", "srv_1", "srv_2", "srv_3"]);
+});
+
+test("drops the socket instead of throwing when a compressed frame does not decode", async () => {
+  fakeHeartbeatClock();
+  const session = new DaemonClientSession();
+  const received: string[] = [];
+  session.subscribeRaw((message) =>
+    received.push((message as { payload: { serverId: string } }).payload.serverId),
+  );
+  const statusFrame = (serverId: string) =>
+    JSON.stringify({
+      type: "session",
+      message: {
+        type: "status",
+        payload: { status: "server_info", serverId, hostname: null, version: null },
+      },
+    });
+
+  await session.connect();
+  const ours = new JsonFrameCompressor();
+  session.daemonSendsFrame(ours.compress(statusFrame("srv_1")));
+  // A frame compressed against a history this socket never saw: another session's.
+  const theirs = new JsonFrameCompressor();
+  theirs.compress(statusFrame("srv_elsewhere"));
+  const foreign = theirs.compress(statusFrame("srv_elsewhere"));
+
+  expect(() => session.daemonSendsFrame(foreign)).not.toThrow();
+  // Later frames on the desynced socket are not decoded either.
+  expect(() => session.daemonSendsFrame(ours.compress(statusFrame("srv_2")))).not.toThrow();
+
+  expect(received).toEqual(["srv_heartbeat_test", "srv_1"]);
+  expect(session.closesFromClient()).toEqual([
+    { code: 1011, reason: "Compressed frame did not decode" },
+  ]);
+  expect(session.state()).toEqual({
+    status: "disconnected",
+    reason: expect.stringMatching(/^Compressed frame did not decode/),
+  });
+});
+
+describe("checked frames (checked_frames)", () => {
+  const statusFrame = (serverId: string) =>
+    JSON.stringify({
+      type: "session",
+      message: {
+        type: "status",
+        payload: { status: "server_info", serverId, hostname: null, version: null },
+      },
+    });
+
+  function connectWithCheckedFrames() {
+    fakeHeartbeatClock();
+    const session = new DaemonClientSession();
+    const received: string[] = [];
+    session.subscribeRaw((message) =>
+      received.push((message as { payload: { serverId: string } }).payload.serverId),
+    );
+    return { session, received, daemon: new CheckedJsonFrameCompressor() };
+  }
+
+  test("a corrupted frame triggers a reset, not a reconnect, and no message is lost", async () => {
+    const { session, received, daemon } = connectWithCheckedFrames();
+    await session.connect();
+    session.daemonSendsFrame(daemon.compress(statusFrame("srv_1")));
+    const corrupted = daemon.compress(statusFrame("srv_2"));
+    corrupted[corrupted.length - 3] ^= 0x5a;
+    expect(() => session.daemonSendsFrame(corrupted)).not.toThrow();
+    // Already in flight before the daemon sees the reset: dropped, then resent.
+    session.daemonSendsFrame(daemon.compress(statusFrame("srv_3")));
+
+    const resets = session.binaryFromClient().map((frame) => decodeCompressionReset(frame));
+    expect(resets).toEqual([{ generation: 0, seq: 1 }]);
+    const answer = daemon.reset(resets[0]!);
+    if (!answer || answer === "stale") throw new Error("expected a resend");
+    session.daemonSendsFrame(answer.ack);
+    for (const frame of answer.frames) session.daemonSendsFrame(frame);
+    session.daemonSendsFrame(daemon.compress(statusFrame("srv_4")));
+
+    expect(received).toEqual(["srv_heartbeat_test", "srv_1", "srv_2", "srv_3", "srv_4"]);
+    expect(session.closesFromClient()).toEqual([]);
+    expect(session.state()).toEqual({ status: "connected" });
+  });
+
+  test("a frame from another history fails its checksum and resets", async () => {
+    const { session, received, daemon } = connectWithCheckedFrames();
+    await session.connect();
+    session.daemonSendsFrame(daemon.compress(statusFrame("srv_1")));
+    const theirs = new CheckedJsonFrameCompressor();
+    theirs.compress(statusFrame("srv_elsewhere"));
+    session.daemonSendsFrame(theirs.compress(statusFrame("srv_elsewhere")));
+
+    expect(received).toEqual(["srv_heartbeat_test", "srv_1"]);
+    expect(session.binaryFromClient().map((frame) => decodeCompressionReset(frame))).toEqual([
+      { generation: 0, seq: 1 },
+    ]);
+    expect(session.state()).toEqual({ status: "connected" });
+  });
+
+  test("a reset the daemon never answers ends in a reconnect", async () => {
+    const { session, daemon } = connectWithCheckedFrames();
+    session.daemonAnswersPingsAfter("fast");
+    await session.connect();
+    session.daemonSendsFrame(daemon.compress(statusFrame("srv_1")));
+    const corrupted = daemon.compress(statusFrame("srv_2"));
+    corrupted[corrupted.length - 3] ^= 0x5a;
+    session.daemonSendsFrame(corrupted);
+    await session.advance(16_000);
+
+    expect(session.closesFromClient()).toEqual([
+      { code: 1011, reason: "Compressed frame reset not answered" },
+    ]);
+  });
+});
+
+test("starts a fresh decompression history on each new socket", async () => {
+  fakeHeartbeatClock();
+  const daemon = new FakeDaemon();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_compressed_reconnect",
+    logger: noopLogger,
+    reconnect: { enabled: true, baseDelayMs: 10, maxDelayMs: 10 },
+    transportFactory: () => daemon.transport,
+  });
+  clients.push(client);
+  const received: string[] = [];
+  client.subscribeRawMessages((message) =>
+    received.push((message as { payload: { serverId: string } }).payload.serverId),
+  );
+  const statusFrame = (serverId: string) =>
+    JSON.stringify({
+      type: "session",
+      message: {
+        type: "status",
+        payload: { status: "server_info", serverId, hostname: null, version: null },
+      },
+    });
+  const connected = client.connect();
+  daemon.openConnection();
+  await connected;
+  const firstSocket = new JsonFrameCompressor();
+  daemon.daemonSendsFrame(firstSocket.compress(statusFrame("srv_first_a")));
+  daemon.daemonSendsFrame(firstSocket.compress(statusFrame("srv_first_b")));
+
+  // The app's socket drops (phone backgrounded, desktop network change) and it redials.
+  daemon.daemonClosesWith("network changed");
+  await vi.advanceTimersByTimeAsync(50);
+  daemon.openConnection();
+  await vi.advanceTimersByTimeAsync(0);
+  // The daemon's compressor is per socket, so the new socket's history starts empty too.
+  const secondSocket = new JsonFrameCompressor();
+  daemon.daemonSendsFrame(secondSocket.compress(statusFrame("srv_second_a")));
+  daemon.daemonSendsFrame(secondSocket.compress(statusFrame("srv_second_b")));
+
+  expect(
+    received.filter((id) => id.startsWith("srv_first") || id.startsWith("srv_second")),
+  ).toEqual(["srv_first_a", "srv_first_b", "srv_second_a", "srv_second_b"]);
+  expect(client.lastError ?? "").not.toMatch(/did not decode/);
+});
+
 test("goes red with the daemon's reason when the connection is closed", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const session = new DaemonClientSession();
 
   await session.connect();
@@ -2263,7 +2642,7 @@ test("goes red with the daemon's reason when the connection is closed", async ()
 });
 
 test("two candidate latency timeouts do not tear down the live connection", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const session = new DaemonClientSession();
   session.daemonGoesSilent();
 
@@ -2299,7 +2678,7 @@ test("two candidate latency timeouts do not tear down the live connection", asyn
 });
 
 test("a candidate measurement that times out under a heartbeat tick does not count toward teardown", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const session = new DaemonClientSession();
   session.daemonGoesSilent();
 
@@ -2320,7 +2699,7 @@ test("a candidate measurement that times out under a heartbeat tick does not cou
 
   // The measurement timeout must not have been recorded as a liveness failure: a
   // single genuine heartbeat miss after it must still leave the connection up.
-  await session.advance(25_000);
+  await session.advance(18_500);
 
   expect(session.state()).toEqual({ status: "connected" });
   expect(session.teardownCount()).toBe(0);
@@ -4045,7 +4424,7 @@ test("restartServer remains restart-only and sends restart_server_request", asyn
 });
 
 test("transitions out of connecting when connect timeout elapses", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   try {
     const logger = createMockLogger();
     const mock = createMockTransport();
@@ -4082,7 +4461,7 @@ test("transitions out of connecting when connect timeout elapses", async () => {
 });
 
 test("reconnects after relay close with replaced-by-new-connection reason", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   try {
     const logger = createMockLogger();
     const first = createMockTransport();
@@ -4120,6 +4499,40 @@ test("reconnects after relay close with replaced-by-new-connection reason", asyn
 
     second.triggerOpen();
     expect(client.getConnectionState().status).toBe("connected");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("stops reconnecting after the transport closes for an endpoint security failure", async () => {
+  const close = { code: 4002, reason: "legacy security below required minimum" };
+  const error = "Endpoint security handshake failed: legacy security below required minimum";
+  fakeHeartbeatClock();
+  try {
+    let attempts = 0;
+    const mock = createMockTransport();
+    const client = new DaemonClient({
+      url: "ws://relay.test/ws?role=client&serverId=srv_test&v=2",
+      clientId: "clsk_security_close_test",
+      e2ee: { enabled: true, daemonPublicKeyB64: "daemon-public-key" },
+      reconnect: { enabled: true, baseDelayMs: 1, maxDelayMs: 1 },
+      transportFactory: () => {
+        attempts += 1;
+        return mock.transport;
+      },
+    });
+    clients.push(client);
+
+    const connecting = client.connect();
+    void connecting.catch(() => {});
+    await vi.waitFor(() => expect(attempts).toBe(1));
+    mock.triggerClose(close);
+
+    await expect(connecting).rejects.toThrow(error);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(attempts).toBe(1);
+    expect(client.getConnectionState().status).toBe("disconnected");
+    expect(client.lastError).toContain(error);
   } finally {
     vi.useRealTimers();
   }
@@ -5380,7 +5793,7 @@ test("imports an agent by provider handle id", async () => {
 });
 
 test("uses server-provided dictation finish timeout budget", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const logger = createMockLogger();
   const mock = createMockTransport();
 
@@ -5470,7 +5883,7 @@ test("resolves dictation finish when final arrives after finish accepted", async
 });
 
 test("cancels waiters when send fails (no leaked timeouts)", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   const logger = createMockLogger();
   const mock = createMockTransport();
   let sendCount = 0;
@@ -5634,6 +6047,48 @@ test("requests provider snapshots conditionally and expands the compact response
   expect(response.entries[0]?.models?.[0]?.thinkingOptions).toBe(
     response.entries[0]?.models?.[1]?.thinkingOptions,
   );
+});
+
+test("plugin catalog requests carry the bundles the app has, and keep hash fields in the answer", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_plugin_catalog_test",
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const plain = client.getPluginCatalog();
+  const plainRequest = parseSentFrame(mock.sent[0]);
+  expect(plainRequest).not.toHaveProperty("knownBundles");
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "plugin.catalog.get.response",
+      payload: { requestId: plainRequest.requestId, plugins: [{ id: "bots", clientBundle: "b" }] },
+    }),
+  );
+  await expect(plain).resolves.toEqual([{ id: "bots", clientBundle: "b" }]);
+
+  const cached = client.getPluginCatalog({ knownBundles: [{ id: "bots", hash: "h1" }] });
+  const request = parseSentFrame(mock.sent[1]);
+  expect(request).toMatchObject({
+    type: "plugin.catalog.get.request",
+    knownBundles: [{ id: "bots", hash: "h1" }],
+  });
+  const plugins = [
+    { id: "bots", clientBundle: "", clientBundleHash: "h1", clientBundleUnchanged: true },
+  ];
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "plugin.catalog.get.response",
+      payload: { requestId: request.requestId, plugins },
+    }),
+  );
+  await expect(cached).resolves.toEqual(plugins);
 });
 
 test("lists commands with draft config via RPC", async () => {
@@ -6863,7 +7318,7 @@ test("sends close_items_request and resolves close_items_response", async () => 
 });
 
 test("waitForFinish with timeout=0 omits timeoutMs and has no client deadline", async () => {
-  useHeartbeatClock();
+  fakeHeartbeatClock();
   try {
     const logger = createMockLogger();
     const mock = createMockTransport();
@@ -7527,3 +7982,335 @@ test.each([false, true])(
     await send;
   },
 );
+
+describe("dictation Opus / resume feature flags", () => {
+  async function connect(features: Record<string, boolean>) {
+    const mock = createMockTransport();
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_unit_test",
+      logger: createMockLogger(),
+      reconnect: { enabled: false },
+      compressUplink: false,
+      transportFactory: () => mock.transport,
+    });
+    clients.push(client);
+    const connectPromise = client.connect();
+    mock.triggerOpen({ features });
+    await connectPromise;
+    return { client, mock };
+  }
+
+  test("reads dictationOpus / dictationResume from server_info", async () => {
+    const { client } = await connect({ dictationOpus: true, dictationResume: true });
+    expect(client.supportsDictationOpus()).toBe(true);
+    expect(client.supportsDictationResume()).toBe(true);
+    const old = await connect({ ownedSubscriptions: true });
+    expect(old.client.supportsDictationOpus()).toBe(false);
+    expect(old.client.supportsDictationResume()).toBe(false);
+  });
+
+  test("resume start resolves with the daemon's resumed ack", async () => {
+    const { client, mock } = await connect({ dictationResume: true });
+    const start = client.startDictationStream("d1", "audio/pcm;rate=16000;bits=16", {
+      resume: true,
+    });
+    expect(parseSentFrame(mock.sent.at(-1))).toMatchObject({
+      type: "dictation_stream_start",
+      dictationId: "d1",
+      resume: true,
+    });
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "dictation_stream_ack",
+        payload: { dictationId: "d1", ackSeq: 7, resumed: true },
+      }),
+    );
+    await expect(start).resolves.toEqual({ ackSeq: 7, resumed: true });
+  });
+
+  test("an old daemon never sees resume and the start waits for ack -1", async () => {
+    const { client, mock } = await connect({ ownedSubscriptions: true });
+    const start = client.startDictationStream("d1", "audio/pcm;rate=16000;bits=16", {
+      resume: true,
+    });
+    const sent = parseSentFrame(mock.sent.at(-1));
+    expect(sent).toMatchObject({ type: "dictation_stream_start", dictationId: "d1" });
+    expect(sent).not.toHaveProperty("resume");
+    // A stale ack for that id does not count as the start's answer.
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "dictation_stream_ack",
+        payload: { dictationId: "d1", ackSeq: 3 },
+      }),
+    );
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "dictation_stream_ack",
+        payload: { dictationId: "d1", ackSeq: -1 },
+      }),
+    );
+    await expect(start).resolves.toEqual({ ackSeq: -1, resumed: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Relay endpoint security through the real secure channel
+// ---------------------------------------------------------------------------
+
+import {
+  createDaemonChannel,
+  exportPublicKey,
+  generateKeyPair,
+  openDaemonSecureChannel,
+  type SecureChannel,
+  type Transport as RelayWire,
+} from "@getpaseo/relay/e2ee";
+
+/**
+ * An in-memory socket pair: the client side is a DaemonTransport, the daemon
+ * side is the relay Transport the daemon's secure channel runs over. Frames
+ * are delivered asynchronously like a real socket, and a close from either
+ * side reaches the other with its code, as the browser WebSocket does.
+ */
+function createRelayLink(options?: { toDaemon?: (text: string) => string }) {
+  const clientOpen = new Set<() => void>();
+  const clientClose = new Set<(event?: unknown) => void>();
+  const clientError = new Set<(event?: unknown) => void>();
+  const clientMessage = new Set<(data: unknown, isBinary: boolean) => void>();
+  let closed = false;
+  const wire: RelayWire = {
+    send: (data) => {
+      if (closed) throw new Error("socket closed");
+      const isBinary = typeof data !== "string";
+      setTimeout(() => {
+        for (const handler of clientMessage) handler(data, isBinary);
+      }, 0);
+    },
+    close: (code = 1005, reason = "") => shutdown(code, reason),
+    onmessage: null,
+    onclose: null,
+    onerror: null,
+  };
+  const shutdown = (code: number, reason: string) => {
+    if (closed) return;
+    closed = true;
+    setTimeout(() => {
+      wire.onclose?.(code, reason);
+      for (const handler of clientClose) handler({ code, reason });
+    }, 0);
+  };
+  const transport: DaemonTransport = {
+    send: (data) => {
+      if (closed) throw new Error("socket closed");
+      if (typeof data === "string") {
+        const text = options?.toDaemon ? options.toDaemon(data) : data;
+        setTimeout(() => wire.onmessage?.({ data: text, isBinary: false }), 0);
+        return;
+      }
+      const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
+      const copy = bytes.slice().buffer as ArrayBuffer;
+      setTimeout(() => wire.onmessage?.({ data: copy, isBinary: true }), 0);
+    },
+    close: (code = 1005, reason = "") => shutdown(code, reason),
+    onOpen: (handler) => {
+      clientOpen.add(handler);
+      return () => clientOpen.delete(handler);
+    },
+    onClose: (handler) => {
+      clientClose.add(handler);
+      return () => clientClose.delete(handler);
+    },
+    onError: (handler) => {
+      clientError.add(handler);
+      return () => clientError.delete(handler);
+    },
+    onMessage: (handler) => {
+      clientMessage.add(handler);
+      return () => clientMessage.delete(handler);
+    },
+  };
+  return {
+    transport,
+    wire,
+    open: () => {
+      for (const handler of clientOpen) handler();
+    },
+    isClosed: () => closed,
+  };
+}
+
+function serverInfoFrame(features: Record<string, boolean>): string {
+  return wrapSessionMessage({
+    type: "status",
+    payload: {
+      status: "server_info",
+      serverId: "srv_test",
+      hostname: null,
+      version: null,
+      features,
+    },
+  });
+}
+
+/** Opens the daemon side of a link and answers the application hello with the daemon's feature flags. */
+function serveProtectedDaemon(
+  link: ReturnType<typeof createRelayLink>,
+  keys: ReturnType<typeof generateKeyPair>,
+  features: Record<string, boolean>,
+  received: unknown[] = [],
+): void {
+  let channel: SecureChannel | null = null;
+  const pendingAnswers: string[] = [];
+  const opened = openDaemonSecureChannel(link.wire, {
+    daemonKeyPair: keys,
+    events: {
+      onmessage: (data) => {
+        received.push(data);
+        if (typeof data !== "string") return;
+        const frame = JSON.parse(data) as { type?: string };
+        if (frame.type !== "hello") return;
+        const answer = serverInfoFrame(features);
+        if (channel) void channel.send(answer);
+        else pendingAnswers.push(answer);
+      },
+    },
+  });
+  void (async () => {
+    try {
+      channel = await opened;
+      for (const answer of pendingAnswers.splice(0)) void channel.send(answer);
+    } catch {
+      // the test asserts on the client side
+    }
+  })();
+}
+
+test("connects in legacy mode to a daemon that only speaks the legacy construction", async () => {
+  const keys = generateKeyPair();
+  const modes: string[] = [];
+  const client = new DaemonClient({
+    url: "ws://relay.test/ws?role=client&serverId=srv_test&v=2",
+    clientId: "clsk_security_legacy_daemon",
+    e2ee: {
+      enabled: true,
+      daemonPublicKeyB64: exportPublicKey(keys.publicKey),
+      onSecurityMode: (mode) => modes.push(mode),
+    },
+    reconnect: { enabled: false },
+    transportFactory: () => {
+      const link = createRelayLink();
+      const opened = createDaemonChannel(link.wire, keys, {
+        onmessage: (data) => {
+          if (typeof data !== "string") return;
+          if ((JSON.parse(data) as { type?: string }).type !== "hello") return;
+          void opened.then((ch) => ch.send(serverInfoFrame({ ownedSubscriptions: true })));
+        },
+      });
+      void opened.catch(() => {});
+      setTimeout(() => link.open(), 0);
+      return link.transport;
+    },
+  });
+  clients.push(client);
+
+  await client.connect();
+  expect(client.getConnectionState().status).toBe("connected");
+  expect(modes).toEqual(["legacy"]);
+});
+
+test("refuses legacy endpoint security on reconnect once the daemon negotiated protected", async () => {
+  const keys = generateKeyPair();
+  const modes: string[] = [];
+  const links: ReturnType<typeof createRelayLink>[] = [];
+  const legacyReceived: unknown[] = [];
+  const client = new DaemonClient({
+    url: "ws://relay.test/ws?role=client&serverId=srv_test&v=2",
+    clientId: "clsk_security_latch",
+    e2ee: {
+      enabled: true,
+      daemonPublicKeyB64: exportPublicKey(keys.publicKey),
+      onSecurityMode: (mode) => modes.push(mode),
+    },
+    reconnect: { enabled: true, baseDelayMs: 1, maxDelayMs: 1 },
+    transportFactory: () => {
+      const link = createRelayLink();
+      links.push(link);
+      if (links.length === 1) {
+        serveProtectedDaemon(link, keys, { relayProtectedSecurity: true });
+      } else {
+        // A daemon that only speaks the legacy construction (older release).
+        void createDaemonChannel(link.wire, keys, {
+          onmessage: (data) => legacyReceived.push(data),
+        }).catch(() => {});
+      }
+      setTimeout(() => link.open(), 0);
+      return link.transport;
+    },
+  });
+  clients.push(client);
+
+  await client.connect();
+  expect(client.getConnectionState().status).toBe("connected");
+  expect(modes).toEqual(["protected"]);
+
+  // The relay drops the session; the client reconnects to a legacy-only daemon.
+  links[0].wire.close(1012, "Server disconnected");
+  await vi.waitFor(() => expect(links).toHaveLength(2));
+  await vi.waitFor(() => expect(links[1].isClosed()).toBe(true));
+  await vi.waitFor(() => expect(client.getConnectionState().status).toBe("disconnected"));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  expect(links).toHaveLength(2);
+  expect(modes).toEqual(["protected"]);
+  expect(legacyReceived).toEqual([]);
+  expect(client.lastError).toContain(
+    "Endpoint security handshake failed: daemon offered only legacy endpoint security",
+  );
+});
+
+test("closes before admission when a protected-capable daemon is reached in legacy mode", async () => {
+  const keys = generateKeyPair();
+  const daemonReceived: unknown[] = [];
+  let attempts = 0;
+  const client = new DaemonClient({
+    url: "ws://relay.test/ws?role=client&serverId=srv_test&v=2",
+    clientId: "clsk_security_downgrade",
+    e2ee: { enabled: true, daemonPublicKeyB64: exportPublicKey(keys.publicKey) },
+    reconnect: { enabled: true, baseDelayMs: 1, maxDelayMs: 1 },
+    transportFactory: () => {
+      attempts += 1;
+      // A relay in the middle strips the protected offer from the client hello.
+      const link = createRelayLink({
+        toDaemon: (text) => {
+          if (!text.startsWith("{")) return text;
+          const parsed = JSON.parse(text) as Record<string, unknown>;
+          if (parsed.type !== "e2ee_hello") return text;
+          const { protected: _dropped, ...legacyHello } = parsed;
+          return JSON.stringify(legacyHello);
+        },
+      });
+      serveProtectedDaemon(link, keys, { relayProtectedSecurity: true }, daemonReceived);
+      setTimeout(() => link.open(), 0);
+      return link.transport;
+    },
+  });
+  clients.push(client);
+
+  const connecting = client.connect();
+  void connecting.catch(() => {});
+  const queued = client.ping({ timeoutMs: 10_000 });
+  void queued.catch(() => {});
+
+  await expect(connecting).rejects.toThrow(
+    "Endpoint security handshake failed: daemon requires protected endpoint security",
+  );
+  await expect(queued).rejects.toThrow();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  expect(attempts).toBe(1);
+  expect(client.getConnectionState().status).toBe("disconnected");
+  // Only the application hello reached the daemon; the queued command never did.
+  expect(daemonReceived).toHaveLength(1);
+  expect(JSON.parse(daemonReceived[0] as string)).toMatchObject({ type: "hello" });
+});

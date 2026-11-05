@@ -43,6 +43,18 @@ export class ApplicationSocketLease<TSocket extends object> {
   }
 }
 
+/**
+ * Calls `listener` for every chunk of bytes that reaches the TCP socket under a `ws` WebSocket.
+ * A large message (a photo sent over a slow uplink) can take minutes to arrive before its
+ * "message" event; its bytes prove the client is alive meanwhile. Sockets without a raw TCP
+ * socket (relay wrappers, test fakes) are left alone.
+ */
+export function onInboundBytes(ws: object, listener: () => void): void {
+  const raw = (ws as { _socket?: { on?: (event: "data", listener: () => void) => unknown } })
+    ._socket;
+  if (typeof raw?.on === "function") raw.on("data", listener);
+}
+
 export function outboundFrameByteLength(data: string | Uint8Array | ArrayBuffer): number {
   if (typeof data === "string") return Buffer.byteLength(data);
   return data.byteLength;

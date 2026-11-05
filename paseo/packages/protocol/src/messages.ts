@@ -168,6 +168,9 @@ const MutableBrowserToolsConfigSchema = z
 const MutableRelayConfigSchema = z
   .object({
     enabled: z.boolean(),
+    // COMPAT(relayProtectedSecurity): added in v0.13.0, keep optional while old daemons are supported.
+    // When true the daemon admits only relay sessions that negotiated protected endpoint security.
+    requireProtectedSecurity: z.boolean().optional(),
   })
   .passthrough();
 
@@ -625,6 +628,25 @@ const ToolCallDetailPayloadSchema: z.ZodType<ToolCallDetail, unknown> = z.discri
   ],
 );
 
+// server_info.features.chatImages: images in a chat travel by reference, never inline.
+export const AgentTimelineImageSchema = z.object({
+  id: z.string(),
+  mimeType: z.string(),
+  source: z.string(),
+  byteSize: z.number().nonnegative().optional(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+  fileName: z.string().optional(),
+  thumbhash: z.string().max(200).optional(),
+  display: z
+    .object({
+      width: z.number().int().positive(),
+      height: z.number().int().positive(),
+      byteSize: z.number().int().nonnegative(),
+    })
+    .optional(),
+});
+
 const ToolCallBasePayloadSchema = z.object({
   agentMessage: AgentMessageSchema.optional(),
   type: z.literal("tool_call"),
@@ -632,6 +654,7 @@ const ToolCallBasePayloadSchema = z.object({
   name: z.string(),
   detail: ToolCallDetailPayloadSchema,
   metadata: z.record(z.string(), z.unknown()).optional(),
+  images: z.array(AgentTimelineImageSchema).optional(),
 });
 
 const ToolCallRunningPayloadSchema = ToolCallBasePayloadSchema.extend({
@@ -670,6 +693,7 @@ export const AgentTimelineItemPayloadSchema: z.ZodType<AgentTimelineItem, unknow
     text: z.string(),
     messageId: z.string().optional(),
     clientMessageId: z.string().optional(),
+    images: z.array(AgentTimelineImageSchema).optional(),
   }),
   z.object({
     type: z.literal("assistant_message"),
@@ -841,6 +865,19 @@ export const AgentSnapshotPayloadSchema = z.object({
   providerUnavailable: z.boolean().optional(),
   // Private helper marker, retained for exact-ID snapshots and older wire messages.
   internal: z.boolean().optional(),
+  /** Messages the daemon holds for this agent until it is idle (agentMessageQueue). Absent = none. */
+  messageQueue: z
+    .object({
+      revision: z.number().int(),
+      items: z.array(
+        z.object({
+          messageId: z.string(),
+          text: z.string(),
+          createdAt: z.string(),
+        }),
+      ),
+    })
+    .optional(),
 });
 
 export type AgentSnapshotPayload = z.infer<typeof AgentSnapshotPayloadSchema>;
@@ -1201,7 +1238,9 @@ const ImageAttachmentSchema = z.object({
   mimeType: z.string(), // e.g., "image/jpeg", "image/png"
 });
 
-export const ActiveTurnBehaviorSchema = z.enum(["interrupt", "steer"]);
+// "queue" holds the message in the daemon until the agent is idle. Gate it on
+// server_info.features.agentMessageQueue: older daemons reject the value.
+export const ActiveTurnBehaviorSchema = z.enum(["interrupt", "steer", "queue"]);
 export type ActiveTurnBehavior = z.infer<typeof ActiveTurnBehaviorSchema>;
 
 export const SendAgentMessageSchema = z.object({
@@ -1425,9 +1464,36 @@ export const DiagnosticsRequestSchema = z.object({
   requestId: z.string(),
 });
 
+/**
+ * Network diagnostics (networkDiagnostics). A speed test over the existing socket: "down" asks
+ * the daemon for `bytes` random bytes; "up" carries them in `payload` (base64).
+ */
+export const DiagnosticsSpeedTestRequestSchema = z.object({
+  type: z.literal("diagnostics.speed_test.request"),
+  requestId: z.string(),
+  direction: z.enum(["down", "up"]),
+  bytes: z.number().int().min(1).max(1_048_576),
+  payload: z.string().optional(),
+});
+
+/**
+ * Checks the path from the daemon to the model provider without a model call (no quota):
+ * TCP and TLS connect and an HTTP HEAD to the provider's API host, plus Anthropic's public
+ * status page.
+ */
+export const DiagnosticsProviderTestRequestSchema = z.object({
+  type: z.literal("diagnostics.provider_test.request"),
+  requestId: z.string(),
+  provider: z.string().optional(),
+});
+
 export const PluginCatalogGetRequestSchema = z.object({
   type: z.literal("plugin.catalog.get.request"),
   requestId: z.string(),
+  // COMPAT(pluginBundleCache): added for the app's plugin cache; older daemons ignore it and send
+  // every bundle. Client bundles the app already has, with the hash the daemon gave each one: the
+  // daemon answers `clientBundleUnchanged` (and an empty `clientBundle`) for those still current.
+  knownBundles: z.array(z.object({ id: PluginIdSchema, hash: z.string() })).optional(),
 });
 
 export const PluginListRequestSchema = z.object({
@@ -1648,7 +1714,12 @@ export const WriteProjectConfigRequestMessageSchema = z.object({
 export const DictationStreamStartMessageSchema = z.object({
   type: z.literal("dictation_stream_start"),
   dictationId: z.string(),
-  format: z.string(), // e.g. "audio/pcm;rate=16000;bits=16"
+  format: z.string(), // e.g. "audio/pcm;rate=16000;bits=16" or DICTATION_OPUS_FORMAT
+  // COMPAT(dictationResume): added in v0.11.3, remove gate after 2027-04-23. When true and the
+  // daemon still holds this dictationId (same format), it keeps the stream and answers with
+  // `dictation_stream_ack { ackSeq, resumed: true }` so the client resends only seq > ackSeq.
+  // Otherwise it starts a fresh stream and acks -1 (full replay), as before.
+  resume: z.boolean().optional(),
 });
 
 export const DictationStreamChunkMessageSchema = z.object({
@@ -1769,6 +1840,22 @@ export const ListProviderModelsRequestMessageSchema = z.object({
   requestId: z.string(),
 });
 
+/** Pi-based providers: the picker's Scoped list (Pi's `enabledModels`). */
+export const ProviderModelScopeGetRequestSchema = z.object({
+  type: z.literal("provider.model_scope.get.request"),
+  provider: AgentProviderSchema,
+  requestId: z.string(),
+});
+
+/** Adds a catalogue model to Scoped (`scoped: true`) or removes it. */
+export const ProviderModelScopeSetRequestSchema = z.object({
+  type: z.literal("provider.model_scope.set.request"),
+  provider: AgentProviderSchema,
+  modelId: z.string().min(1),
+  scoped: z.boolean(),
+  requestId: z.string(),
+});
+
 export const ListProviderModesRequestMessageSchema = z.object({
   type: z.literal("list_provider_modes_request"),
   provider: AgentProviderSchema,
@@ -1805,6 +1892,25 @@ export const ProviderDiagnosticRequestMessageSchema = z.object({
 export const ProviderUsageListRequestMessageSchema = z.object({
   type: z.literal("provider.usage.list.request"),
   requestId: z.string(),
+});
+
+/** Sends a queued message now, steered into the running turn (agentMessageQueue). */
+export const AgentQueueForceRequestSchema = z.object({
+  type: z.literal("agent.queue.force.request"),
+  requestId: z.string(),
+  agentId: z.string(),
+  messageId: z.string(),
+});
+
+/**
+ * Withdraws a message the agent has not taken (agentMessageQueue). With no record of the id yet,
+ * the daemon keeps a tombstone so a late or retried send is dropped.
+ */
+export const AgentMessageCancelRequestSchema = z.object({
+  type: z.literal("agent.message.cancel.request"),
+  requestId: z.string(),
+  agentId: z.string(),
+  messageId: z.string(),
 });
 
 export const UsageListReportsRequestMessageSchema = z.object({
@@ -1879,6 +1985,48 @@ export const FetchAgentTimelineRequestMessageSchema = z.object({
   projection: z.enum(["projected", "canonical"]).optional(),
   // Allow the client to merge this bounded page outside its contiguous loaded range.
   mergeWindow: z.boolean().optional(),
+  // server_info.features.compactTimeline: tool calls arrive without large payloads, marked with
+  // metadata.paseoCompact; agent.timeline.item.request loads one in full.
+  compact: z.boolean().optional(),
+  // server_info.features.compactTimeline: answer notLoaded instead of resuming a stored agent.
+  ifLoaded: z.boolean().optional(),
+  // server_info.features.leanTimeline: for chats nobody is looking at. No reasoning rows, tool
+  // calls as one-line stubs marked metadata.paseoCompact (agent.timeline.item.request loads one).
+  lean: z.boolean().optional(),
+});
+
+/**
+ * A small JPEG thumbnail of a chat image (server_info.features.chatImages). `maxEdge` bounds the
+ * longer side; the daemon picks from a few fixed sizes and caches them.
+ */
+export const AgentImageThumbnailRequestMessageSchema = z.object({
+  type: z.literal("agent.image.thumbnail.request"),
+  requestId: z.string(),
+  imageId: z.string(),
+  maxEdge: z.number().int().positive().optional(),
+  /**
+   * thumbnail (default): inline small JPEG. placeholder: ThumbHash and display size, inline.
+   * display: the chat-width image; full: what to open full screen. display/full answer with a
+   * daemon path the client reads with the file read RPC (binary, chunked, with progress).
+   */
+  variant: z.enum(["thumbnail", "placeholder", "display", "full"]).optional(),
+  /** full: the client can show HEIC itself (iOS), so the original is fine. */
+  acceptsHeic: z.boolean().optional(),
+});
+
+/** One timeline item in full, e.g. a tool call that arrived compacted (compactTimeline). */
+export const AgentTimelineItemRequestMessageSchema = z.object({
+  type: z.literal("agent.timeline.item.request"),
+  agentId: z.string(),
+  requestId: z.string(),
+  callId: z.string(),
+});
+
+/** agent_patches: the client lost the base of an agent_patch; send that agent in full again. */
+export const AgentPatchResyncMessageSchema = z.object({
+  type: z.literal("agent_patch.resync"),
+  subscriptionId: z.string().optional(),
+  agentId: z.string(),
 });
 
 export const AgentTimelineSearchRequestMessageSchema = z.object({
@@ -2759,6 +2907,8 @@ export const FileExplorerRequestSchema = z.object({
   requestId: z.string(),
   acceptBinary: z.boolean().optional(),
   maxBytes: z.number().int().positive().optional(),
+  /** Binary chunk size wish (min 8 KB), so small reads on slow links can show progress. */
+  chunkBytes: z.number().int().positive().optional(),
 });
 
 export const FileVersionSchema = z.discriminatedUnion("status", [
@@ -3161,6 +3311,8 @@ export const SessionEventSubscriptionSchema = z.enum([
   "activity_log",
   "hub.execution.agent.update",
   "hub.execution.agent.stream",
+  // server_info.features.pluginEvents: events a plugin's server pushes to its client (server.emit).
+  "plugin.event",
 ]);
 export type SessionEventSubscription = z.infer<typeof SessionEventSubscriptionSchema>;
 export const SessionEventsSetSubscriptionRequestSchema = z.object({
@@ -3239,6 +3391,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   HubManagementDaemonDisconnectRequestSchema,
   HubManagementDaemonPermissionsUpdateRequestSchema,
   DiagnosticsRequestSchema,
+  DiagnosticsSpeedTestRequestSchema,
+  DiagnosticsProviderTestRequestSchema,
   PluginCatalogGetRequestSchema,
   PluginListRequestSchema,
   PluginLogsGetRequestSchema,
@@ -3270,6 +3424,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   DictationStreamCancelMessageSchema,
   CreateAgentRequestMessageSchema,
   ListProviderModelsRequestMessageSchema,
+  ProviderModelScopeGetRequestSchema,
+  ProviderModelScopeSetRequestSchema,
   ListProviderModesRequestMessageSchema,
   ListProviderFeaturesRequestMessageSchema,
   ListAvailableProvidersRequestMessageSchema,
@@ -3278,6 +3434,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ProviderDiagnosticRequestMessageSchema,
   ProviderUsageListRequestMessageSchema,
   UsageListReportsRequestMessageSchema,
+  AgentQueueForceRequestSchema,
+  AgentMessageCancelRequestSchema,
   ResumeAgentRequestMessageSchema,
   ImportAgentRequestMessageSchema,
   RefreshAgentRequestMessageSchema,
@@ -3287,6 +3445,9 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   DaemonUpdateRequestMessageSchema,
   FetchAgentTimelineRequestMessageSchema,
   AgentTimelineSearchRequestMessageSchema,
+  AgentTimelineItemRequestMessageSchema,
+  AgentPatchResyncMessageSchema,
+  AgentImageThumbnailRequestMessageSchema,
   AgentTimelineListPromptsRequestMessageSchema,
   ProviderSubagentListRequestMessageSchema,
   ProviderSubagentTimelineRequestMessageSchema,
@@ -3471,6 +3632,9 @@ export const DictationStreamAckMessageSchema = z.object({
   payload: z.object({
     dictationId: z.string(),
     ackSeq: z.number().int(),
+    // COMPAT(dictationResume): set on the reply to a `resume` start. true: the daemon kept the
+    // stream and has every seq up to ackSeq. false: it started fresh (ackSeq -1).
+    resumed: z.boolean().optional(),
   }),
 });
 
@@ -3564,6 +3728,11 @@ export const ServerInfoStatusPayloadSchema = z
     serverId: z.string().trim().min(1),
     hostname: ServerInfoHostnameSchema.optional(),
     version: ServerInfoVersionSchema.optional(),
+    // DinoBot: the version to show people (e.g. productName "DinoBot", displayVersion "0.1.3").
+    // Display only: `version` (the engine, 0.11.x) stays what every compatibility check compares.
+    // Older daemons omit both; clients then show `version` as before.
+    displayVersion: ServerInfoVersionSchema.optional(),
+    productName: ServerInfoHostnameSchema.optional(),
     // COMPAT(sessionPermissions): optional while clients support older daemons.
     permissions: z.array(DaemonPermissionSchema).optional(),
     // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
@@ -3620,6 +3789,8 @@ export const ServerInfoStatusPayloadSchema = z
         daemonStatusRpc: z.boolean().optional(),
         // COMPAT(daemonConfigReload): added in v0.4.0, remove gate after 2027-02-14.
         daemonConfigReload: z.boolean().optional(),
+        // COMPAT(modelScope): provider.model_scope.* (Scoped / All model picker).
+        modelScope: z.boolean().optional(),
         // COMPAT(relayConfig): added in v0.2.6, remove gate after 2027-01-31.
         relayConfig: z.boolean().optional(),
         // COMPAT(pushTokenRevocation): added in v0.3.2, remove gate after 2027-02-10.
@@ -3696,6 +3867,9 @@ export const ServerInfoStatusPayloadSchema = z
         workspaceMarkUnread: z.boolean().optional(),
         // COMPAT(hubRelationship): added in v0.1.X, drop the gate when floor >= v0.1.X.
         hubRelationship: z.boolean().optional(),
+        // COMPAT(relayProtectedSecurity): added in v0.13.0. A capable daemon always advertises
+        // it; relay clients that negotiated legacy security reject the connection on seeing it.
+        relayProtectedSecurity: z.boolean().optional(),
         // COMPAT(projectGithubClone): added in v0.1.108, remove gate after 2027-01-15.
         projectGithubClone: z.boolean().optional(),
         // COMPAT(workspaceGithubRepositorySearch): added in v0.1.108, remove gate after 2027-01-15.
@@ -3725,6 +3899,31 @@ export const ServerInfoStatusPayloadSchema = z
         ownedSubscriptions: z.boolean().optional(),
         // COMPAT(canonicalSubmittedPrompts): added in v0.2.6, remove gate after 2027-01-30.
         canonicalSubmittedPrompts: z.boolean().optional(),
+        // COMPAT(messageReceivedAck): added in v0.11.2, remove gate after 2027-04-10.
+        messageReceivedAck: z.boolean().optional(),
+        // COMPAT(agentMessageQueue): added in v0.11.2, remove gate after 2027-04-10.
+        agentMessageQueue: z.boolean().optional(),
+        // COMPAT(compressedFrames): added in v0.11.2, remove gate after 2027-04-10.
+        compressedFrames: z.boolean().optional(),
+        // COMPAT(networkDiagnostics): added in v0.11.2, remove gate after 2027-04-10.
+        networkDiagnostics: z.boolean().optional(),
+        // COMPAT(compactTimeline): added in v0.11.2, remove gate after 2027-04-10.
+        compactTimeline: z.boolean().optional(),
+        // COMPAT(leanTimeline): added in v0.11.3, remove gate after 2027-04-10.
+        leanTimeline: z.boolean().optional(),
+        // COMPAT(pluginEvents): added in v0.11.3, remove gate after 2027-04-10.
+        pluginEvents: z.boolean().optional(),
+        // COMPAT(checkedUplink): added in v0.11.3, remove gate after 2027-04-10. The daemon reads
+        // client JSON frames sent as checked DEFLATE frames (binary-frames/compressed-json).
+        checkedUplink: z.boolean().optional(),
+        // COMPAT(dictationOpus): added in v0.11.3, remove gate after 2027-04-23. The daemon
+        // decodes dictation chunks in DICTATION_OPUS_FORMAT (see dictation-audio-format.ts).
+        dictationOpus: z.boolean().optional(),
+        // COMPAT(dictationResume): added in v0.11.3, remove gate after 2027-04-23. The daemon
+        // honours `dictation_stream_start.resume` (resend only what it has not acked).
+        dictationResume: z.boolean().optional(),
+        // COMPAT(chatImages): added in v0.11.2, remove gate after 2027-04-10.
+        chatImages: z.boolean().optional(),
         agentMessageProvenance: z.boolean().optional(),
         // COMPAT(agentTurnIdentity): accept peers that observed pre-release v0.2.6 through 2027-01-31.
         agentTurnIdentity: z.boolean().optional(),
@@ -4101,6 +4300,8 @@ export const AgentUpdateMessageSchema = z.object({
       project: ProjectPlacementPayloadSchema.nullable().optional(),
       generation: z.string().optional(),
       seq: z.number().int().positive().optional(),
+      // agent_patches: revision of this agent on this subscription; agent_patch builds on it.
+      rev: z.number().int().positive().optional(),
     }),
     z.object({
       subscriptionId: z.string().optional(),
@@ -4110,6 +4311,28 @@ export const AgentUpdateMessageSchema = z.object({
       seq: z.number().int().positive().optional(),
     }),
   ]),
+});
+
+/**
+ * Only the fields of an agent that changed since the last agent_update/agent_patch for it on the
+ * same subscription (client capability agent_patches). `baseRev` names that update; the client
+ * applies `set`/`unset` to it and hands listeners a full agent_update, so nothing downstream sees
+ * a patch. A client without the base asks for a full upsert (agent_patch.resync).
+ */
+export const AgentPatchMessageSchema = z.object({
+  type: z.literal("agent_patch"),
+  payload: z.object({
+    subscriptionId: z.string().optional(),
+    agentId: z.string(),
+    rev: z.number().int().positive(),
+    baseRev: z.number().int().positive(),
+    set: z.record(z.string(), z.unknown()),
+    unset: z.array(z.string()).optional(),
+    // Present only when the placement changed.
+    project: ProjectPlacementPayloadSchema.nullable().optional(),
+    generation: z.string().optional(),
+    seq: z.number().int().positive().optional(),
+  }),
 });
 
 export const AgentStreamMessageSchema = z.object({
@@ -4646,6 +4869,37 @@ export const FetchAgentTimelineResponseMessageSchema = z.object({
     mergeWindow: z.boolean().optional(),
     entries: z.array(AgentTimelineEntryPayloadSchema),
     error: z.string().nullable(),
+    // compactTimeline: the request asked ifLoaded and the agent is not in memory.
+    notLoaded: z.boolean().optional(),
+  }),
+});
+
+export const AgentImageThumbnailResponseMessageSchema = z.object({
+  type: z.literal("agent.image.thumbnail.response"),
+  payload: z.object({
+    requestId: z.string(),
+    imageId: z.string(),
+    /** Base64 JPEG. Thumbnails are a few KB, so they ride the JSON channel. */
+    data: z.string().nullable(),
+    mimeType: z.string().nullable(),
+    width: z.number().int().positive().nullable(),
+    height: z.number().int().positive().nullable(),
+    error: z.string().nullable(),
+    thumbhash: z.string().nullable().optional(),
+    /** display/full: daemon-local path to read with the file read RPC. */
+    path: z.string().nullable().optional(),
+    byteSize: z.number().int().nonnegative().nullable().optional(),
+  }),
+});
+
+export const AgentTimelineItemResponseMessageSchema = z.object({
+  type: z.literal("agent.timeline.item.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    callId: z.string(),
+    item: AgentTimelineItemPayloadSchema.nullable(),
+    error: z.string().nullable(),
   }),
 });
 
@@ -4958,6 +5212,14 @@ export const WorkspaceMarkUnreadResponseSchema = z.object({
   }),
 });
 
+export const SendAgentMessageDispositionSchema = z.enum([
+  "turn_started",
+  "steered",
+  "out_of_band",
+  "queued",
+]);
+export type SendAgentMessageDisposition = z.infer<typeof SendAgentMessageDispositionSchema>;
+
 export const SendAgentMessageResponseMessageSchema = z.object({
   type: z.literal("send_agent_message_response"),
   payload: z.object({
@@ -4965,6 +5227,46 @@ export const SendAgentMessageResponseMessageSchema = z.object({
     agentId: z.string(),
     accepted: z.boolean(),
     error: z.string().nullable(),
+    /** How the agent took the message. Absent from older daemons and on failure. */
+    disposition: SendAgentMessageDispositionSchema.optional(),
+  }),
+});
+
+export const AgentQueueForceResponseSchema = z.object({
+  type: z.literal("agent.queue.force.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    messageId: z.string(),
+    /** not_queued: the daemon no longer holds it (already taken, cancelled or unknown). */
+    result: z.enum(["forced", "not_queued", "failed"]),
+    error: z.string().nullable(),
+  }),
+});
+
+export const AgentMessageCancelResponseSchema = z.object({
+  type: z.literal("agent.message.cancel.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    messageId: z.string(),
+    /** too_late: the agent has it, or is being handed it right now. */
+    result: z.enum(["cancelled", "too_late", "failed"]),
+    error: z.string().nullable(),
+  }),
+});
+
+/**
+ * The daemon has recorded a tracked message durably (single tick): a dropped connection or a
+ * killed app can no longer lose it. Sent before send_agent_message_response, only to clients
+ * that advertise message_received_ack.
+ */
+export const SendAgentMessageReceivedMessageSchema = z.object({
+  type: z.literal("send_agent_message_received"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    messageId: z.string(),
   }),
 });
 
@@ -5089,6 +5391,64 @@ export const DiagnosticsResponseSchema = z.object({
       diagnostic: z.string(),
     })
     .passthrough(),
+});
+
+export const DiagnosticsSpeedTestResponseSchema = z.object({
+  type: z.literal("diagnostics.speed_test.response"),
+  payload: z.object({
+    requestId: z.string(),
+    direction: z.enum(["down", "up"]),
+    bytes: z.number().int(),
+    /** "down": the random bytes, base64. */
+    payload: z.string().optional(),
+    /** Daemon time between receiving the request and sending the reply. */
+    serverMs: z.number(),
+    error: z.string().nullable(),
+  }),
+});
+
+const ProviderStatusComponentSchema = z.object({
+  name: z.string(),
+  status: z.string(),
+});
+
+export const DiagnosticsProviderTestResponseSchema = z.object({
+  type: z.literal("diagnostics.provider_test.response"),
+  payload: z.object({
+    requestId: z.string(),
+    provider: z.string(),
+    url: z.string(),
+    /** Whether the URL came from ANTHROPIC_BASE_URL (a proxy) rather than the default host. */
+    viaBaseUrl: z.boolean(),
+    dnsMs: z.number().nullable(),
+    tcpMs: z.number().nullable(),
+    tlsMs: z.number().nullable(),
+    httpMs: z.number().nullable(),
+    httpStatus: z.number().nullable(),
+    error: z.string().nullable(),
+    /** The last provider error the daemon saw on any agent, if recent. */
+    lastProviderError: z
+      .object({ agentId: z.string(), message: z.string(), at: z.string().nullable() })
+      .nullable(),
+    status: z
+      .object({
+        indicator: z.string(),
+        description: z.string(),
+        components: z.array(ProviderStatusComponentSchema),
+        incidents: z.array(
+          z.object({
+            name: z.string(),
+            status: z.string(),
+            impact: z.string().nullable(),
+            updatedAt: z.string().nullable(),
+            latestUpdate: z.string().nullable(),
+          }),
+        ),
+      })
+      .nullable(),
+    statusError: z.string().nullable(),
+    testedAt: z.string(),
+  }),
 });
 
 export const SetDaemonConfigResponseMessageSchema = z.object({
@@ -5799,7 +6159,8 @@ export const PullRequestTimelineResponseSchema = z.object({
       // daemon floor is >= v0.2.0.
       authState: ForgeAuthStateSchema,
     })
-    .optional()
+    // zod >= 4.6 types `.optional().prefault()` output as possibly undefined;
+    // `.prefault({})` alone accepts a missing payload the same way.
     .prefault({}),
 });
 
@@ -6141,6 +6502,33 @@ export const ListProviderModelsResponseMessageSchema = z.object({
     fetchedAt: z.string(),
     requestId: z.string(),
   }),
+});
+
+export const ProviderModelScopeSchema = z.object({
+  provider: AgentProviderSchema,
+  supported: z.boolean(),
+  settingsPath: z.string().nullable(),
+  patterns: z.array(z.string()),
+  scopedModelIds: z.array(z.string()),
+  globModelIds: z.array(z.string()),
+  unmatchedPatterns: z.array(z.string()),
+});
+
+const ProviderModelScopeResponsePayloadSchema = z.object({
+  provider: AgentProviderSchema,
+  scope: ProviderModelScopeSchema.nullable(),
+  error: z.string().nullable(),
+  requestId: z.string(),
+});
+
+export const ProviderModelScopeGetResponseSchema = z.object({
+  type: z.literal("provider.model_scope.get.response"),
+  payload: ProviderModelScopeResponsePayloadSchema,
+});
+
+export const ProviderModelScopeSetResponseSchema = z.object({
+  type: z.literal("provider.model_scope.set.response"),
+  payload: ProviderModelScopeResponsePayloadSchema,
 });
 
 export const ListProviderModesResponseMessageSchema = z.object({
@@ -6649,6 +7037,11 @@ export const PluginCatalogGetResponseSchema = z.object({
         id: PluginIdSchema,
         clientBundle: z.string(),
         requirements: PluginRequirementsSchema.optional(),
+        // COMPAT(pluginBundleCache): sent only in answer to a request with `knownBundles`.
+        /** Content hash of the client bundle, for the app to send back next time. */
+        clientBundleHash: z.string().optional(),
+        /** The app's bundle with this hash is current; `clientBundle` is empty. */
+        clientBundleUnchanged: z.boolean().optional(),
       }),
     ),
   }),
@@ -6796,6 +7189,20 @@ export const PluginRemoveResponseSchema = z.object({
   payload: z.object({ requestId: z.string() }).strict(),
 });
 
+/**
+ * A plugin's server pushed an event to its clients (server.emit, server_info.features.pluginEvents).
+ * Only sent to sockets subscribed to the "plugin.event" session event.
+ */
+export const PluginEventMessageSchema = z.object({
+  type: z.literal("plugin.event"),
+  payload: z.object({
+    subscriptionId: z.string().optional(),
+    pluginId: PluginIdSchema,
+    name: z.string(),
+    data: z.unknown(),
+  }),
+});
+
 export const PluginRpcInvokeResponseSchema = z.object({
   type: z.literal("plugin.rpc.invoke.response"),
   payload: z.object({
@@ -6889,6 +7296,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   RpcErrorMessageSchema,
   ArtifactMessageSchema,
   AgentUpdateMessageSchema,
+  AgentPatchMessageSchema,
+  PluginEventMessageSchema,
   WorkspaceUpdateMessageSchema,
   WorkspaceLabelListResponseSchema,
   WorkspaceLabelUpdateSchema,
@@ -6924,6 +7333,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   FetchAgentTimelineResponseMessageSchema,
   AgentTimelineReplacementMessageSchema,
   AgentTimelineSearchResponseMessageSchema,
+  AgentTimelineItemResponseMessageSchema,
+  AgentImageThumbnailResponseMessageSchema,
   AgentTimelineListPromptsResponseMessageSchema,
   ProviderSubagentListResponseMessageSchema,
   ProviderSubagentTimelineResponseMessageSchema,
@@ -6941,6 +7352,9 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   WorkspaceClearAttentionResponseSchema,
   WorkspaceMarkUnreadResponseSchema,
   SendAgentMessageResponseMessageSchema,
+  SendAgentMessageReceivedMessageSchema,
+  AgentQueueForceResponseSchema,
+  AgentMessageCancelResponseSchema,
   SetVoiceModeResponseMessageSchema,
   DaemonGetStatusResponseSchema,
   DaemonGetPairingOfferResponseSchema,
@@ -6950,6 +7364,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   HubManagementDaemonDisconnectResponseSchema,
   HubManagementDaemonPermissionsUpdateResponseSchema,
   DiagnosticsResponseSchema,
+  DiagnosticsSpeedTestResponseSchema,
+  DiagnosticsProviderTestResponseSchema,
   GetDaemonConfigResponseMessageSchema,
   SetDaemonConfigResponseMessageSchema,
   ReadProjectConfigResponseMessageSchema,
@@ -7024,6 +7440,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   FileDownloadTokenResponseSchema,
   FileUploadResponseSchema,
   ListProviderModelsResponseMessageSchema,
+  ProviderModelScopeGetResponseSchema,
+  ProviderModelScopeSetResponseSchema,
   ListProviderModesResponseMessageSchema,
   ListProviderFeaturesResponseMessageSchema,
   ListAvailableProvidersResponseSchema,
@@ -7154,6 +7572,9 @@ export type AgentTimelineListPromptsResponseMessage = z.infer<
 export type AgentForkContextResponseMessage = z.infer<typeof AgentForkContextResponseMessageSchema>;
 export type CancelAgentResponseMessage = z.infer<typeof CancelAgentResponseMessageSchema>;
 export type SendAgentMessageResponseMessage = z.infer<typeof SendAgentMessageResponseMessageSchema>;
+export type SendAgentMessageReceivedMessage = z.infer<typeof SendAgentMessageReceivedMessageSchema>;
+export type AgentQueueForceResponse = z.infer<typeof AgentQueueForceResponseSchema>;
+export type AgentMessageCancelResponse = z.infer<typeof AgentMessageCancelResponseSchema>;
 export type SetVoiceModeResponseMessage = z.infer<typeof SetVoiceModeResponseMessageSchema>;
 export type SetAgentModeResponseMessage = z.infer<typeof SetAgentModeResponseMessageSchema>;
 export type SetAgentModelResponseMessage = z.infer<typeof SetAgentModelResponseMessageSchema>;
@@ -7201,6 +7622,8 @@ export type DaemonGetStatusResponse = z.infer<typeof DaemonGetStatusResponseSche
 export type DaemonGetPairingOfferResponse = z.infer<typeof DaemonGetPairingOfferResponseSchema>;
 export type DaemonConfigReloadResponse = z.infer<typeof DaemonConfigReloadResponseSchema>;
 export type DiagnosticsResponse = z.infer<typeof DiagnosticsResponseSchema>;
+export type DiagnosticsSpeedTestResponse = z.infer<typeof DiagnosticsSpeedTestResponseSchema>;
+export type DiagnosticsProviderTestResponse = z.infer<typeof DiagnosticsProviderTestResponseSchema>;
 export type GetProvidersSnapshotResponseMessage = z.infer<
   typeof GetProvidersSnapshotResponseMessageSchema
 >;
@@ -7471,6 +7894,9 @@ export type ProjectIconRequest = z.infer<typeof ProjectIconRequestSchema>;
 export type ProjectIconResponse = z.infer<typeof ProjectIconResponseSchema>;
 export type ProjectIconGetRequest = z.infer<typeof ProjectIconGetRequestSchema>;
 export type ProjectIconGetResponse = z.infer<typeof ProjectIconGetResponseSchema>;
+export type ProviderModelScope = z.infer<typeof ProviderModelScopeSchema>;
+export type ProviderModelScopeGetResponse = z.infer<typeof ProviderModelScopeGetResponseSchema>;
+export type ProviderModelScopeSetResponse = z.infer<typeof ProviderModelScopeSetResponseSchema>;
 export type ProjectIcon = z.infer<typeof ProjectIconSchema>;
 export type FileDownloadTokenRequest = z.infer<typeof FileDownloadTokenRequestSchema>;
 export type FileDownloadTokenResponse = z.infer<typeof FileDownloadTokenResponseSchema>;
@@ -7541,6 +7967,9 @@ export const WSHelloMessageSchema = z.object({
     .discriminatedUnion("kind", [
       z.object({ kind: z.literal("password"), password: z.string() }),
       z.object({ kind: z.literal("localCredential"), token: z.string() }),
+      // A per-device session token the daemon issued after an earlier password check
+      // (client capability session_tokens, frame session.token).
+      z.object({ kind: z.literal("sessionToken"), token: z.string().max(256) }),
     ])
     .optional(),
   appVersion: z.string().optional(),
@@ -7548,6 +7977,7 @@ export const WSHelloMessageSchema = z.object({
     .object({
       voice: z.boolean().optional(),
       [CLIENT_CAPS.helloRejection]: z.boolean().optional(),
+      [CLIENT_CAPS.sessionTokens]: z.boolean().optional(),
       pushNotifications: z.boolean().optional(),
       [CLIENT_CAPS.explicitEventSubscriptions]: z.boolean().optional(),
       [CLIENT_CAPS.allProviders]: z.boolean().optional(),
@@ -7585,8 +8015,26 @@ export const WSSessionOutboundSchema = z.object({
 
 export const WSHelloRejectedMessageSchema = z.object({
   type: z.literal("hello.rejected"),
-  reason: z.enum(["password_required", "incorrect_password", "incompatible_protocol"]),
+  reason: z.enum([
+    "password_required",
+    "incorrect_password",
+    "incompatible_protocol",
+    // Only for a hello that presented a session token: the token is unknown, expired or revoked.
+    // Not an authentication failure: the client drops the token and reconnects with the password.
+    "session_token_invalid",
+  ]),
   accepts: z.array(z.literal("password")),
+});
+
+/**
+ * A per-device session token, sent before server_info to a client that advertised
+ * session_tokens and proved the password (or presented a token that is due for renewal).
+ * Secret: the client keeps it like the password and never logs it.
+ */
+export const WSSessionTokenMessageSchema = z.object({
+  type: z.literal("session.token"),
+  token: z.string().min(1).max(256),
+  expiresAt: z.number().int(),
 });
 
 // Complete WebSocket message schemas
@@ -7601,6 +8049,7 @@ export const WSOutboundMessageSchema = z.discriminatedUnion("type", [
   WSPongMessageSchema,
   WSSessionOutboundSchema,
   WSHelloRejectedMessageSchema,
+  WSSessionTokenMessageSchema,
 ]);
 
 export type WSInboundMessage = z.infer<typeof WSInboundMessageSchema>;

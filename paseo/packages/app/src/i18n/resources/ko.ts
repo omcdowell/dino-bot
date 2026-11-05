@@ -342,6 +342,7 @@ export const ko: TranslationResources = {
       closeImage: "이미지 닫기",
       imageLoadFailed: "이미지를 불러올 수 없습니다",
       imageUnavailable: "이미지를 사용할 수 없습니다",
+      downloadImage: "이미지 다운로드",
       imagePreviewUnavailable: "이미지 미리보기를 사용할 수 없습니다.",
       imagePreviewLoadFailed: "이미지 미리보기를 불러올 수 없습니다.",
       review: "리뷰",
@@ -628,6 +629,8 @@ export const ko: TranslationResources = {
         trigger: "탭 전환 ({{count}}개 열림)",
         title: "탭 전환",
         searchPlaceholder: "탭 검색",
+        groupLabel: "탭",
+        groupCount: "{{count}}개 열림",
       },
       menu: {
         openFor: "{{label}}의 메뉴 열기",
@@ -1653,6 +1656,11 @@ export const ko: TranslationResources = {
     retrying: "다시 시도 중...",
     noMatches: "검색과 일치하는 모델이 없습니다",
     noMatchesForQuery: '"{{query}}"과(와) 일치하는 모델이 없습니다',
+    scopeScoped: "범위",
+    scopeAll: "전체",
+    scopeAdd: "범위에 추가",
+    scopeRemove: "범위에서 제거",
+    scopeEmpty: "범위가 비어 있습니다. 전체에서 체크하여 모델을 추가하세요.",
     searchAllPlaceholder: "모든 모델 검색...",
     searchPlaceholder: "모델 검색...",
     openProviderSettings: "{{provider}} 설정 열기",
@@ -2113,6 +2121,8 @@ export const ko: TranslationResources = {
     general: {
       title: "일반",
       sending: "전송",
+      network: en.settings.general.network,
+      meteredNetwork: en.settings.general.meteredNetwork,
       browserData: {
         title: "브라우저 데이터",
         siteData: "쿠키 및 사이트 데이터",
@@ -2823,4 +2833,6 @@ export const ko: TranslationResources = {
       },
     },
   },
+  delivery: en.delivery,
+  network: en.network,
 };

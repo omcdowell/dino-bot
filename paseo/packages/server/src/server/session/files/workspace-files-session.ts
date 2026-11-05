@@ -295,39 +295,43 @@ export class WorkspaceFilesSession {
           }
         }
         if (request.acceptBinary && this.host.hasBinaryChannel()) {
-          await streamExplorerFile({ root: cwd, relativePath: requestedPath }, async (file) => {
-            await this.host.emitBinary(
-              encodeFileTransferFrame({
-                opcode: FileTransferOpcode.FileBegin,
-                requestId,
-                metadata: {
-                  mime: file.mimeType,
-                  size: file.size,
-                  encoding: file.encoding,
-                  modifiedAt: file.modifiedAt,
-                  revision: file.revision,
-                },
-              }),
-              source,
-            );
-            for await (const chunk of file.chunks) {
+          await streamExplorerFile(
+            { root: cwd, relativePath: requestedPath },
+            async (file) => {
               await this.host.emitBinary(
                 encodeFileTransferFrame({
-                  opcode: FileTransferOpcode.FileChunk,
+                  opcode: FileTransferOpcode.FileBegin,
                   requestId,
-                  payload: chunk,
+                  metadata: {
+                    mime: file.mimeType,
+                    size: file.size,
+                    encoding: file.encoding,
+                    modifiedAt: file.modifiedAt,
+                    revision: file.revision,
+                  },
                 }),
                 source,
               );
-            }
-            await this.host.emitBinary(
-              encodeFileTransferFrame({
-                opcode: FileTransferOpcode.FileEnd,
-                requestId,
-              }),
-              source,
-            );
-          });
+              for await (const chunk of file.chunks) {
+                await this.host.emitBinary(
+                  encodeFileTransferFrame({
+                    opcode: FileTransferOpcode.FileChunk,
+                    requestId,
+                    payload: chunk,
+                  }),
+                  source,
+                );
+              }
+              await this.host.emitBinary(
+                encodeFileTransferFrame({
+                  opcode: FileTransferOpcode.FileEnd,
+                  requestId,
+                }),
+                source,
+              );
+            },
+            { chunkBytes: request.chunkBytes },
+          );
         } else {
           const file = await readExplorerFile({
             root: cwd,

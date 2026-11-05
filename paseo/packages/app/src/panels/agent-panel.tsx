@@ -54,6 +54,12 @@ import { useArchiveAgent } from "@/hooks/use-archive-agent";
 import { useContainerWidthBelow } from "@/hooks/use-container-width";
 import { reconcileMissingAgentStateWithPresentAgent } from "@/panels/agent-panel-load-state";
 import { TimelineSyncStatus } from "@/timeline/sync-status";
+import { ConnectionBanner } from "@/components/connection-banner";
+import {
+  FloatingHeaderInsetProvider,
+  useFloatingHeaderInset,
+} from "@/components/headers/floating-header-inset";
+import { useConnectionFault } from "@/hooks/use-connection-fault";
 import { usePaneContext, usePaneFocus } from "@/panels/pane-context";
 import { definePanel, type PanelDescriptor } from "@/panels/panel-registry";
 import { RenderProfile } from "@/utils/render-profiler";
@@ -1216,6 +1222,15 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
       composerState,
     ],
   );
+  // On a phone the chat scrolls under the floating header. The connection banner cannot: it is
+  // pushed below the controls, and the chat under it then needs no header inset of its own.
+  const floatingHeaderInset = useFloatingHeaderInset();
+  const hasConnectionFault = useConnectionFault(serverId) !== null;
+  const bannerBelowFloatingHeader = floatingHeaderInset > 0 && hasConnectionFault;
+  const floatingHeaderSpacerStyle = useMemo(
+    () => ({ height: floatingHeaderInset }),
+    [floatingHeaderInset],
+  );
   const composerSection = (
     <RenderProfile id={`AgentComposerSection:${agentId}`}>
       <AgentComposerSection
@@ -1234,23 +1249,29 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
       />
     </RenderProfile>
   );
+  const agentStreamSection = (
+    <RenderProfile id={`AgentStreamSection:${agentId}`}>
+      <AgentStreamSection
+        streamViewRef={streamViewRef}
+        serverId={serverId}
+        workspaceId={workspaceId}
+        agentId={agentId}
+        agent={effectiveAgent}
+        routeBottomAnchorRequest={routeBottomAnchorRequest}
+        hasAppliedAuthoritativeHistory={hasAppliedAuthoritativeHistory}
+        hasActiveComposer={hasActiveComposer}
+        hasVisibleAgentTracks={hasVisibleAgentTracks}
+        toast={toastApi}
+        onOpenWorkspaceFile={onOpenWorkspaceFile}
+        floatingHeaderInset={bannerBelowFloatingHeader ? 0 : floatingHeaderInset}
+      />
+    </RenderProfile>
+  );
   const streamContent = (
     <View style={animatedStaticStyles.content}>
-      <RenderProfile id={`AgentStreamSection:${agentId}`}>
-        <AgentStreamSection
-          streamViewRef={streamViewRef}
-          serverId={serverId}
-          workspaceId={workspaceId}
-          agentId={agentId}
-          agent={effectiveAgent}
-          routeBottomAnchorRequest={routeBottomAnchorRequest}
-          hasAppliedAuthoritativeHistory={hasAppliedAuthoritativeHistory}
-          hasActiveComposer={hasActiveComposer}
-          hasVisibleAgentTracks={hasVisibleAgentTracks}
-          toast={toastApi}
-          onOpenWorkspaceFile={onOpenWorkspaceFile}
-        />
-      </RenderProfile>
+      {bannerBelowFloatingHeader ? <View style={floatingHeaderSpacerStyle} /> : null}
+      <ConnectionBanner serverId={serverId} workspaceId={workspaceId} cwd={cwd} />
+      {agentStreamSection}
       {hasActiveComposer ? (
         <AgentTracks
           serverId={serverId}
@@ -1374,6 +1395,7 @@ const AgentStreamSection = memo(function AgentStreamSection({
   hasVisibleAgentTracks,
   toast,
   onOpenWorkspaceFile,
+  floatingHeaderInset,
 }: {
   streamViewRef: React.RefObject<AgentStreamViewHandle | null>;
   serverId: string;
@@ -1386,6 +1408,8 @@ const AgentStreamSection = memo(function AgentStreamSection({
   hasVisibleAgentTracks: boolean;
   toast: ReturnType<typeof useToastHost>["api"];
   onOpenWorkspaceFile?: (request: WorkspaceFileOpenRequest) => void;
+  /** Top of the chat covered by the phone's floating header; the stream scrolls under it. */
+  floatingHeaderInset: number;
 }) {
   const isCompactFormFactor = useIsCompactFormFactor();
   const hasWorkspaceDiffStat = useWorkspaceHasDiffStat(serverId, workspaceId);
@@ -1443,22 +1467,24 @@ const AgentStreamSection = memo(function AgentStreamSection({
   }, [pendingPermissionList]);
 
   return (
-    <AgentStreamView
-      ref={streamViewRef}
-      agentId={agent.id}
-      serverId={serverId}
-      context={agent}
-      streamItems={streamItems}
-      pendingPermissions={pendingPermissions}
-      routeBottomAnchorRequest={routeBottomAnchorRequest}
-      isAuthoritativeHistoryReady={hasAppliedAuthoritativeHistory}
-      bottomOverlayTailClearance={bottomOverlayTailClearance}
-      bottomOverlayControlClearance={bottomOverlayControlClearance}
-      toast={toast}
-      pendingMessageSubmissions={pendingMessageSubmissions}
-      turnPresentation={turnPresentation}
-      onOpenWorkspaceFile={onOpenWorkspaceFile}
-    />
+    <FloatingHeaderInsetProvider value={floatingHeaderInset}>
+      <AgentStreamView
+        ref={streamViewRef}
+        agentId={agent.id}
+        serverId={serverId}
+        context={agent}
+        streamItems={streamItems}
+        pendingPermissions={pendingPermissions}
+        routeBottomAnchorRequest={routeBottomAnchorRequest}
+        isAuthoritativeHistoryReady={hasAppliedAuthoritativeHistory}
+        bottomOverlayTailClearance={bottomOverlayTailClearance}
+        bottomOverlayControlClearance={bottomOverlayControlClearance}
+        toast={toast}
+        pendingMessageSubmissions={pendingMessageSubmissions}
+        turnPresentation={turnPresentation}
+        onOpenWorkspaceFile={onOpenWorkspaceFile}
+      />
+    </FloatingHeaderInsetProvider>
   );
 });
 

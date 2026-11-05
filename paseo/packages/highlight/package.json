@@ -1,6 +1,7 @@
 {
   "name": "@getpaseo/highlight",
   "version": "0.11.2",
+  "license": "Apache-2.0",
   "files": [
     "dist",
     "!dist/**/*.map",
@@ -50,6 +51,6 @@
   },
   "devDependencies": {
     "typescript": "^5.9.2",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.12"
   }
 }

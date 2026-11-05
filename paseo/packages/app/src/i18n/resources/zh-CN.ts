@@ -341,6 +341,7 @@ export const zhCN: TranslationResources = {
       closeImage: "关闭图片",
       imageLoadFailed: "无法加载图片",
       imageUnavailable: "图片不可用",
+      downloadImage: "下载图片",
       imagePreviewUnavailable: "图片预览不可用。",
       imagePreviewLoadFailed: "无法加载图片预览。",
       review: "审查",
@@ -627,6 +628,8 @@ export const zhCN: TranslationResources = {
         trigger: "切换标签（已打开 {{count}} 个）",
         title: "切换标签",
         searchPlaceholder: "搜索标签",
+        groupLabel: "标签",
+        groupCount: "已打开 {{count}} 个",
       },
       menu: {
         openFor: "打开 {{label}} 的菜单",
@@ -1626,6 +1629,11 @@ export const zhCN: TranslationResources = {
     retrying: "正在重试...",
     noMatches: "没有匹配的模型",
     noMatchesForQuery: "没有与“{{query}}”匹配的模型",
+    scopeScoped: "已选",
+    scopeAll: "全部",
+    scopeAdd: "加入已选",
+    scopeRemove: "移出已选",
+    scopeEmpty: "已选为空。在“全部”中勾选添加模型。",
     searchAllPlaceholder: "搜索所有模型...",
     searchPlaceholder: "搜索模型...",
     openProviderSettings: "打开 {{provider}} 设置",
@@ -2080,6 +2088,8 @@ export const zhCN: TranslationResources = {
     general: {
       title: "通用",
       sending: "发送",
+      network: en.settings.general.network,
+      meteredNetwork: en.settings.general.meteredNetwork,
       browserData: {
         title: "浏览器数据",
         siteData: "Cookie 和网站数据",
@@ -2774,4 +2784,6 @@ export const zhCN: TranslationResources = {
       },
     },
   },
+  delivery: en.delivery,
+  network: en.network,
 };

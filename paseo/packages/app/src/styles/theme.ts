@@ -107,6 +107,30 @@ export const baseColors = {
   },
 } as const;
 
+// Spring green #9CC963 (13 Oct 21:02: "spring is my chosen green, but expect it
+// change again") replaces #64A633 (build 35). White on it is ~2:1, so text and icons on it are the
+// dark ink #2B3318 (onAccent). To change the green again, edit DINO_GREEN.accent (and onAccent if
+// the ink must change); the themes below only reference these.
+// Before: green #64A633 (13 Oct 20:26, sampled from his screenshot: "swap all the
+// green for this green instead") replaced #84983F in every place below, white on it (build 35).
+// Dark dino green (13 Oct 20:03: "use the dark dino green everywhere instead"): the
+// accent, accentText, accentBright and success greens are the art's outline green #84983F in every
+// theme, with white on it. In light mode #84983F is 3.2:1 on white (kept as asked).
+// The body green #C7D08E stays only on the dino sprite. Before that change:
+// Dino green (13 Oct): the Paseo accent is the light green of the dino art's body. It is
+// pale, so anything drawn on it uses the art's dark eye/text colour (ink), and where the accent is
+// itself the foreground on a light surface (text, outlines, dots) it takes `text`, a darker step of
+// the art's outline green (#84983F, 3.2:1 on white) that reaches 5.7:1 on white, like the old
+// #20744A. On dark surfaces the body green is the foreground as is (10.6:1 on #181B1A).
+export const DINO_GREEN = {
+  body: "#C7D08E",
+  outline: "#84983F",
+  accent: "#9CC963",
+  ink: "#2B3318",
+  onAccent: "#2B3318",
+  text: "#5E6C2D",
+} as const;
+
 // Diff colors — the +/- inside a diff view, where the color *is* the signal and has to
 // survive being scanned line by line, so it stays saturated. Light uses muted tones, dark
 // uses the brighter palette values.
@@ -233,6 +257,8 @@ export interface LightThemeConfig {
   accent: string;
   accentBright: string;
   accentForeground?: string;
+  /** The accent as a foreground on the theme's surfaces (text, outlines, dots). Default: accent. */
+  accentText?: string;
   primary: string;
   primaryForeground: string;
   destructive: string;
@@ -282,11 +308,12 @@ export function buildLightSemanticColors(tint: LightThemeConfig) {
     accent: tint.accent,
     accentBright: tint.accentBright,
     accentForeground: tint.accentForeground ?? tint.surface0,
+    accentText: tint.accentText ?? tint.accent,
 
     destructive: tint.destructive,
     destructiveForeground: tint.surface0,
     success: tint.accent,
-    successForeground: tint.surface0,
+    successForeground: tint.accentForeground ?? tint.surface0,
 
     background: tint.surface0,
     popover: tint.surface0,
@@ -333,9 +360,10 @@ const lightSemanticColors = buildLightSemanticColors({
   foregroundExtraMuted: "#a1a1aa",
   border: "#e4e4e7",
   borderAccent: "#ececf1",
-  accent: "#20744A",
-  accentBright: "#239956",
-  accentForeground: "#ffffff",
+  accent: DINO_GREEN.accent,
+  accentBright: DINO_GREEN.accent,
+  accentForeground: DINO_GREEN.onAccent,
+  accentText: DINO_GREEN.accent,
   primary: "#18181b",
   primaryForeground: "#fafafa",
   destructive: "#b04138",
@@ -363,6 +391,8 @@ export interface DarkThemeConfig {
   accent: string;
   accentBright: string;
   accentForeground?: string;
+  /** The accent as a foreground on the theme's surfaces (text, outlines, dots). Default: accent. */
+  accentText?: string;
   destructive: string;
   terminalBlack: string;
   terminalBrightBlack: string;
@@ -413,11 +443,12 @@ export function buildDarkSemanticColors(tint: DarkThemeConfig) {
     accent: tint.accent,
     accentBright: tint.accentBright,
     accentForeground: tint.accentForeground ?? "#ffffff",
+    accentText: tint.accentText ?? tint.accent,
 
     destructive: tint.destructive,
     destructiveForeground: "#ffffff",
     success: tint.accent,
-    successForeground: "#ffffff",
+    successForeground: tint.accentForeground ?? "#ffffff",
 
     // Legacy aliases (for gradual migration)
     background: tint.surface0,
@@ -469,8 +500,9 @@ const paseoDarkColors = buildDarkSemanticColors({
   foregroundExtraMuted: "#717574",
   border: "#252B2A",
   borderAccent: "#2F3534",
-  accent: "#20744A",
-  accentBright: "#7ccba0",
+  accent: DINO_GREEN.accent,
+  accentBright: DINO_GREEN.accent,
+  accentForeground: DINO_GREEN.onAccent,
   destructive: "#c64f43", // warm red, hue ~7 — reads as red (not pink) against the green tint
   terminalBlack: "#141716",
   terminalBrightBlack: "#434645",
@@ -730,8 +762,9 @@ const pureBlackDarkColors = buildDarkSemanticColors({
   foregroundExtraMuted: "#71717a",
   border: "#1c1c1c",
   borderAccent: "#242424",
-  accent: "#20744A",
-  accentBright: "#7ccba0",
+  accent: DINO_GREEN.accent,
+  accentBright: DINO_GREEN.accent,
+  accentForeground: DINO_GREEN.onAccent,
   destructive: "#c44a4a",
   terminalBlack: "#595959",
   terminalBrightBlack: "#8a8a8a",
@@ -791,7 +824,7 @@ export const THEME_OPTIONS = [
     group: "primary",
     unistylesName: "dark",
     theme: darkTheme,
-    swatch: "#2D8B62",
+    swatch: DINO_GREEN.accent,
   },
   { name: "auto", group: "primary" },
   {

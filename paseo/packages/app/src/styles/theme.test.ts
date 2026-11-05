@@ -48,9 +48,10 @@ describe("Pure black theme", () => {
     expect(darkPureBlackTheme.colors.terminal.background).toBe("#000000");
   });
 
-  it("uses Paseo's muted green accent", () => {
-    expect(darkPureBlackTheme.colors.accent).toBe("#20744A");
-    expect(darkPureBlackTheme.colors.accentBright).toBe("#7ccba0");
+  it("uses Paseo's dino green accent", () => {
+    expect(darkPureBlackTheme.colors.accent).toBe("#9CC963");
+    expect(darkPureBlackTheme.colors.accentBright).toBe("#9CC963");
+    expect(darkPureBlackTheme.colors.accentForeground).toBe("#2B3318");
   });
 
   it("derives sidebar interaction surfaces from the surface scale", () => {
@@ -86,7 +87,7 @@ describe("Built-in light theme", () => {
       primary: "#18181b",
       primaryForeground: "#fafafa",
       destructiveForeground: "#ffffff",
-      successForeground: "#ffffff",
+      successForeground: "#2B3318",
       terminal: {
         black: "#1a1a1e",
         brightBlack: "#3f3f46",

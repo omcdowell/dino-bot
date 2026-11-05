@@ -54,6 +54,7 @@ import { TerminalSection } from "@/screens/settings/terminal/terminal-section";
 import { ChatSection } from "@/screens/settings/chat/chat-section";
 import { SidebarNavSection } from "@/screens/settings/sidebar/sidebar-nav-section";
 import { SendingSection } from "@/screens/settings/general/sending-section";
+import { MeteredNetworkSection } from "@/screens/settings/general/metered-network-section";
 import {
   useAppSettings,
   useSettings,
@@ -90,10 +91,18 @@ import { IntegrationsSection } from "@/desktop/components/integrations-section";
 import { isElectronRuntime } from "@/desktop/host";
 import { useDesktopAppUpdater } from "@/desktop/updates/use-desktop-app-updater";
 import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
-import { resolveAppVersion } from "@/utils/app-version";
+import { formatHostVersionLabel } from "@/utils/display-version";
+import {
+  resolveAppVersion,
+  resolveDisplayVersion,
+  resolveNativeBuildNumber,
+} from "@/utils/app-version";
+import { formatAppVersionLabel } from "@/utils/app-version-label";
 import { openChangelog } from "@/changelog";
+import { RELEASE_POLICY } from "@/constants/flavour";
 import { useAppDiagnosticStore } from "@/diagnostics/store";
 import { settingsStyles } from "@/styles/settings";
+import { LicencesRow } from "@/licences/licences-row";
 import { THINKING_TONE_NATIVE_PCM_BASE64 } from "@/utils/thinking-tone.native-pcm";
 import { useVoiceAudioEngineOptional } from "@/contexts/voice-context";
 import {
@@ -132,7 +141,7 @@ import {
   type SettingsSectionSlug,
 } from "@/utils/host-routes";
 import { useLastWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
-import { returnFromSettings, type SettingsView } from "@/navigation/settings-navigation";
+import { useReturnFromSettings, type SettingsView } from "@/navigation/settings-navigation";
 import { isNative, isWeb } from "@/constants/platform";
 
 // ---------------------------------------------------------------------------
@@ -145,6 +154,8 @@ interface SidebarSectionItem {
   icon: ComponentType<{ size: number; color: string; strokeWidth?: number }>;
   desktopOnly?: boolean;
   webOnly?: boolean;
+  /** Hidden unless the release policy allows it (public flavour drops the `paseo` CLI installer). */
+  policyGate?: "desktopCliInstall";
   /** The page body, for pages that need nothing from the settings screen. */
   Content?: ComponentType;
 }
@@ -196,6 +207,7 @@ const SIDEBAR_SECTION_ITEMS: SidebarSectionItem[] = [
     labelKey: "settings.sections.integrations",
     icon: Puzzle,
     desktopOnly: true,
+    policyGate: "desktopCliInstall",
     Content: IntegrationsSection,
   },
   {
@@ -217,7 +229,11 @@ const SIDEBAR_SECTION_ITEMS: SidebarSectionItem[] = [
 ];
 
 function isSectionAvailable(item: SidebarSectionItem, isDesktopApp: boolean): boolean {
-  return (!item.desktopOnly || isDesktopApp) && (!item.webOnly || isWeb);
+  return (
+    (!item.desktopOnly || isDesktopApp) &&
+    (!item.webOnly || isWeb) &&
+    (!item.policyGate || RELEASE_POLICY[item.policyGate])
+  );
 }
 
 interface HostSectionItem {
@@ -463,8 +479,9 @@ function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSection
             </View>
             <Text style={styles.aboutValue}>{appVersionText}</Text>
           </View>
-          <WhatsNewRow />
-          {isDesktopApp ? <DesktopAppUpdateRow /> : null}
+          {RELEASE_POLICY.upstreamChangelog ? <WhatsNewRow /> : null}
+          <LicencesRow />
+          {isDesktopApp && RELEASE_POLICY.desktopAppUpdates ? <DesktopAppUpdateRow /> : null}
         </View>
       </SettingsSection>
       <ConnectedHostsSection clientVersion={appVersion} />
@@ -544,6 +561,10 @@ function HostVersionRow({
   const daemonVersion = useSessionStore(
     (state) => state.sessions[host.serverId]?.serverInfo?.version ?? null,
   );
+  // DinoBot: what the row shows ("DinoBot 0.1.3"); the mismatch check keeps the engine version.
+  const hostVersionLabel = useSessionStore((state) =>
+    formatHostVersionLabel(state.sessions[host.serverId]?.serverInfo),
+  );
 
   const rowStyle = useMemo(
     () => [settingsStyles.row, showBorder && settingsStyles.rowBorder],
@@ -558,8 +579,8 @@ function HostVersionRow({
   let valueText: string;
   if (!isConnected) {
     valueText = t("settings.about.offline");
-  } else if (normalizedHost) {
-    valueText = formatVersionWithPrefix(normalizedHost);
+  } else if (hostVersionLabel) {
+    valueText = hostVersionLabel;
   } else {
     valueText = "—";
   }
@@ -1092,7 +1113,9 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   const lastOpenedAddHostIntentRef = useRef<string | null>(null);
   const isDesktopApp = isElectronRuntime();
   const appVersion = resolveAppVersion();
-  const appVersionText = formatVersionWithPrefix(appVersion);
+  // About row: the display version (DinoBot's in the public build); appVersion (engine) stays for
+  // the host version rows.
+  const appVersionText = formatAppVersionLabel(resolveDisplayVersion(), resolveNativeBuildNumber());
   const isCompactLayout = useIsCompactFormFactor();
   const insets = useSafeAreaInsets();
   const insetBottomStyle = useMemo(() => ({ paddingBottom: insets.bottom }), [insets.bottom]);
@@ -1296,13 +1319,14 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     }
   }, [isCompactLayout, router]);
 
+  const leaveSettings = useReturnFromSettings();
   const handleBackFromDetail = useCallback(() => {
-    returnFromSettings(view);
-  }, [view]);
+    leaveSettings(view);
+  }, [leaveSettings, view]);
 
   const handleBackToWorkspace = useCallback(() => {
-    returnFromSettings({ kind: "root" });
-  }, []);
+    leaveSettings({ kind: "root" });
+  }, [leaveSettings]);
 
   const installedPlugins = useInstalledPlugins();
   const detailTitle = ((): string | undefined => {
@@ -1359,6 +1383,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
             <>
               <GeneralSection settings={settings} handleLanguageChange={handleLanguageChange} />
               <SendingSection />
+              {isDesktopApp ? <MeteredNetworkSection /> : null}
               {isDesktopApp ? <OpenLocationSection /> : null}
             </>
           );

@@ -377,6 +377,11 @@ export interface PaseoAgentHandle {
    */
   commands(options?: PaseoAgentCommandsOptions): Promise<PaseoAgentCommandsResult>;
   archive(): Promise<{ archivedAt: string }>;
+  /**
+   * Merges `labels` into the agent's labels. A stored (closed) agent is updated on disk and is
+   * not resumed.
+   */
+  setLabels(labels: Record<string, string>): Promise<void>;
   detach(): Promise<void>;
   subscribe(handler: (update: PaseoAgentUpdate) => void): () => void;
 }
@@ -978,6 +983,7 @@ function createAgentHandleFactory(
         }
         return result;
       },
+      setLabels: (labels) => daemonClient.updateAgent(id, { labels }),
       detach: async () => {
         await daemonClient.detachAgent(id);
       },

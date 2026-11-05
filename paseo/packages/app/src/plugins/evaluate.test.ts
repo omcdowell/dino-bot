@@ -184,6 +184,74 @@ describe("evaluatePluginClientBundle", () => {
     ).toThrow("Timeline transformer bad-query has invalid item type: settled");
   });
 
+  it("keeps a screen's mobileHome flag only when it is true", () => {
+    const plugin = evaluatePluginClientBundle(
+      "example",
+      bundle(`
+        function Screen() { return null; }
+        plugin.addScreen({ id: "home", title: "Bots", Component: Screen, mobileHome: true });
+        plugin.addScreen({ id: "other", title: "Other", Component: Screen, mobileHome: "yes" });
+        plugin.addScreen({ id: "plain", title: "Plain", Component: Screen });
+      `),
+    );
+
+    expect(plugin.surfaces.map((surface) => [surface.id, surface.mobileHome ?? false])).toEqual([
+      ["home", true],
+      ["other", false],
+      ["plain", false],
+    ]);
+  });
+
+  it("keeps a screen's mobileFloatingHeader components and drops anything else", () => {
+    const plugin = evaluatePluginClientBundle(
+      "example",
+      bundle(`
+        function Screen() { return null; }
+        function Avatar() { return null; }
+        function Controls() { return null; }
+        plugin.addScreen({ id: "group", title: "G", Component: Screen,
+          mobileFloatingHeader: { Avatar, Controls } });
+        plugin.addScreen({ id: "title-only", title: "T", Component: Screen,
+          mobileFloatingHeader: { Avatar: "nope" } });
+        plugin.addScreen({ id: "bad", title: "B", Component: Screen, mobileFloatingHeader: true });
+        plugin.addScreen({ id: "plain", title: "P", Component: Screen });
+      `),
+    );
+
+    const [group, titleOnly, bad, plain] = plugin.surfaces;
+    expect(group?.mobileFloatingHeader?.Avatar).toBeTypeOf("function");
+    expect(group?.mobileFloatingHeader?.Controls).toBeTypeOf("function");
+    expect(titleOnly?.mobileFloatingHeader).toEqual({});
+    expect(bad?.mobileFloatingHeader).toBeUndefined();
+    expect(plain?.mobileFloatingHeader).toBeUndefined();
+  });
+
+  it("keeps well-formed mobileHomeMenu items and drops the rest", () => {
+    const plugin = evaluatePluginClientBundle(
+      "example",
+      bundle(`
+        function Screen() { return null; }
+        const onSelect = () => {};
+        plugin.addScreen({ id: "home", title: "H", Component: Screen, mobileHome: true,
+          mobileHomeMenu: { title: " Bots ", items: [
+            { id: "new-bot", title: "New bot", icon: "Bot", onSelect },
+            { id: "", title: "No id", icon: "Bot", onSelect },
+            { id: "no-handler", title: "X", icon: "Bot" },
+            null,
+          ] } });
+        plugin.addScreen({ id: "empty", title: "E", Component: Screen, mobileHomeMenu: { items: [] } });
+        plugin.addScreen({ id: "bad", title: "B", Component: Screen, mobileHomeMenu: true });
+      `),
+    );
+
+    const [home, empty, bad] = plugin.surfaces;
+    expect(home?.mobileHomeMenu?.title).toBe("Bots");
+    expect(home?.mobileHomeMenu?.items.map((item) => item.id)).toEqual(["new-bot"]);
+    expect(home?.mobileHomeMenu?.items[0]?.onSelect).toBeTypeOf("function");
+    expect(empty?.mobileHomeMenu).toBeUndefined();
+    expect(bad?.mobileHomeMenu).toBeUndefined();
+  });
+
   it("collects screens and sidebar header and footer items", () => {
     const plugin = evaluatePluginClientBundle(
       "example",
@@ -602,6 +670,40 @@ describe("evaluatePluginClientBundle", () => {
     expect(element).toMatchObject({ props: { size: 18, color: "#123456" } });
   });
 
+  it("provides pickImage and haptic through @getpaseo/plugin/client/react-native", () => {
+    const plugin = evaluatePluginClientBundle(
+      "example",
+      `(function(require) {
+        const { pickImage, haptic } = require("@getpaseo/plugin/client/react-native");
+        const module = { exports: {} };
+        module.exports.default = function(plugin) {
+          plugin.addScreen({ id: typeof pickImage === "function" && typeof haptic === "function" ? "ok" : "missing",
+            title: "T", Component: function Screen() { return null; } });
+          return function() {};
+        };
+        return module.exports;
+      })`,
+    );
+    expect(plugin.surfaces[0]?.id).toBe("ok");
+  });
+
+  it("provides SvgXml through @getpaseo/plugin/client/react-native", () => {
+    const plugin = evaluatePluginClientBundle(
+      "example",
+      `(function(require) {
+        const { SvgXml } = require("@getpaseo/plugin/client/react-native");
+        const module = { exports: {} };
+        module.exports.default = function(plugin) {
+          plugin.addScreen({ id: typeof SvgXml === "function" ? "ok" : "missing",
+            title: "T", Component: function Screen() { return null; } });
+          return function() {};
+        };
+        return module.exports;
+      })`,
+    );
+    expect(plugin.surfaces[0]?.id).toBe("ok");
+  });
+
   it("provides Paseo UI through @getpaseo/plugin/client/react-native", () => {
     const plugin = evaluatePluginClientBundle(
       "example",
@@ -629,8 +731,9 @@ describe("evaluatePluginClientBundle", () => {
         `(function(require) {
       const shared = require("@getpaseo/plugin");
       const client = require("@getpaseo/plugin/client");
-      const { ExternalLink } = require("@getpaseo/plugin/client/ui");
+      const { ExternalLink, Markdown } = require("@getpaseo/plugin/client/ui");
       if (typeof ExternalLink !== "function") throw new Error("ExternalLink");
+      if (typeof Markdown !== "function") throw new Error("Markdown");
       for (const name of ["usePaseo", "useRpc", "useSettings", "useAgent", "useWorkspace", "openExternalUrl"]) {
         if (name in shared || typeof client[name] !== "function") throw new Error(name);
       }

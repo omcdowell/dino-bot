@@ -311,6 +311,32 @@ export type ToolCallDetail =
       output: unknown;
     };
 
+/**
+ * An image in a chat, by reference. The bytes stay on the daemon (content-addressed by
+ * `id`, the sha256 of the original); clients fetch a small thumbnail with
+ * `agent.image.thumbnail.request` and the original only when the user opens it.
+ */
+export interface AgentTimelineImage {
+  /** sha256 (hex) of the original bytes. */
+  id: string;
+  mimeType: string;
+  /** Daemon-local absolute path of the original, readable with the file read RPC. */
+  source: string;
+  byteSize?: number;
+  /** Display size after EXIF orientation, when the daemon could read the header. */
+  width?: number;
+  height?: number;
+  fileName?: string;
+  /**
+   * Base64 ThumbHash (~25 bytes): clients render a blurred preview at full size before any
+   * download. Present once the daemon has prepared the image (history rows; live rows only if
+   * preparation finished first).
+   */
+  thumbhash?: string;
+  /** The display image clients download first (chat width, JPEG for HEIC). */
+  display?: { width: number; height: number; byteSize: number };
+}
+
 interface ToolCallBase {
   agentMessage?: AgentMessage;
   [key: string]: unknown;
@@ -319,6 +345,8 @@ interface ToolCallBase {
   name: string;
   detail: ToolCallDetail;
   metadata?: Record<string, unknown>;
+  /** Images the tool returned (e.g. `read` on a PNG). */
+  images?: AgentTimelineImage[];
 }
 
 type ToolCallRunningTimelineItem = ToolCallBase & {
@@ -373,7 +401,13 @@ export interface AgentTaskItem {
 }
 
 export type AgentTimelineItem =
-  | { type: "user_message"; text: string; messageId?: string; clientMessageId?: string }
+  | {
+      type: "user_message";
+      text: string;
+      messageId?: string;
+      clientMessageId?: string;
+      images?: AgentTimelineImage[];
+    }
   | { type: "assistant_message"; text: string; messageId?: string }
   | { type: "reasoning"; text: string }
   | ToolCallTimelineItem

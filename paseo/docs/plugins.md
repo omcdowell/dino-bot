@@ -125,9 +125,9 @@ selection is unavailable for registry installs; install an explicit source to se
 
 Registry overviews are untrusted author content, even before installation. Render them with
 `@getpaseo/protocol/plugin-overview`: no raw HTML, HTTPS-only links and images, no relative
-URLs, and isolated external links. The website adapter and corpus tests live in
-`packages/website/src/plugins/overview.tsx` and `overview.test.tsx`; the reusable corpus is
-`packages/protocol/tests/fixtures/plugin-overview.json`. A future app overview must share
+URLs, and isolated external links. The policy tests live in
+`packages/protocol/src/plugin-overview.test.ts` (the upstream website adapter is not in the
+DinoBot fork); the reusable corpus is `packages/protocol/tests/fixtures/plugin-overview.json`. A future app overview must share
 this policy. Installed-plugin descriptions in the app remain plain text.
 
 Use `host/owner/slug` for a registry at `https://host`, or set
@@ -369,6 +369,14 @@ grace. During daemon startup, plugin sessions may connect while application WebS
 paused; the daemon accepts clients only after configured plugins have settled and the initial
 catalog is complete.
 
+The app caches each host's client bundles on the device (`plugins/plugin-cache.ts`). At start-up it
+installs them before the host connects, with the plugin queries marked `meta: { persist: true }`;
+the live catalog then keeps that installation when the bundle is unchanged, or replaces it and starts
+the replacement from the same data. Installs stay through a disconnect. A catalog request sends the
+hashes of the bundles the app has (`knownBundles`); the daemon answers those still current with an
+empty bundle and `clientBundleUnchanged`, so a connect does not resend them. Older daemons ignore the
+field and send every bundle.
+
 When the same plugin contribution exists on multiple hosts, Paseo shows it once in the sidebar and
 adds a host picker to the screen header. The selected host supplies the bundle, RPC transport, and
 query cache. Explicit SDK targets follow the [host API contract](../public-docs/plugins/reference.md#discover-hosts-and-target-another-host).
@@ -496,6 +504,12 @@ SVG or URL.
 Register a usage source from `index.server.ts` with `server.registerUsageSource()`. Import `UsageSourceRegistration` and normalization helpers from `@getpaseo/plugin/server/usage`. The plugin owns account discovery, harness labels, and credential-store reads; the daemon owns account grouping and the fetch cache. Agent popovers use only the agent's own login. The host-wide Usage modal falls back across an account's logins; any success shows usage only, and all failures show every login's labeled error and remedy. Follow the [usage source discovery contract](../public-docs/plugins/reference.md#usage-sources). The resolved launch environment crosses into the trusted, unsandboxed plugin subprocess for session discovery. Usage queries never run lifecycle hooks. Inputs are validated in the plugin process and remain daemon-side. `icon` uses the same sanitized SVG file rules as provider icons.
 
 The daemon calls discovery for `usage.list_reports`; the client gates this RPC on `server_info.features.usageSources`. The old `provider.usage.list` RPC maps discovered reports for older clients.
+
+## Push events to the client
+
+A plugin's server can push data instead of having its client poll. On hosts with `server_info.features.pluginEvents`, `server.emit(name, data)` sends a JSON value (at most 256 KiB, name `[a-z][a-z0-9._-]*`) to the plugin's client on every app that is listening; elsewhere `server.emit` is missing, so check for it. The app listens once per host (a `plugin.event` session-event subscription), and only while it is connected.
+
+On the client, `client.events` (missing on older apps) has `on(name, listener)`, `live` and `onLiveChange(listener)`. `live` is true while the host pushes to this app. Events are not replayed: refetch when `live` turns true, and keep polling (slowly, as a safety net) while it is false.
 
 ## Contribute sidebar items
 

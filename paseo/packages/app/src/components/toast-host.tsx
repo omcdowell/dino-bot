@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFloatingHeaderInset } from "@/components/headers/floating-header-inset";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { Theme } from "@/styles/theme";
 import { useTranslation } from "react-i18next";
@@ -186,7 +187,11 @@ export function ToastViewport({
 
   const headerHeight = isMobile ? HEADER_INNER_HEIGHT_MOBILE : HEADER_INNER_HEIGHT;
   const headerTopPadding = isMobile ? HEADER_TOP_PADDING_MOBILE : 0;
-  const topOffset = placement === "app-shell" ? insets.top + headerTopPadding + headerHeight : 0;
+  // A panel toast sits at the top of its panel, which on a phone may be under the floating
+  // header's glass controls.
+  const floatingHeaderInset = useFloatingHeaderInset();
+  const topOffset =
+    placement === "app-shell" ? insets.top + headerTopPadding + headerHeight : floatingHeaderInset;
 
   const content = (
     <View

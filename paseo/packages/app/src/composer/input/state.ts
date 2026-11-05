@@ -5,6 +5,33 @@ import type { MessageInputKeyboardActionKind } from "@/keyboard/actions";
 
 export type SendBehavior = ActiveTurnBehavior | "queue";
 
+/** Agent label that overrides the send-behaviour setting for one agent (e.g. bot chats queue). */
+export const SEND_BEHAVIOR_LABEL = "paseo.send-behavior";
+
+export function resolveAgentSendBehavior(
+  sendBehavior: SendBehavior,
+  label: string | undefined,
+): SendBehavior {
+  return label === "queue" || label === "steer" || label === "interrupt" ? label : sendBehavior;
+}
+
+/**
+ * Turn behaviour for a message sent from the composer (not via the queue button):
+ * - "interrupt" setting: interrupt;
+ * - "queue" setting with the agent idle: queue, so a turn that starts meanwhile does not get
+ *   interrupted (the daemon starts it at once when idle);
+ * - otherwise steer: a "send now" while the agent works folds into the running turn.
+ */
+export function resolveSubmitTurnBehavior(input: {
+  sendBehavior: SendBehavior;
+  isAgentRunning: boolean;
+  daemonQueue: boolean;
+}): ActiveTurnBehavior {
+  if (input.sendBehavior === "interrupt") return "interrupt";
+  if (input.sendBehavior === "queue" && !input.isAgentRunning && input.daemonQueue) return "queue";
+  return "steer";
+}
+
 export function resolveActiveSendBehavior(
   sendBehavior: SendBehavior,
   hasPendingPermission: boolean,

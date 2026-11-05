@@ -67,7 +67,9 @@ export function estimateStreamItemHeight({
         }) ?? 220
       );
     case "tool_call":
-      return COLLAPSED_TOOL_SEQUENCE_ROW_HEIGHT_ESTIMATE;
+      return item.payload.source === "agent" && (item.payload.data.images?.length ?? 0) > 0
+        ? COLLAPSED_TOOL_SEQUENCE_ROW_HEIGHT_ESTIMATE + 216
+        : COLLAPSED_TOOL_SEQUENCE_ROW_HEIGHT_ESTIMATE;
     case "thought":
       return COLLAPSED_TOOL_SEQUENCE_ROW_HEIGHT_ESTIMATE;
     case "todo_list":

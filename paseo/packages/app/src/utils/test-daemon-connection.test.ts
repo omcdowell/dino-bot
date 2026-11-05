@@ -186,6 +186,48 @@ describe("test-daemon-connection connectToDaemon", () => {
     expect(probe.createdConfigs()[0]?.password).toBe("shared-secret");
   });
 
+  it("public build: refuses a non-Tailscale address before opening a socket or sending the password", async () => {
+    const { connectToDaemon } = await import("./test-daemon-connection");
+    const policy = { tailnetOnly: true };
+    for (const endpoint of [
+      "192.168.1.23:6767",
+      "10.0.0.5:6767",
+      "macbook.local:6767",
+      "lan:6767",
+      "203.0.113.9:6767",
+      "evil.example.com:6767",
+      "100.128.0.1:6767",
+    ]) {
+      await expect(
+        connectToDaemon(
+          { id: `direct:${endpoint}`, type: "directTcp", endpoint, useTls: true },
+          { password: "shared-secret", policy },
+          probe.deps,
+        ),
+      ).rejects.toThrow(/only through Tailscale/);
+    }
+    expect(probe.createdClients).toHaveLength(0);
+    expect(probe.clientIdsRequested).toBe(0);
+
+    for (const endpoint of [
+      "box.tail1234.ts.net:6767",
+      "100.64.0.11:6767",
+      "127.0.0.1:6767",
+      "localhost:6767",
+      "[::1]:6767",
+    ]) {
+      const result = await connectToDaemon(
+        { id: `direct:${endpoint}`, type: "directTcp", endpoint },
+        { password: "shared-secret", policy },
+        probe.deps,
+      );
+      await result.client.close();
+    }
+    expect(probe.createdConfigs().map((config) => config.password)).toEqual(
+      Array(5).fill("shared-secret"),
+    );
+  });
+
   it("passes performance tracing into the connected client", async () => {
     const { connectToDaemon } = await import("./test-daemon-connection");
     const trace = {

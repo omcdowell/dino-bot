@@ -5,7 +5,10 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type pino from "pino";
 
-import { getSherpaOnnxModelSpec, type SherpaOnnxModelId } from "./model-catalog.js";
+import {
+  getSherpaOnnxModelSpec,
+  type SherpaOnnxModelId,
+} from "./model-catalog.js";
 import { spawnProcess } from "../../../../../utils/spawn.js";
 
 export interface EnsureSherpaOnnxModelOptions {
@@ -15,12 +18,18 @@ export interface EnsureSherpaOnnxModelOptions {
   signal?: AbortSignal;
 }
 
-export function getSherpaOnnxModelDir(modelsDir: string, modelId: SherpaOnnxModelId): string {
+export function getSherpaOnnxModelDir(
+  modelsDir: string,
+  modelId: SherpaOnnxModelId
+): string {
   const spec = getSherpaOnnxModelSpec(modelId);
   return path.join(modelsDir, spec.extractedDir);
 }
 
-async function hasRequiredFiles(modelDir: string, requiredFiles: string[]): Promise<boolean> {
+async function hasRequiredFiles(
+  modelDir: string,
+  requiredFiles: string[]
+): Promise<boolean> {
   const results = await Promise.all(
     requiredFiles.map(async (rel) => {
       const abs = path.join(modelDir, rel);
@@ -33,7 +42,7 @@ async function hasRequiredFiles(modelDir: string, requiredFiles: string[]): Prom
       } catch {
         return false;
       }
-    }),
+    })
   );
   return results.every((present) => present);
 }
@@ -48,7 +57,9 @@ async function downloadToFile(options: DownloadToFileOptions): Promise<void> {
   const { url, outputPath } = options;
   const res = await fetch(url, { signal: options.signal });
   if (!res.ok) {
-    throw new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
+    throw new Error(
+      `Failed to download ${url}: ${res.status} ${res.statusText}`
+    );
   }
   if (!res.body) {
     throw new Error(`Failed to download ${url}: missing response body`);
@@ -62,7 +73,9 @@ async function downloadToFile(options: DownloadToFileOptions): Promise<void> {
   const nodeStream = Readable.fromWeb(res.body as any);
 
   try {
-    await pipeline(nodeStream, createWriteStream(tmpPath), { signal: options.signal });
+    await pipeline(nodeStream, createWriteStream(tmpPath), {
+      signal: options.signal,
+    });
     await rename(tmpPath, outputPath);
   } catch (error) {
     await rm(tmpPath, { force: true }).catch(() => undefined);
@@ -70,22 +83,47 @@ async function downloadToFile(options: DownloadToFileOptions): Promise<void> {
   }
 }
 
+/**
+ * A plain reason for a failed `tar` run. GNU tar (Linux) unpacks .tar.bz2 through an external
+ * `bzip2` program, which minimal installs lack ("bzip2: Cannot exec"); macOS's bsdtar has it built
+ * in. Without this the user only saw "tar exited with code 2".
+ */
+export function describeTarFailure(
+  code: number | null,
+  stderr: string,
+  archivePath: string
+): string {
+  const tail = stderr.trim().split("\n").slice(-2).join(" ").slice(0, 300);
+  if (
+    /\.(tar\.)?bz2$/.test(archivePath) &&
+    /bzip2/i.test(stderr) &&
+    /exec|not found|no such file/i.test(stderr)
+  ) {
+    return "bzip2 is not installed, so the voice models cannot be unpacked. Install it (Debian/Ubuntu: sudo apt install bzip2; Fedora: sudo dnf install bzip2), then restart the daemon.";
+  }
+  return `tar exited with code ${code}${tail ? `: ${tail}` : ""}`;
+}
+
 async function extractTarArchive(
   archivePath: string,
   destDir: string,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<void> {
   await mkdir(destDir, { recursive: true });
 
   await new Promise<void>((resolve, reject) => {
     const child = spawnProcess("tar", ["xf", archivePath, "-C", destDir], {
-      stdio: "inherit",
+      stdio: ["ignore", "ignore", "pipe"],
       signal,
+    });
+    let stderr = "";
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString("utf8")).slice(-4096);
     });
     child.on("error", reject);
     child.on("exit", (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`tar exited with code ${code}`));
+      else reject(new Error(describeTarFailure(code, stderr, archivePath)));
     });
   });
 }
@@ -98,13 +136,16 @@ interface SherpaOnnxModelPaths {
 
 function getSherpaOnnxModelPaths(
   modelsDir: string,
-  modelId: SherpaOnnxModelId,
+  modelId: SherpaOnnxModelId
 ): SherpaOnnxModelPaths {
   const spec = getSherpaOnnxModelSpec(modelId);
   const downloadsDir = path.join(modelsDir, ".downloads");
   return {
     modelDir: path.join(modelsDir, spec.extractedDir),
-    archivePath: path.join(downloadsDir, path.basename(new URL(spec.archiveUrl).pathname)),
+    archivePath: path.join(
+      downloadsDir,
+      path.basename(new URL(spec.archiveUrl).pathname)
+    ),
     extractionDir: path.join(downloadsDir, `${spec.extractedDir}.extracting`),
   };
 }
@@ -113,12 +154,13 @@ function getSherpaOnnxModelPaths(
 // still in .downloads did not finish installing and may hold truncated files.
 export async function isSherpaOnnxModelInstalled(
   modelsDir: string,
-  modelId: SherpaOnnxModelId,
+  modelId: SherpaOnnxModelId
 ): Promise<boolean> {
   const spec = getSherpaOnnxModelSpec(modelId);
   const { modelDir, archivePath } = getSherpaOnnxModelPaths(modelsDir, modelId);
   return (
-    !(await isNonEmptyFile(archivePath)) && (await hasRequiredFiles(modelDir, spec.requiredFiles))
+    !(await isNonEmptyFile(archivePath)) &&
+    (await hasRequiredFiles(modelDir, spec.requiredFiles))
   );
 }
 
@@ -132,7 +174,7 @@ async function isNonEmptyFile(filePath: string): Promise<boolean> {
 }
 
 export async function ensureSherpaOnnxModel(
-  options: EnsureSherpaOnnxModelOptions,
+  options: EnsureSherpaOnnxModelOptions
 ): Promise<string> {
   const logger = options.logger.child({
     module: "speech",
@@ -144,7 +186,7 @@ export async function ensureSherpaOnnxModel(
   const spec = getSherpaOnnxModelSpec(options.modelId);
   const { modelDir, archivePath, extractionDir } = getSherpaOnnxModelPaths(
     options.modelsDir,
-    options.modelId,
+    options.modelId
   );
   if (await isSherpaOnnxModelInstalled(options.modelsDir, options.modelId)) {
     return modelDir;
@@ -167,7 +209,7 @@ export async function ensureSherpaOnnxModel(
         archivePath,
         modelDir,
       },
-      "Extracting model archive",
+      "Extracting model archive"
     );
     // Extract beside the archive and move into place once complete, so an interrupted
     // extraction never leaves partial files at modelDir.
@@ -181,11 +223,13 @@ export async function ensureSherpaOnnxModel(
           modelId: options.modelId,
           modelDir,
         },
-        "Verifying downloaded model files",
+        "Verifying downloaded model files"
       );
       if (!(await hasRequiredFiles(extractedModelDir, spec.requiredFiles))) {
         throw new Error(
-          `Downloaded and extracted ${path.basename(archivePath)}, but required files are missing.`,
+          `Downloaded and extracted ${path.basename(
+            archivePath
+          )}, but required files are missing.`
         );
       }
 
@@ -194,7 +238,7 @@ export async function ensureSherpaOnnxModel(
           modelId: options.modelId,
           archivePath,
         },
-        "Finalizing model artifacts",
+        "Finalizing model artifacts"
       );
       // A retained archive marks the model as not installed, so remove it before the model
       // is moved into place. If removal fails, nothing at modelDir looks installed.
@@ -229,7 +273,7 @@ export async function ensureSherpaOnnxModels(options: {
         signal: options.signal,
       });
       return [id, modelPath] as [SherpaOnnxModelId, string];
-    }),
+    })
   );
   // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
   return Object.fromEntries(entries) as Record<SherpaOnnxModelId, string>;

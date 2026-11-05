@@ -42,3 +42,22 @@ export const toError = (error: unknown): Error => {
   }
   return new Error(i18n.t("common.errors.unexpectedDictationError"));
 };
+
+export type InterruptedDictationOutcome = "finalize" | "keep-for-retry" | "discard";
+
+/**
+ * A call, Siri or an alarm took the mic in the middle of a dictation. Stop, and keep what was
+ * said before it: transcribe it now when the daemon is reachable, otherwise hold the audio for
+ * the existing retry. Only a dictation with no audio yet is simply dropped.
+ */
+export function resolveInterruptedDictation(input: {
+  hasCapturedAudio: boolean;
+  canFinalize: boolean;
+}): InterruptedDictationOutcome {
+  if (!input.hasCapturedAudio) {
+    return "discard";
+  }
+  return input.canFinalize ? "finalize" : "keep-for-retry";
+}
+
+export const DICTATION_INTERRUPTED_MESSAGE = "Dictation was interrupted by another audio source.";

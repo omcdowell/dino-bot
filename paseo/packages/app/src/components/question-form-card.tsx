@@ -100,15 +100,21 @@ function QuestionOptionRow({
       styles.selectionControl,
       multiSelect ? styles.selectionControlCheckbox : styles.selectionControlRadio,
       {
-        borderColor: isSelected ? theme.colors.accent : theme.colors.foregroundExtraMuted,
+        borderColor: isSelected ? theme.colors.accentText : theme.colors.foregroundExtraMuted,
         backgroundColor: isSelected && multiSelect ? theme.colors.accent : "transparent",
       },
     ],
-    [isSelected, multiSelect, theme.colors.accent, theme.colors.foregroundExtraMuted],
+    [
+      isSelected,
+      multiSelect,
+      theme.colors.accent,
+      theme.colors.accentText,
+      theme.colors.foregroundExtraMuted,
+    ],
   );
   const radioDotStyle = useMemo(
-    () => [styles.selectionRadioDot, { backgroundColor: theme.colors.accent }],
-    [theme.colors.accent],
+    () => [styles.selectionRadioDot, { backgroundColor: theme.colors.accentText }],
+    [theme.colors.accentText],
   );
 
   return (

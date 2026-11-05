@@ -74,3 +74,31 @@ export function pausePlayback() {
 export function resumePlayback() {
   return ExpoTwoWayAudioModule.resumePlayback();
 }
+
+// COMPAT(dictationOpus): added with build 48. An OTA JS update can land on an older binary
+// whose native module lacks these, so callers check `isOpusEncoderAvailable()` first.
+export function isOpusEncoderAvailable(): boolean {
+  return (
+    typeof ExpoTwoWayAudioModule.createOpusEncoder === "function" &&
+    typeof ExpoTwoWayAudioModule.opusEncode === "function"
+  );
+}
+
+/** iOS: AudioToolbox Opus, 16 kHz mono, 20 ms frames. Returns a handle, or -1 if unavailable. */
+export function createOpusEncoder(bitRate: number): number {
+  return ExpoTwoWayAudioModule.createOpusEncoder(bitRate);
+}
+
+/** PCM16LE mono in; len16-framed Opus packets out (empty until a full 20 ms frame is buffered). */
+export function opusEncode(handle: number, pcm: Uint8Array): Uint8Array {
+  return ExpoTwoWayAudioModule.opusEncode(handle, pcm);
+}
+
+/** Pads the last partial frame with silence and returns the remaining packets. */
+export function flushOpusEncoder(handle: number): Uint8Array {
+  return ExpoTwoWayAudioModule.flushOpusEncoder(handle);
+}
+
+export function releaseOpusEncoder(handle: number): void {
+  ExpoTwoWayAudioModule.releaseOpusEncoder(handle);
+}

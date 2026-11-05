@@ -8,6 +8,13 @@ import { usePanelStore } from "@/stores/panel-store";
 import { canBeginMobilePanelGesture, isMobilePanelGestureCurrent } from "./model";
 import { useMobilePanelsRuntime } from "./provider";
 import { resolveMobilePanelGestureIntent } from "./gesture-intent";
+import { leavesTouchToNativeBack } from "@/navigation/mobile-home-stack";
+import {
+  goToMobileHome,
+  useIsChatOverMobileHome,
+  useIsOnMobileHome,
+  useMobileHome,
+} from "@/plugins/mobile-home-runtime";
 
 const MOBILE_WEB_EDGE_SWIPE_WIDTH = 32;
 
@@ -49,12 +56,21 @@ export function useOpenAgentListGesture(enabled: boolean) {
   const { startedRevision, touchStartX, touchStartY } = useGestureState();
   const showMobileAgentList = usePanelStore((state) => state.showMobileAgentList);
   const commit = useRevisionCommit(showMobileAgentList);
+  // Phones with a plugin home: the swipe goes Back to it instead of pulling out the drawer, and
+  // does nothing on the home itself.
+  const mobileHome = useMobileHome();
+  const onMobileHome = useIsOnMobileHome();
+  const swipesHome = mobileHome !== null;
+  const chatOverHome = useIsChatOverMobileHome();
+  const goHome = useCallback(() => {
+    if (mobileHome) goToMobileHome(mobileHome);
+  }, [mobileHome]);
 
   return useMemo(
     () =>
       Gesture.Pan()
         .withRef(leftOpenGestureRef)
-        .enabled(enabled)
+        .enabled(enabled && !(swipesHome && onMobileHome))
         .manualActivation(true)
         .onTouchesDown((event) => {
           const touch = event.changedTouches[0];
@@ -85,6 +101,7 @@ export function useOpenAgentListGesture(enabled: boolean) {
             !canBeginMobilePanelGesture(motionState.value, "agent", position.value) ||
             horizontalScroll?.isAnyScrolledRight.value ||
             (isWeb && touchStartX.value > MOBILE_WEB_EDGE_SWIPE_WIDTH) ||
+            leavesTouchToNativeBack(touchStartX.value, chatOverHome) ||
             panIntent === "fail"
           ) {
             stateManager.fail();
@@ -98,10 +115,16 @@ export function useOpenAgentListGesture(enabled: boolean) {
           startedRevision.value = beginGesture({ origin: "agent" });
         })
         .onUpdate((event) => {
+          if (swipesHome) return;
           updateGesture(startedRevision.value, -event.translationX / windowWidth);
         })
         .onEnd((event, success) => {
           const shouldOpen = event.translationX > windowWidth / 3 || event.velocityX > 500;
+          if (swipesHome) {
+            finishGesture({ startedRevision: startedRevision.value, target: "agent", success });
+            if (success && shouldOpen) scheduleOnRN(goHome);
+            return;
+          }
           const result = finishGesture({
             startedRevision: startedRevision.value,
             target: shouldOpen ? "agent-list" : "agent",
@@ -112,8 +135,12 @@ export function useOpenAgentListGesture(enabled: boolean) {
           }
         }),
     [
+      chatOverHome,
       commit,
       enabled,
+      goHome,
+      onMobileHome,
+      swipesHome,
       beginGesture,
       finishGesture,
       horizontalScroll?.isAnyScrolledRight,

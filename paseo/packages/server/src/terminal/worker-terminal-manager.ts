@@ -92,6 +92,8 @@ interface TerminalWorkerProcess {
 interface WorkerTerminalManagerOptions {
   requestTimeoutMs?: number;
   forkWorker?: () => TerminalWorkerProcess;
+  /** "lazy" (default): fork on the first request. "eager": fork now. */
+  startWorker?: "lazy" | "eager";
   getTerminalActivityUrl?: () => string | null;
 }
 
@@ -150,7 +152,9 @@ function forkTerminalWorker(): TerminalWorkerProcess {
 export function createWorkerTerminalManager(
   managerOptions: WorkerTerminalManagerOptions = {},
 ): TerminalManager {
-  const worker = managerOptions.forkWorker ? managerOptions.forkWorker() : forkTerminalWorker();
+  // Forked on the first request: a daemon nobody opens a terminal on never pays for the
+  // worker process (~25 MB PSS, ~75 MB RSS) or its node-pty and xterm state.
+  let worker: TerminalWorkerProcess | null = null;
   const requestTimeoutMs = managerOptions.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
   const pendingRequests = new Map<string, PendingRequest>();
   const recordsById = new Map<string, WorkerTerminalRecord>();
@@ -588,7 +592,14 @@ export function createWorkerTerminalManager(
     }
   }
 
-  worker.on("message", (message: TerminalWorkerToParentMessage) => {
+  function startWorker(): TerminalWorkerProcess {
+    const started = managerOptions.forkWorker ? managerOptions.forkWorker() : forkTerminalWorker();
+    started.on("message", handleWorkerMessage);
+    started.on("exit", handleWorkerExit);
+    return started;
+  }
+
+  function handleWorkerMessage(message: TerminalWorkerToParentMessage): void {
     if (isResponse(message)) {
       const pending = pendingRequests.get(message.requestId);
       if (!pending) {
@@ -604,19 +615,26 @@ export function createWorkerTerminalManager(
       return;
     }
     handleWorkerEvent(message);
-  });
+  }
 
-  worker.on("exit", (code, signal) => {
+  function handleWorkerExit(code: number | null, signal: NodeJS.Signals | null): void {
     workerExited = true;
     if (workerShutdownTimer) {
       clearTimeout(workerShutdownTimer);
       workerShutdownTimer = null;
     }
     rejectPendingRequests(new Error(`Terminal worker exited (${signal ?? code ?? "unknown"})`));
-  });
+  }
+
+  if (managerOptions.startWorker === "eager") worker = startWorker();
 
   function sendRequest(input: TerminalWorkerRequestInput): Promise<unknown> {
-    if (workerExited || !worker.connected) {
+    if (workerExited) {
+      return Promise.reject(new Error("Terminal worker is not running"));
+    }
+    worker ??= startWorker();
+    const target = worker;
+    if (!target.connected) {
       return Promise.reject(new Error("Terminal worker is not running"));
     }
     const requestId = randomUUID();
@@ -627,7 +645,7 @@ export function createWorkerTerminalManager(
         reject(new Error(`Terminal worker request timed out: ${input.type}`));
       }, requestTimeoutMs);
       pendingRequests.set(requestId, { resolve, reject, timeout });
-      worker.send(message, (error) => {
+      target.send(message, (error) => {
         if (!error) {
           return;
         }
@@ -814,20 +832,26 @@ export function createWorkerTerminalManager(
     },
 
     killAll(): void {
-      void sendRequest({ type: "killAll" })
-        .catch(() => {
-          // no-op
-        })
-        .finally(() => {
-          if (worker.connected) {
-            worker.disconnect();
-          }
-          if (!worker.killed && !workerShutdownTimer) {
-            workerShutdownTimer = setTimeout(() => {
-              worker.kill();
-            }, 1000);
-          }
-        });
+      const running = worker;
+      if (running) {
+        void sendRequest({ type: "killAll" })
+          .catch(() => {
+            // no-op
+          })
+          .finally(() => {
+            if (running.connected) {
+              running.disconnect();
+            }
+            if (!running.killed && !workerShutdownTimer) {
+              workerShutdownTimer = setTimeout(() => {
+                running.kill();
+              }, 1000);
+            }
+          });
+      } else {
+        // Never started: nothing to stop, and nothing may start it from here on.
+        workerExited = true;
+      }
       for (const terminalId of Array.from(recordsById.keys())) {
         removeRecord(terminalId);
       }

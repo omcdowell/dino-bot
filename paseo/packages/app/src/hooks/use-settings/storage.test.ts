@@ -43,6 +43,22 @@ function makeDeps(
 }
 
 describe("loadAppSettingsFromStorage", () => {
+  it("defaults the metered-network setting off and keeps it when stored", async () => {
+    expect((await loadAppSettingsFromStorage(makeDeps())).meteredNetwork).toBe(false);
+    const deps = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({ meteredNetwork: true }),
+      }),
+    });
+    expect((await loadAppSettingsFromStorage(deps)).meteredNetwork).toBe(true);
+    const junk = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({ meteredNetwork: "yes" }),
+      }),
+    });
+    expect((await loadAppSettingsFromStorage(junk)).meteredNetwork).toBe(false);
+  });
+
   it("preserves a persisted steer send behavior", async () => {
     const deps = makeDeps({
       storage: createInMemoryKeyValueStorage({

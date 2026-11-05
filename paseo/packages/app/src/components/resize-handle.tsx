@@ -206,9 +206,9 @@ export function ResizeHandle({
     () => [
       styles.highlight,
       direction === "horizontal" ? styles.highlightHorizontal : styles.highlightVertical,
-      { backgroundColor: theme.colors.accent },
+      { backgroundColor: theme.colors.accentText },
     ],
-    [direction, theme.colors.accent],
+    [direction, theme.colors.accentText],
   );
   const hitAreaStyle = useMemo(
     () => [

@@ -2,6 +2,29 @@ import { stat } from "node:fs/promises";
 import type { CreationSnapshot } from "@getpaseo/protocol/messages";
 import { CreationService } from "./creation/index.js";
 import { MessageReceipts } from "./message-receipts/index.js";
+import { getDaemonDisplayInfo } from "./display-version.js";
+import {
+  COMPRESSED_JSON_MIN_BYTES,
+  CheckedJsonFrameDecoder,
+  CheckedJsonOpcode,
+  CompressionResetOpcode,
+  decodeCompressionReset,
+  isCheckedJsonFrame,
+} from "@getpaseo/protocol/binary-frames/compressed-json";
+import {
+  CheckedJsonFrameCompressor,
+  JsonFrameCompressor,
+  ZstdJsonFrameCompressor,
+  zstdFramesAvailable,
+} from "@getpaseo/protocol/binary-frames/compressed-json-node";
+import { OrderedFrameSender } from "./ordered-frame-sender.js";
+import {
+  AgentMessageQueue,
+  isAgentBusyForQueue,
+  type QueuedAgentMessage,
+} from "./agent-queue/index.js";
+import { sendPromptToAgent, waitForAgentRunStartWithTimeout } from "./agent/agent-prompt.js";
+import { buildAgentPrompt } from "./agent/prompt-attachments.js";
 import { WebSocket, WebSocketServer } from "ws";
 import type { IncomingMessage, Server as HTTPServer } from "http";
 import { join } from "path";
@@ -97,7 +120,17 @@ import {
   normalizeClientRestartRpcReason,
 } from "./lifecycle-reasons.js";
 import { CLIENT_CAPS } from "@getpaseo/protocol/client-capabilities";
+import { SessionTokenStore, type SessionTokenBinding } from "./session-tokens.js";
 
+import type { KeyPair, SecurityMode } from "@getpaseo/relay/e2ee";
+import { DIRECT_E2EE_SUBPROTOCOL } from "@getpaseo/protocol/daemon-endpoints";
+import { admitSecuredRelaySocket } from "./websocket/secure-relay-ingress.js";
+import {
+  DIRECT_E2EE_REQUIRED_MESSAGE,
+  isLoopbackAddress,
+  isSameMachineRequest,
+  type DirectE2eePolicy,
+} from "./direct-e2ee.js";
 import type { BrowserToolsBroker } from "./browser-tools/broker.js";
 import type { DaemonRuntimeConfig } from "./session/daemon/daemon-session.js";
 import { DirectorySyncService } from "./directory-sync/index.js";
@@ -107,6 +140,7 @@ import {
   APPLICATION_SOCKET_LEASE_CHECK_INTERVAL_MS,
   ApplicationSocketLease,
   MAX_PHYSICAL_SOCKET_BUFFERED_BYTES,
+  onInboundBytes,
   outboundFrameByteLength,
   physicalSocketHasCapacity,
   sendBoundedPhysicalFrame,
@@ -114,11 +148,16 @@ import {
 } from "./websocket/physical-socket.js";
 
 const WS_CLOSE_DAEMON_AUTH_FAILED = 4401;
+/** A plaintext socket from another machine while PASEO_DIRECT_E2EE=required. */
+const WS_CLOSE_DIRECT_E2EE_REQUIRED = 4426;
+const DIRECT_E2EE_REQUIRED_REASON = DIRECT_E2EE_REQUIRED_MESSAGE;
 
 export interface ExternalSocketMetadata {
   transport: "relay" | "hub";
   externalSessionKey?: string;
   relayConnectionId?: string;
+  /** Negotiated endpoint security for relay-carried sockets. */
+  securityMode?: SecurityMode;
   hubDaemonId?: string;
 }
 
@@ -134,6 +173,8 @@ interface PendingConnection {
   identity: WebSocketConnectionIdentity;
   admission: SessionAdmission | null;
   authenticating: boolean;
+  /** The hello proved the password (or a token due for renewal): send a fresh session token. */
+  issueSessionToken?: boolean;
 }
 
 interface WebSocketConnectionIdentity {
@@ -146,6 +187,7 @@ interface WebSocketConnectionIdentity {
   userAgent?: string;
   remoteAddress?: string;
   relayConnectionId?: string;
+  securityMode?: SecurityMode;
   hubDaemonId?: string;
   clientId?: string;
   sessionId?: string;
@@ -160,6 +202,13 @@ interface WebSocketServerConfig {
   daemonStatusRpc?: boolean;
   relayConfig?: boolean;
   startPaused?: boolean;
+  /**
+   * The daemon key pairing hands out. With it, direct sockets that offer
+   * DIRECT_E2EE_SUBPROTOCOL run the same end-to-end encrypted channel as the relay.
+   */
+  daemonKeyPair?: KeyPair;
+  /** "required": refuse plaintext WebSocket clients that are not on this machine. */
+  directE2ee?: DirectE2eePolicy;
 }
 
 type WebSocketRuntimeMetrics = SessionRuntimeMetrics & CheckoutDiffMetrics;
@@ -488,6 +537,9 @@ const WS_CLOSE_INCOMPATIBLE_PROTOCOL = 4003;
 const WS_CLOSE_SERVER_SHUTDOWN = 1001;
 const WS_PROTOCOL_VERSION = 1;
 const WS_RUNTIME_METRICS_FLUSH_MS = 30_000;
+// The delay monitor wakes the loop once per interval: at 10 ms that was half the idle daemon's
+// CPU. Stalls that matter are tens of milliseconds or more and still show at 50 ms.
+const EVENT_LOOP_DELAY_RESOLUTION_MS = 50;
 const OWNER_SESSION_ADMISSION: SessionAdmission = {
   principalId: "owner",
   permissions: OWNER_PERMISSIONS,
@@ -537,6 +589,17 @@ export class VoiceAssistantWebSocketServer {
   private readonly agentManager: AgentManager;
   private readonly agentStorage: AgentStorage;
   private readonly messageReceipts: MessageReceipts;
+  private readonly agentQueue: AgentMessageQueue;
+  /** Per-socket DEFLATE streams for clients that accept compressed JSON frames. */
+  private readonly frameCompressors = new WeakMap<
+    WebSocketLike,
+    JsonFrameCompressor | CheckedJsonFrameCompressor | ZstdJsonFrameCompressor
+  >();
+  /** zstd sockets: compression is asynchronous, so every frame to them goes out through this, in order. */
+  private readonly orderedSenders = new WeakMap<WebSocketLike, OrderedFrameSender>();
+  /** checkedUplink: the client's checked JSON frames (0x21), one decoder per socket. */
+  private readonly uplinkDecoders = new WeakMap<WebSocketLike, CheckedJsonFrameDecoder>();
+  private unsubscribeAgentQueue: (() => void) | null = null;
   private readonly creationService: CreationService;
   private readonly projectRegistry: ProjectRegistry;
   private readonly workspaceRegistry: WorkspaceRegistry;
@@ -549,6 +612,14 @@ export class VoiceAssistantWebSocketServer {
   private readonly downloadTokenStore: DownloadTokenStore;
   private readonly paseoHome: string;
   private readonly passwordHash: string | undefined;
+  /** Per-device session tokens (in memory: a restart or password change invalidates them all). */
+  private readonly sessionTokens = new SessionTokenStore({
+    getPasswordHash: () => this.passwordHash,
+  });
+  /** Sockets admitted by a password in the upgrade headers (COMPAT(headerAuth)). */
+  private readonly passwordHeaderSockets = new WeakSet<WebSocketLike>();
+  /** Direct sockets that run the encrypted channel, with the mode they negotiated. */
+  private readonly directSocketSecurityModes = new WeakMap<WebSocketLike, SecurityMode>();
   private readonly credentialSource: DaemonAuthConfig | undefined;
   private readonly worktreesRoot: string | undefined;
   private readonly daemonConfigStore: DaemonConfigStore;
@@ -679,6 +750,7 @@ export class VoiceAssistantWebSocketServer {
     this.agentManager = agentManager;
     this.agentStorage = agentStorage;
     this.messageReceipts = new MessageReceipts(join(paseoHome, "agent-requests"));
+    this.agentQueue = this.createAgentQueue(join(paseoHome, "agent-queues"));
     this.creationService = new CreationService(
       join(paseoHome, "creations"),
       this.logger.child({ module: "creation" }),
@@ -754,6 +826,7 @@ export class VoiceAssistantWebSocketServer {
     });
 
     this.wss = this.createWebSocketServer(server, wsConfig, auth);
+    this.startAgentQueue();
     this.startRuntimeMetricsInterval();
     this.startApplicationSocketLeaseInterval();
 
@@ -812,6 +885,155 @@ export class VoiceAssistantWebSocketServer {
     this.resolveScriptHealth = params.resolveScriptHealth ?? null;
   }
 
+  /**
+   * Compress JSON frames on this socket when the client accepts them (most useful on weak mobile
+   * links). PASEO_COMPRESSED_FRAMES=0 turns it off.
+   */
+  private negotiateFrameCompression(
+    ws: WebSocketLike,
+    capabilities: Record<string, unknown> | null | undefined,
+  ): void {
+    if (process.env.PASEO_COMPRESSED_FRAMES === "0") return;
+    if (capabilities?.[CLIENT_CAPS.checkedFrames] === true) {
+      if (
+        capabilities?.[CLIENT_CAPS.zstdFrames] === true &&
+        process.env.PASEO_ZSTD_FRAMES !== "0" &&
+        zstdFramesAvailable()
+      ) {
+        if (!(this.frameCompressors.get(ws) instanceof ZstdJsonFrameCompressor)) {
+          this.frameCompressors.set(ws, new ZstdJsonFrameCompressor());
+        }
+        if (!this.orderedSenders.has(ws)) this.orderedSenders.set(ws, new OrderedFrameSender());
+        return;
+      }
+      this.frameCompressors.set(ws, new CheckedJsonFrameCompressor());
+      return;
+    }
+    if (capabilities?.[CLIENT_CAPS.compressedFrames] !== true) return;
+    this.frameCompressors.set(ws, new JsonFrameCompressor());
+  }
+
+  /**
+   * The client's history broke at a checked frame (checked_frames): start a new generation and
+   * resend from the frame it is missing. When those frames are gone, close the socket so the
+   * client reconnects and resyncs, as any dropped link does.
+   */
+  private handleCompressionReset(ws: WebSocketLike, bytes: Uint8Array, log: pino.Logger): void {
+    const compressor = this.frameCompressors.get(ws);
+    const request = decodeCompressionReset(bytes);
+    if (
+      !(
+        compressor instanceof CheckedJsonFrameCompressor ||
+        compressor instanceof ZstdJsonFrameCompressor
+      ) ||
+      !request
+    ) {
+      log.warn({ bytes: bytes.byteLength }, "compression_reset_unexpected");
+      return;
+    }
+    const answer = compressor.reset(request);
+    if (answer === "stale") return;
+    if (!answer) {
+      this.incrementRuntimeCounter("compressionResetClosed");
+      this.closePhysicalSocket({
+        ws,
+        logMessage: "Closing socket: compression reset asks for frames no longer held",
+        logFields: { seq: request.seq, generation: request.generation },
+      });
+      return;
+    }
+    this.incrementRuntimeCounter("compressionReset");
+    log.warn(
+      { seq: request.seq, generation: request.generation, resent: answer.frames.length },
+      "compression_reset",
+    );
+    this.sendFrameToClient(ws, answer.ack, answer.ack.byteLength, () => {});
+    for (const frame of answer.frames) {
+      this.sendFrameToClient(ws, frame, frame instanceof Promise ? 0 : frame.byteLength, () => {});
+    }
+  }
+
+  /**
+   * checkedUplink: a client JSON frame as a checked DEFLATE frame. One that is out of sequence,
+   * does not decode or fails its checksum means this socket's uplink history is broken: close the
+   * socket (the client reconnects and resyncs) rather than act on a wrong message.
+   */
+  private decodeUplinkFrame(ws: WebSocketLike, bytes: Uint8Array, log: pino.Logger): string | null {
+    if (!isCheckedJsonFrame(bytes)) return null;
+    let decoder = this.uplinkDecoders.get(ws);
+    if (!decoder) {
+      decoder = new CheckedJsonFrameDecoder();
+      this.uplinkDecoders.set(ws, decoder);
+    }
+    const result = decoder.decode(bytes);
+    if (result.kind === "message") return result.text;
+    this.incrementRuntimeCounter("uplinkFrameRejected");
+    log.warn(
+      { reason: result.kind === "reset" ? result.reason : "dropped", bytes: bytes.byteLength },
+      "uplink_frame_rejected",
+    );
+    this.closePhysicalSocket({ ws, logMessage: "Closing socket: client frame did not decode" });
+    return null;
+  }
+
+  private createAgentQueue(directory: string): AgentMessageQueue {
+    const logger = this.logger.child({ module: "agent-queue" });
+    return new AgentMessageQueue({
+      directory,
+      logger,
+      isBusy: (agentId) => {
+        const agent = this.agentManager.getAgent(agentId);
+        return agent ? isAgentBusyForQueue(agent) : false;
+      },
+      dispatch: async (agentId, message: QueuedAgentMessage, behavior) => {
+        const result = await sendPromptToAgent({
+          agentManager: this.agentManager,
+          agentStorage: this.agentStorage,
+          agentId,
+          prompt: buildAgentPrompt(
+            message.text,
+            message.images,
+            message.attachments as Parameters<typeof buildAgentPrompt>[2],
+          ),
+          source: message.sourceAgentId
+            ? { kind: "agent-message", agentId: message.sourceAgentId }
+            : undefined,
+          messageId: message.messageId,
+          activeTurnBehavior: behavior,
+          clearPendingPermissions: true,
+          logger,
+        });
+        if (result.disposition === "turn_started") {
+          await waitForAgentRunStartWithTimeout(this.agentManager, agentId);
+        }
+      },
+      onDelivered: (agentId, messageId) => this.messageReceipts.complete(agentId, messageId),
+      onChange: (agentId, snapshot) => this.agentManager.setMessageQueue(agentId, snapshot),
+    });
+  }
+
+  /** Loads held messages and hands each agent its next one whenever it goes idle. */
+  private startAgentQueue(): void {
+    this.unsubscribeAgentQueue = this.agentManager.subscribe((event) => {
+      if (event.type !== "agent_state") return;
+      const agent = event.agent;
+      if (agent.lifecycle === "running") this.agentQueue.release(agent.id);
+      const snapshot = this.agentQueue.snapshot(agent.id);
+      if (snapshot && agent.messageQueue?.revision !== snapshot.revision) {
+        this.agentManager.setMessageQueue(agent.id, snapshot);
+        return;
+      }
+      this.agentQueue.kick(agent.id);
+    });
+    void (async () => {
+      try {
+        for (const agentId of await this.agentQueue.load()) this.agentQueue.kick(agentId);
+      } catch (error) {
+        this.logger.warn({ err: error }, "agent_queue.start_failed");
+      }
+    })();
+  }
+
   private createWebSocketServer(
     server: HTTPServer,
     wsConfig: WebSocketServerConfig,
@@ -821,7 +1043,10 @@ export class VoiceAssistantWebSocketServer {
     const wss = new WebSocketServer({
       server,
       path: "/ws",
-      handleProtocols: (protocols) => selectWebSocketProtocol(protocols, password),
+      handleProtocols: (protocols) =>
+        wsConfig.daemonKeyPair && protocols.has(DIRECT_E2EE_SUBPROTOCOL)
+          ? DIRECT_E2EE_SUBPROTOCOL
+          : selectWebSocketProtocol(protocols, password),
       verifyClient: ({ req }, callback) => {
         this.verifyWsUpgrade(
           req,
@@ -832,13 +1057,27 @@ export class VoiceAssistantWebSocketServer {
       },
     });
     wss.on("connection", (ws, request) => {
+      if (wsConfig.daemonKeyPair && ws.protocol === DIRECT_E2EE_SUBPROTOCOL) {
+        void this.attachDirectE2eeSocket(ws, request, wsConfig.daemonKeyPair);
+        return;
+      }
+      if (wsConfig.directE2ee === "required" && !isSameMachineRequest(request)) {
+        this.logger.warn(
+          extractSocketRequestMetadata(request),
+          "Rejected plaintext WebSocket from another machine (direct E2EE required)",
+        );
+        ws.close(WS_CLOSE_DIRECT_E2EE_REQUIRED, DIRECT_E2EE_REQUIRED_REASON);
+        return;
+      }
       void this.attachAuthenticatedSocket(ws, request, password);
     });
     return wss;
   }
 
   private startRuntimeMetricsInterval(): void {
-    this.eventLoopDelayMonitor = monitorEventLoopDelay({ resolution: 10 });
+    this.eventLoopDelayMonitor = monitorEventLoopDelay({
+      resolution: EVENT_LOOP_DELAY_RESOLUTION_MS,
+    });
     this.eventLoopDelayMonitor.enable();
     const runtimeMetricsInterval = setInterval(() => {
       this.flushRuntimeMetrics();
@@ -867,7 +1106,9 @@ export class VoiceAssistantWebSocketServer {
     if (!monitor) {
       return null;
     }
-    const toMs = (nanoseconds: number): number => Math.round(nanoseconds / 1e5) / 10;
+    // The histogram holds whole timer intervals; report the delay beyond the sampling interval.
+    const toMs = (nanoseconds: number): number =>
+      Math.max(0, Math.round((nanoseconds / 1e6 - EVENT_LOOP_DELAY_RESOLUTION_MS) * 10) / 10);
     const snapshot = {
       p50Ms: toMs(monitor.percentile(50)),
       p99Ms: toMs(monitor.percentile(99)),
@@ -911,6 +1152,34 @@ export class VoiceAssistantWebSocketServer {
     }
   }
 
+  /**
+   * A direct socket that asked for end-to-end encryption: run the relay's secure channel
+   * (protected Noise NK only; there are no legacy direct clients to stay compatible with)
+   * keyed to the daemon key from pairing, then admit it like any direct socket. Bearer
+   * headers are ignored here: credentials are read only from the encrypted hello.
+   */
+  private async attachDirectE2eeSocket(
+    ws: WebSocket,
+    request: IncomingMessage,
+    daemonKeyPair: KeyPair,
+  ): Promise<void> {
+    await admitSecuredRelaySocket(
+      ws,
+      {
+        daemonKeyPair,
+        logger: this.logger.child({
+          transport: "direct_e2ee",
+          ...extractSocketRequestMetadata(request),
+        }),
+        requireProtectedMode: () => true,
+      },
+      async ({ socket, securityMode }) => {
+        this.directSocketSecurityModes.set(socket, securityMode);
+        await this.attachSocket(socket, request, undefined, false, null);
+      },
+    );
+  }
+
   private async attachAuthenticatedSocket(
     ws: WebSocket,
     request: IncomingMessage,
@@ -937,6 +1206,7 @@ export class VoiceAssistantWebSocketServer {
           ws.close(WS_CLOSE_DAEMON_AUTH_FAILED, reason);
           return;
         }
+        this.passwordHeaderSockets.add(ws);
       }
 
       await this.attachSocket(
@@ -1061,6 +1331,8 @@ export class VoiceAssistantWebSocketServer {
 
   public async close(): Promise<void> {
     this.prepareForShutdown();
+    this.unsubscribeAgentQueue?.();
+    this.unsubscribeAgentQueue = null;
     this.unsubscribeSpeechReadiness?.();
     this.unsubscribeSpeechReadiness = null;
     this.unsubscribeDaemonConfigChange?.();
@@ -1183,9 +1455,27 @@ export class VoiceAssistantWebSocketServer {
 
     const payloadBytes = outboundFrameByteLength(payload);
     for (const ws of writableSockets) {
-      this.sendFrameToClient(ws, payload, payloadBytes, () => {
+      const socketCompressor = this.frameCompressors.get(ws);
+      // Checked sockets sequence every JSON frame, small ones too, so a reset can resend them all.
+      const recordSent = () => {
         this.runtimeMetrics.recordOutboundMessage(message, ws.bufferedAmount);
-      });
+      };
+      if (socketCompressor instanceof ZstdJsonFrameCompressor) {
+        this.sendFrameToClient(ws, socketCompressor.compress(payload), payloadBytes, recordSent);
+        continue;
+      }
+      const compressor =
+        socketCompressor instanceof CheckedJsonFrameCompressor ||
+        payload.length >= COMPRESSED_JSON_MIN_BYTES
+          ? socketCompressor
+          : undefined;
+      const frame = compressor ? compressor.compress(payload) : payload;
+      this.sendFrameToClient(
+        ws,
+        frame,
+        compressor ? outboundFrameByteLength(frame) : payloadBytes,
+        recordSent,
+      );
     }
   }
 
@@ -1207,6 +1497,8 @@ export class VoiceAssistantWebSocketServer {
       this.logger.warn({ bytes: frame.byteLength }, "ws_application_binary_delivery_denied");
       return;
     }
+    // Behind any JSON frames still being compressed for this socket.
+    await this.orderedSenders.get(ws)?.drain();
     try {
       const sent = await sendBoundedPhysicalFrameAndWait({
         socket: ws,
@@ -1224,6 +1516,29 @@ export class VoiceAssistantWebSocketServer {
   }
 
   private sendFrameToClient(
+    ws: WebSocketLike,
+    frame: string | Uint8Array | Promise<Uint8Array>,
+    frameBytes: number,
+    recordSent: () => void,
+  ): void {
+    const ordered = this.orderedSenders.get(ws);
+    if (ordered) {
+      ordered.push(
+        frame,
+        frameBytes,
+        (ready) => this.sendFrameNow(ws, ready, outboundFrameByteLength(ready), recordSent),
+        (err) => {
+          this.logger.warn({ err }, "ws_frame_compression_failed");
+          this.closePhysicalSocket({ ws, logMessage: "Closing socket: frame compression failed" });
+        },
+      );
+      return;
+    }
+    if (frame instanceof Promise) throw new Error("asynchronous frame on a synchronous socket");
+    this.sendFrameNow(ws, frame, frameBytes, recordSent);
+  }
+
+  private sendFrameNow(
     ws: WebSocketLike,
     frame: string | Uint8Array,
     frameBytes: number,
@@ -1244,7 +1559,8 @@ export class VoiceAssistantWebSocketServer {
 
   private ensureOutboundCapacity(ws: WebSocketLike, frameBytes: number): boolean {
     if (ws.readyState !== 1) return false;
-    if (physicalSocketHasCapacity(ws, frameBytes)) return true;
+    const queued = this.orderedSenders.get(ws)?.pendingBytes ?? 0;
+    if (physicalSocketHasCapacity(ws, frameBytes + queued)) return true;
 
     this.closeAtOutboundHighWater(ws);
     return false;
@@ -1323,6 +1639,8 @@ export class VoiceAssistantWebSocketServer {
 
     const requestMetadata = extractSocketRequestMetadata(request);
     const identity = createWebSocketConnectionIdentity(requestMetadata, metadata);
+    const directSecurityMode = this.directSocketSecurityModes.get(ws);
+    if (directSecurityMode) identity.securityMode = directSecurityMode;
     this.socketIdentities.set(ws, identity);
     const connectionLogger = this.logger.child(toConnectionLogFields(identity));
 
@@ -1480,6 +1798,7 @@ export class VoiceAssistantWebSocketServer {
       agentManager: this.agentManager,
       agentStorage: this.agentStorage,
       messageReceipts: this.messageReceipts,
+      agentQueue: this.agentQueue,
       creationService: this.creationService,
       projectRegistry: this.projectRegistry,
       workspaceRegistry: this.workspaceRegistry,
@@ -1580,6 +1899,7 @@ export class VoiceAssistantWebSocketServer {
 
     pending.authenticating = true;
     if (!pending.admission && !(await this.admitPendingHello(ws, message, pending))) return;
+    this.noteHeaderPasswordAdmission(ws, message, pending);
 
     const clientId = message.clientId.trim();
     if (clientId.length === 0) {
@@ -1635,6 +1955,8 @@ export class VoiceAssistantWebSocketServer {
       this.externalSessionsByKey.set(sessionKey, connection);
     }
     pending.identity.sessionId = connection.session.getSessionId();
+    this.negotiateFrameCompression(ws, message.capabilities);
+    this.sendSessionToken(ws, pending, admitted, connection.lifecycle);
     this.sendToClient(ws, this.createServerInfoMessage(connection.session));
     connection.connectionLogger.info(
       {
@@ -1678,19 +2000,29 @@ export class VoiceAssistantWebSocketServer {
   ): Promise<boolean> {
     if (pending.admission) return true;
     try {
+      const binding = this.sessionTokenBinding(message, pending);
       const resolved = await resolveSessionAdmission({
         credential: message.auth,
         passwordHash: this.passwordHash,
         localCredential: this.credentialSource?.localCredential?.() ?? null,
         transport: pending.identity.transport === "relay" ? "relay" : "direct",
+        verifySessionToken: (token) => this.sessionTokens.verify(token, binding),
       });
       if (this.pendingConnections.get(ws) !== pending) return false;
       if ("rejection" in resolved) {
         this.clearPendingConnection(ws);
+        if (resolved.rejection === "session_token_invalid") {
+          this.incrementRuntimeCounter("helloSessionTokenRejected");
+        }
         await this.rejectHello(ws, message, resolved.rejection);
         return false;
       }
       pending.admission = resolved.admission;
+      if (resolved.method === "sessionToken") this.incrementRuntimeCounter("helloSessionToken");
+      pending.issueSessionToken =
+        message.capabilities?.[CLIENT_CAPS.sessionTokens] === true &&
+        (resolved.method === "password" ||
+          (resolved.method === "sessionToken" && resolved.renewToken === true));
       return true;
     } catch (error) {
       pending.connectionLogger.error({ err: error }, "Failed to resolve hello credential");
@@ -1702,10 +2034,61 @@ export class VoiceAssistantWebSocketServer {
     }
   }
 
+  private sessionTokenBinding(
+    message: WSHelloMessage,
+    pending: PendingConnection,
+  ): SessionTokenBinding {
+    return { clientId: message.clientId.trim(), channel: sessionTokenChannel(pending.identity) };
+  }
+
+  /** The password was checked on the upgrade (COMPAT(headerAuth)): a capable client gets a token. */
+  private noteHeaderPasswordAdmission(
+    ws: WebSocketLike,
+    message: WSHelloMessage,
+    pending: PendingConnection,
+  ): void {
+    if (!this.passwordHeaderSockets.has(ws)) return;
+    pending.issueSessionToken = message.capabilities?.[CLIENT_CAPS.sessionTokens] === true;
+  }
+
+  /** Sends a fresh per-device session token before server_info (never logged). */
+  private sendSessionToken(
+    ws: WebSocketLike,
+    pending: PendingConnection,
+    admission: SessionAdmission,
+    lifecycle: SessionConnection["lifecycle"],
+  ): void {
+    // Plugin sockets are per-run and never reconnect: no token.
+    if (lifecycle !== "reconnectable") return;
+    if (!pending.issueSessionToken || !pending.identity.clientId) return;
+    pending.issueSessionToken = false;
+    const issued = this.sessionTokens.issue(admission, {
+      clientId: pending.identity.clientId,
+      channel: sessionTokenChannel(pending.identity),
+    });
+    if (!issued) return;
+    this.incrementRuntimeCounter("sessionTokenIssued");
+    this.sendToClient(ws, { type: "session.token", ...issued });
+  }
+
+  /** Drops a device's session token (it must prove the password again). */
+  public revokeSessionToken(clientId: string): boolean {
+    return this.sessionTokens.revokeClient(clientId);
+  }
+
+  /** Drops every session token. */
+  public revokeAllSessionTokens(): void {
+    this.sessionTokens.revokeAll();
+  }
+
   private async rejectHello(
     ws: WebSocketLike,
     hello: WSHelloMessage,
-    reason: "password_required" | "incorrect_password" | "incompatible_protocol",
+    reason:
+      | "password_required"
+      | "incorrect_password"
+      | "incompatible_protocol"
+      | "session_token_invalid",
   ): Promise<void> {
     // Older clients discard unknown frames, then use the close code and reason.
     // They never send hello.auth, so avoid sending an unknown envelope to them.
@@ -1720,6 +2103,7 @@ export class VoiceAssistantWebSocketServer {
       password_required: "Password required",
       incorrect_password: "Incorrect password",
       incompatible_protocol: "Incompatible protocol version",
+      session_token_invalid: "Session token invalid",
     }[reason];
     try {
       ws.close(
@@ -1764,6 +2148,9 @@ export class VoiceAssistantWebSocketServer {
     existing.sockets.add(ws);
     this.sessions.set(ws, existing);
     pending.identity.sessionId = existing.session.getSessionId();
+    this.negotiateFrameCompression(ws, message.capabilities);
+    if (pending.admission)
+      this.sendSessionToken(ws, pending, pending.admission, existing.lifecycle);
     this.sendToClient(ws, this.createServerInfoMessage(existing.session));
     pending.connectionLogger.info(
       {
@@ -1782,11 +2169,15 @@ export class VoiceAssistantWebSocketServer {
       serverId: this.serverId,
       hostname: getHostName(),
       version: this.daemonVersion,
+      // DinoBot: display only; `version` stays the engine version every compat check uses.
+      ...getDaemonDisplayInfo(),
       permissions: session.getPermissions(),
       // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
       desktopManaged: this.daemonRuntimeConfig?.desktopManaged === true,
       ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),
       features: {
+        // COMPAT(relayProtectedSecurity): added in v0.13.0, remove gate after 2027-04-21.
+        relayProtectedSecurity: true,
         usageSources: true,
         ownedSubscriptions: true,
         agentRequestReceipts: true,
@@ -1828,6 +2219,8 @@ export class VoiceAssistantWebSocketServer {
         ...(this.advertiseDaemonStatusRpc ? { daemonStatusRpc: true } : {}),
         // COMPAT(daemonConfigReload): added in v0.4.0, remove gate after 2027-02-14.
         daemonConfigReload: true,
+        // COMPAT(modelScope): provider.model_scope.* (Scoped / All model picker).
+        modelScope: true,
         // COMPAT(relayConfig): added in v0.2.6, remove gate after 2027-01-31.
         ...(this.advertiseRelayConfig ? { relayConfig: true } : {}),
         // COMPAT(pushTokenRevocation): added in v0.3.2, remove gate after 2027-02-10.
@@ -1924,6 +2317,28 @@ export class VoiceAssistantWebSocketServer {
         explicitEventSubscriptions: true,
         // COMPAT(canonicalSubmittedPrompts): added in v0.2.6, remove gate after 2027-01-30.
         canonicalSubmittedPrompts: true,
+        // COMPAT(messageReceivedAck): added in v0.11.2, remove gate after 2027-04-10.
+        messageReceivedAck: true,
+        // COMPAT(agentMessageQueue): added in v0.11.2, remove gate after 2027-04-10.
+        agentMessageQueue: true,
+        // COMPAT(compressedFrames): added in v0.11.2, remove gate after 2027-04-10.
+        compressedFrames: process.env.PASEO_COMPRESSED_FRAMES !== "0",
+        // COMPAT(networkDiagnostics): added in v0.11.2, remove gate after 2027-04-10.
+        networkDiagnostics: true,
+        // COMPAT(compactTimeline): added in v0.11.2, remove gate after 2027-04-10.
+        compactTimeline: true,
+        // COMPAT(checkedUplink): added in v0.11.3, remove gate after 2027-04-10.
+        checkedUplink: true,
+        // COMPAT(dictationOpus): added in v0.11.3, remove gate after 2027-04-23.
+        dictationOpus: process.env.PASEO_DICTATION_OPUS !== "0",
+        // COMPAT(dictationResume): added in v0.11.3, remove gate after 2027-04-23.
+        dictationResume: true,
+        // COMPAT(leanTimeline): added in v0.11.3, remove gate after 2027-04-10.
+        leanTimeline: true,
+        // COMPAT(pluginEvents): added in v0.11.3, remove gate after 2027-04-10.
+        pluginEvents: true,
+        // COMPAT(chatImages): added in v0.11.2, remove gate after 2027-04-10.
+        chatImages: true,
         agentMessageProvenance: true,
         // COMPAT(stableProjectIdentity): added in v0.1.109, remove gate after 2027-01-15.
         stableProjectIdentity: true,
@@ -1985,6 +2400,9 @@ export class VoiceAssistantWebSocketServer {
   }
 
   private bindSocketHandlers(ws: WebSocketLike): void {
+    // A photo on a slow uplink arrives over longer than the lease before its "message" fires;
+    // without this the daemon cut the socket mid-upload and the app sent the photo again.
+    onInboundBytes(ws, () => this.applicationSocketLease.renew(ws));
     ws.on("message", (...args: unknown[]) => {
       const data = args[0] as Buffer | ArrayBuffer | Buffer[] | string;
       this.handleRawMessage(ws, data);
@@ -1993,6 +2411,9 @@ export class VoiceAssistantWebSocketServer {
     ws.on("close", async (...args: unknown[]) => {
       const code = args[0];
       const reason = args[1];
+      const compressor = this.frameCompressors.get(ws);
+      if (compressor instanceof ZstdJsonFrameCompressor) compressor.dispose();
+      this.orderedSenders.get(ws)?.close();
       await this.detachSocket(ws, {
         code: typeof code === "number" ? code : undefined,
         reason,
@@ -2273,6 +2694,7 @@ export class VoiceAssistantWebSocketServer {
     }
   }
 
+  // oxlint-disable-next-line complexity -- one flat dispatch over frame kinds (checked, compressed, binary, JSON)
   private handleRawMessage(
     ws: WebSocketLike,
     data: Buffer | ArrayBuffer | Buffer[] | string,
@@ -2293,6 +2715,15 @@ export class VoiceAssistantWebSocketServer {
 
     try {
       const buffer = bufferFromWsData(data);
+      if (buffer.length > 0 && buffer[0] === CompressionResetOpcode && activeConnection) {
+        this.handleCompressionReset(ws, new Uint8Array(buffer), log);
+        return;
+      }
+      if (buffer.length > 0 && buffer[0] === CheckedJsonOpcode && activeConnection) {
+        const text = this.decodeUplinkFrame(ws, new Uint8Array(buffer), log);
+        if (text !== null) this.handleRawMessage(ws, text);
+        return;
+      }
       const binaryHandled = this.maybeHandleBinaryFrame({
         ws,
         buffer,
@@ -2782,8 +3213,14 @@ function createWebSocketConnectionIdentity(
     ...(requestMetadata.userAgent ? { userAgent: requestMetadata.userAgent } : {}),
     ...(requestMetadata.remoteAddress ? { remoteAddress: requestMetadata.remoteAddress } : {}),
     ...(metadata?.relayConnectionId ? { relayConnectionId: metadata.relayConnectionId } : {}),
+    ...(metadata?.securityMode ? { securityMode: metadata.securityMode } : {}),
     ...(metadata?.hubDaemonId ? { hubDaemonId: metadata.hubDaemonId } : {}),
   };
+}
+
+/** A session token only works on the kind of path it was issued on (direct/relay, E2EE mode). */
+function sessionTokenChannel(identity: WebSocketConnectionIdentity): string {
+  return `${identity.transport}:${identity.securityMode ?? "none"}`;
 }
 
 function sessionConnectionKey(principalId: string, clientId: string): string {
@@ -2800,6 +3237,7 @@ function toConnectionLogFields(identity: WebSocketConnectionIdentity): Record<st
     ...(identity.userAgent ? { userAgent: identity.userAgent } : {}),
     ...(identity.remoteAddress ? { remoteAddress: identity.remoteAddress } : {}),
     ...(identity.relayConnectionId ? { relayConnectionId: identity.relayConnectionId } : {}),
+    ...(identity.securityMode ? { securityMode: identity.securityMode } : {}),
     ...(identity.hubDaemonId ? { hubDaemonId: identity.hubDaemonId } : {}),
     ...(identity.clientId ? { clientId: identity.clientId } : {}),
     ...(identity.sessionId ? { sessionId: identity.sessionId } : {}),
@@ -2814,13 +3252,6 @@ function resolveConnectionPeer(
   if (metadata !== undefined) return "external";
   if (!requestMetadata.remoteAddress) return "local_ipc";
   return isLoopbackAddress(requestMetadata.remoteAddress) ? "loopback" : "external";
-}
-
-function isLoopbackAddress(address: string): boolean {
-  const normalized = address.toLowerCase();
-  if (normalized === "::1" || normalized === "0:0:0:0:0:0:0:1") return true;
-  const ipv4 = normalized.startsWith("::ffff:") ? normalized.slice("::ffff:".length) : normalized;
-  return ipv4.startsWith("127.");
 }
 
 function extractSocketRequestMetadata(request: unknown): SocketRequestMetadata {

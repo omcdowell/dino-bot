@@ -25,8 +25,10 @@ import { useSessionStore } from "@/stores/session-store";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
 import type { HostProfile } from "@/types/host-connection";
 import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
-import { resolveAppVersion } from "@/utils/app-version";
+import { resolveDisplayVersion } from "@/utils/app-version";
+import { formatHostVersionLabel } from "@/utils/display-version";
 import { openChangelog } from "@/changelog";
+import { RELEASE_POLICY } from "@/constants/flavour";
 import { openExternalUrl } from "@/utils/open-external-url";
 
 const DISCORD_URL = "https://discord.gg/jz8T2uahpH";
@@ -60,12 +62,10 @@ const changelogLeadingIcon = (
 function HostVersionHint({ host }: { host: HostProfile }) {
   const { t } = useTranslation();
   const isConnected = useHostRuntimeIsConnected(host.serverId);
-  const daemonVersion = useSessionStore(
-    (state) => state.sessions[host.serverId]?.serverInfo?.version ?? null,
+  const hostVersionLabel = useSessionStore((state) =>
+    formatHostVersionLabel(state.sessions[host.serverId]?.serverInfo),
   );
-  const version = isConnected
-    ? formatVersionWithPrefix(daemonVersion)
-    : t("settings.about.offline");
+  const version = isConnected ? (hostVersionLabel ?? "\u2014") : t("settings.about.offline");
 
   return (
     <DropdownMenuHint
@@ -85,7 +85,7 @@ export function SidebarHelpMenu() {
   const openAppDiagnostic = useAppDiagnosticStore((state) => state.open);
   const setShortcutsDialogOpen = useKeyboardShortcutsStore((state) => state.setShortcutsDialogOpen);
   const [open, setOpen] = useState(false);
-  const version = formatVersionWithPrefix(resolveAppVersion());
+  const version = formatVersionWithPrefix(resolveDisplayVersion());
   const hosts = useHosts();
 
   const openKeyboardShortcuts = useCallback(() => {
@@ -135,13 +135,15 @@ export function SidebarHelpMenu() {
             {t("sidebar.help.shortcuts")}
           </DropdownMenuItem>
         ) : null}
-        <DropdownMenuItem
-          testID="sidebar-help-changelog"
-          leading={changelogLeadingIcon}
-          onSelect={openChangelog}
-        >
-          {t("sidebar.help.whatsNew")}
-        </DropdownMenuItem>
+        {RELEASE_POLICY.upstreamChangelog ? (
+          <DropdownMenuItem
+            testID="sidebar-help-changelog"
+            leading={changelogLeadingIcon}
+            onSelect={openChangelog}
+          >
+            {t("sidebar.help.whatsNew")}
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuItem
           testID="sidebar-help-diagnostics"
           leading={diagnosticLeadingIcon}

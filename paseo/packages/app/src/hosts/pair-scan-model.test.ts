@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ConnectionLinkImport, LinkPairing } from "@/runtime/host-runtime";
-import { openPairScan, type PairScanModel } from "./pair-scan-model";
+import { createPairAttempts, openPairScan, type PairScanModel } from "./pair-scan-model";
 
 const LINK = "https://app.paseo.sh/#offer=abc";
 const PAIRING: LinkPairing = { submit: async () => ({ status: "cancelled" }) };
@@ -112,5 +112,34 @@ describe("openPairScan", () => {
     await Promise.resolve();
 
     expect(connected).toEqual([]);
+  });
+});
+
+describe("createPairAttempts", () => {
+  const deps = () => ({
+    importConnectionLink: vi.fn(() => new Promise<never>(() => {})),
+    onConnected: vi.fn(),
+  });
+
+  it("a remount with the same attempt key re-attaches instead of pairing (and asking) again", () => {
+    const attempts = createPairAttempts();
+    const first = deps();
+    const a = attempts.acquire("at1|dinobot://pair/#offer=x", first);
+    a.scan("dinobot://pair/#offer=x");
+    const b = attempts.acquire("at1|dinobot://pair/#offer=x", deps());
+    b.scan("dinobot://pair/#offer=x");
+    expect(b).toBe(a);
+    expect(first.importConnectionLink).toHaveBeenCalledTimes(1);
+    expect(a.getState()).toEqual({ status: "pairing" });
+  });
+
+  it("a new key (the link opened again) closes the old attempt and starts a new one", () => {
+    const attempts = createPairAttempts();
+    const a = attempts.acquire("at1|L", deps());
+    const second = deps();
+    const b = attempts.acquire("at2|L", second);
+    expect(b).not.toBe(a);
+    b.scan("dinobot://pair/#offer=x");
+    expect(second.importConnectionLink).toHaveBeenCalledTimes(1);
   });
 });

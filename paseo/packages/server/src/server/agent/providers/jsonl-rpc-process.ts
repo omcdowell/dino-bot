@@ -97,8 +97,10 @@ export class JsonlRpcProcess {
       },
     });
     this.child = (options.spawn ?? spawnJsonlRpcProcess)(options.launch);
-    this.child.stdout.on("data", (chunk) => {
-      this.handleStdoutChunk(chunk.toString());
+    // Decode across reads: a pipe read can end inside a multi-byte UTF-8 character.
+    this.child.stdout.setEncoding("utf8");
+    this.child.stdout.on("data", (chunk: string) => {
+      this.handleStdoutChunk(chunk);
     });
     this.child.stderr.on("data", (chunk) => {
       this.stderrBuffer += chunk.toString();

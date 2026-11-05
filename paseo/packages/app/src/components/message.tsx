@@ -1,3 +1,5 @@
+import { useSessionStore } from "@/stores/session-store";
+import { loadFullToolCallDetail } from "@/timeline/compact-tool-call";
 import type { AgentMessage } from "@getpaseo/protocol/agent-message";
 import { ASSISTANT_IMAGE_DEFAULT_ASPECT_RATIO } from "@/utils/assistant-image-metadata";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -46,6 +48,7 @@ import {
   FileSymlink,
 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { DeliveryTick, type DeliveryState } from "@/components/delivery-tick";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import Animated, {
@@ -59,7 +62,14 @@ import Animated, {
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "react-native-svg";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import { MarkdownRenderer, type MarkdownStyles } from "@/components/markdown/renderer";
-import type { TaskActivity, TodoEntry, UserMessageImageAttachment } from "@/types/stream";
+import {
+  isChatImageReference,
+  type TaskActivity,
+  type TodoEntry,
+  type UserMessageImage,
+  type UserMessageImageAttachment,
+} from "@/types/stream";
+import { ChatImage, LocalChatImage } from "@/chat-images/chat-image";
 import type { AgentAttachment } from "@getpaseo/protocol/messages";
 import type { ToolCallDetail } from "@getpaseo/protocol/agent-types";
 import { buildToolCallPresentation } from "@/tool-calls/presentation";
@@ -95,14 +105,12 @@ import {
 } from "@/assistant-file-links";
 import { getCompactionMarkerLabel } from "./message-compaction-label";
 import { useAssistantImage } from "@/assistant-image/use-assistant-image";
-import {
-  AttachmentFrame,
-  AttachmentLabel,
-  AttachmentThumbnail,
-} from "@/components/attachment-pill";
+import { AttachmentFrame, AttachmentLabel } from "@/components/attachment-pill";
 import { AttachmentLightbox, type ImageLightboxSource } from "@/components/attachment-lightbox";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { isWeb, isNative } from "@/constants/platform";
+import { UserMessageBubblePressable } from "@/components/user-message-bubble-pressable";
+import { isUserMessageTrailingRowVisible, resolveAssistantFooterLabels } from "./message-meta";
 import type { AgentCapabilityFlags } from "@getpaseo/protocol/agent-types";
 import { RewindMenu, type RewindMode } from "@/components/rewind/rewind-menu";
 import { useRewindAgentMutation } from "@/components/rewind/use-rewind-agent-mutation";
@@ -124,7 +132,7 @@ interface UserMessageProps {
   agentId?: string;
   messageId?: string;
   message: string;
-  images?: UserMessageImageAttachment[];
+  images?: UserMessageImage[];
   attachments?: AgentAttachment[];
   timestamp: number;
   capabilities?: AgentCapabilityFlags;
@@ -133,6 +141,113 @@ interface UserMessageProps {
   isLastInGroup?: boolean;
   isPending?: boolean;
   disableOuterSpacing?: boolean;
+  /** Tick shown for the message (pinned bubbles, and blue for messages the agent took). */
+  deliveryState?: DeliveryState;
+  /** Small text left of the tick inside the bubble (time written, retry reason). */
+  deliveryMeta?: string;
+  /** Pressing the bubble (pinned bubbles open their actions). */
+  onPressBubble?: () => void;
+  /** Long-press or right-click on a pressable bubble (pinned bubbles open, not toggle, their
+   * actions). Falls back to `onPressBubble`. */
+  onLongPressBubble?: () => void;
+}
+
+/** Images go above the bubble at full width; a message of only images has no empty bubble. */
+function userMessageLayout(input: {
+  hasImages: boolean;
+  hasText: boolean;
+  hasAttachments: boolean;
+  isPending: boolean;
+}) {
+  return {
+    hasBubble: !input.hasImages || input.hasText || input.hasAttachments || input.isPending,
+    contentStyle: input.hasImages
+      ? userMessageStylesheet.contentWithImages
+      : userMessageStylesheet.content,
+  };
+}
+
+/** Images above a user bubble, at the chat's width (capped), each with its own aspect ratio. */
+function UserMessageImages({
+  images,
+  serverId,
+  client,
+  onOpenLocal,
+}: {
+  images: UserMessageImage[];
+  serverId?: string;
+  client?: DaemonClient | null;
+  onOpenLocal: (metadata: UserMessageImageAttachment) => void;
+}) {
+  const { t } = useTranslation();
+  if (images.length === 0) return null;
+  return (
+    <View style={userMessageStylesheet.imageBlock} testID="user-message-images">
+      {images.map((image) =>
+        isChatImageReference(image) ? (
+          <ChatImage
+            key={image.id}
+            image={image}
+            serverId={serverId}
+            client={client}
+            accessibilityLabel={t("composer.attachments.openImage")}
+          />
+        ) : (
+          <LocalChatImage
+            key={image.id}
+            metadata={image}
+            onOpen={onOpenLocal}
+            accessibilityLabel={t("composer.attachments.openImage")}
+          />
+        ),
+      )}
+    </View>
+  );
+}
+
+function UserMessageBubble({
+  onPress,
+  onLongPress,
+  children,
+}: {
+  onPress: (() => void) | undefined;
+  onLongPress: (() => void) | undefined;
+  children: ReactNode;
+}) {
+  if (!onPress) return <View style={userMessageStylesheet.bubble}>{children}</View>;
+  return (
+    <UserMessageBubblePressable
+      style={userMessageStylesheet.bubble}
+      onPress={onPress}
+      onLongPress={onLongPress ?? onPress}
+    >
+      {children}
+    </UserMessageBubblePressable>
+  );
+}
+
+function PendingDeliveryRow({
+  state,
+  meta,
+}: {
+  state: DeliveryState | undefined;
+  meta: string | undefined;
+}) {
+  if (!state) return null;
+  return (
+    <View style={userMessageStylesheet.deliveryRow} testID="user-message-delivery">
+      {meta ? (
+        <Text style={userMessageStylesheet.deliveryMeta} numberOfLines={1}>
+          {meta}
+        </Text>
+      ) : null}
+      <DeliveryTick state={state} />
+    </View>
+  );
+}
+
+function SettledDeliveryTick({ state }: { state: DeliveryState | undefined }) {
+  return state ? <DeliveryTick state={state} /> : null;
 }
 
 const MessageOuterSpacingContext = createContext(false);
@@ -340,6 +455,11 @@ const userMessageStylesheet = StyleSheet.create((theme) => ({
     maxWidth: "100%",
     cursor: "auto",
   },
+  contentWithImages: {
+    alignItems: "flex-end",
+    width: "100%",
+    cursor: "auto",
+  },
   containerSpacing: {
     marginBottom: theme.spacing[1],
   },
@@ -368,10 +488,11 @@ const userMessageStylesheet = StyleSheet.create((theme) => ({
         }
       : {}),
   },
-  imagePreviewContainer: {
-    flexDirection: "row",
+  imageBlock: {
+    width: "100%",
+    alignItems: "flex-end",
     gap: theme.spacing[2],
-    flexWrap: "wrap",
+    marginBottom: theme.spacing[2],
   },
   attachmentPreviewContainer: {
     flexDirection: "row",
@@ -406,24 +527,23 @@ const userMessageStylesheet = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontSize: STREAM_METADATA_FONT_SIZE,
   },
+  deliveryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    alignSelf: "flex-end",
+    gap: theme.spacing[1],
+    marginTop: theme.spacing[1],
+    marginBottom: -theme.spacing[2],
+    marginRight: -theme.spacing[2],
+    maxWidth: "100%",
+  },
+  deliveryMeta: {
+    color: theme.colors.foregroundMuted,
+    fontSize: STREAM_METADATA_FONT_SIZE,
+    flexShrink: 1,
+  },
 }));
-
-interface UserMessageImagePillProps {
-  image: UserMessageImageAttachment;
-  onOpen: (image: UserMessageImageAttachment) => void;
-  accessibilityLabel: string;
-}
-
-function UserMessageImagePill({ image, onOpen, accessibilityLabel }: UserMessageImagePillProps) {
-  const handlePress = useCallback(() => {
-    onOpen(image);
-  }, [onOpen, image]);
-  return (
-    <AttachmentFrame onPress={handlePress} accessibilityLabel={accessibilityLabel}>
-      <AttachmentThumbnail metadata={image} />
-    </AttachmentFrame>
-  );
-}
 
 const MESSAGE_TEXT_DATASET = { messageText: "true" };
 
@@ -441,10 +561,12 @@ export const UserMessage = memo(function UserMessage({
   isLastInGroup = true,
   isPending = false,
   disableOuterSpacing,
+  deliveryState,
+  deliveryMeta,
+  onPressBubble,
+  onLongPressBubble,
 }: UserMessageProps) {
-  const isCompact = useIsCompactFormFactor();
   const { t } = useTranslation();
-  const [isHovered, setIsHovered] = useState(false);
   const [lightboxMetadata, setLightboxMetadata] = useState<UserMessageImageAttachment | null>(null);
   const handleLightboxClose = useCallback(() => setLightboxMetadata(null), []);
   const lightboxSource = useMemo<ImageLightboxSource | null>(
@@ -455,15 +577,14 @@ export const UserMessage = memo(function UserMessage({
   const hasText = message.trim().length > 0;
   const hasImages = images.length > 0;
   const hasAttachments = attachments.length > 0;
-  const showTrailingRow = !isPending && hasText && (isCompact || isNative || isHovered);
+  // Always on screen (desktop and phone alike); pending bubbles show their own clock/tick.
+  const showTrailingRow = isUserMessageTrailingRowVisible({ isPending, hasText });
   const formattedTimestamp = useMemo(
     () => formatMessageTimestamp(new Date(timestamp)),
     [timestamp],
   );
   const rewindMutation = useRewindAgentMutation({ serverId, agentId, client, messageId });
 
-  const handlePointerEnter = useCallback(() => setIsHovered(true), []);
-  const handlePointerLeave = useCallback(() => setIsHovered(false), []);
   const getMessageContent = useCallback(() => message, [message]);
   const handleRewind = useCallback(
     (input: { mode: RewindMode; rewoundText: string }) => {
@@ -483,13 +604,6 @@ export const UserMessage = memo(function UserMessage({
     ],
     [resolvedDisableOuterSpacing, isFirstInGroup, isLastInGroup],
   );
-  const imagePreviewContainerStyle = useMemo(
-    () => [
-      userMessageStylesheet.imagePreviewContainer,
-      hasText || hasAttachments ? userMessageStylesheet.imagePreviewSpacing : undefined,
-    ],
-    [hasAttachments, hasText],
-  );
   const attachmentPreviewContainerStyle = useMemo(
     () => [
       userMessageStylesheet.attachmentPreviewContainer,
@@ -507,50 +621,60 @@ export const UserMessage = memo(function UserMessage({
     [showTrailingRow],
   );
 
+  const { hasBubble, contentStyle } = userMessageLayout({
+    hasImages,
+    hasText,
+    hasAttachments,
+    isPending,
+  });
+
+  const bubbleContent = (
+    <>
+      {hasAttachments ? (
+        <View style={attachmentPreviewContainerStyle}>
+          {attachments.map((attachment, index) => {
+            const content = getAgentAttachmentPillContent(attachment, t);
+            return (
+              <AttachmentFrame
+                key={`${attachment.type}:${"number" in attachment ? attachment.number : index}`}
+              >
+                <AttachmentLabel
+                  icon={content.icon}
+                  title={content.title}
+                  subtitle={content.subtitle}
+                />
+              </AttachmentFrame>
+            );
+          })}
+        </View>
+      ) : null}
+      {hasText ? (
+        <Text
+          selectable={!onPressBubble}
+          style={userMessageStylesheet.text}
+          dataSet={MESSAGE_TEXT_DATASET}
+        >
+          {message}
+        </Text>
+      ) : null}
+      <PendingDeliveryRow state={isPending ? deliveryState : undefined} meta={deliveryMeta} />
+    </>
+  );
+
   return (
     <View style={containerStyle} testID="user-message" aria-busy={isPending}>
-      <View
-        style={userMessageStylesheet.content}
-        onPointerEnter={handlePointerEnter}
-        onPointerLeave={handlePointerLeave}
-      >
-        <View style={userMessageStylesheet.bubble}>
-          {hasImages ? (
-            <View style={imagePreviewContainerStyle}>
-              {images.map((image) => (
-                <UserMessageImagePill
-                  key={image.id}
-                  image={image}
-                  onOpen={setLightboxMetadata}
-                  accessibilityLabel={t("composer.attachments.openImage")}
-                />
-              ))}
-            </View>
-          ) : null}
-          {hasAttachments ? (
-            <View style={attachmentPreviewContainerStyle}>
-              {attachments.map((attachment, index) => {
-                const content = getAgentAttachmentPillContent(attachment, t);
-                return (
-                  <AttachmentFrame
-                    key={`${attachment.type}:${"number" in attachment ? attachment.number : index}`}
-                  >
-                    <AttachmentLabel
-                      icon={content.icon}
-                      title={content.title}
-                      subtitle={content.subtitle}
-                    />
-                  </AttachmentFrame>
-                );
-              })}
-            </View>
-          ) : null}
-          {hasText ? (
-            <Text selectable style={userMessageStylesheet.text} dataSet={MESSAGE_TEXT_DATASET}>
-              {message}
-            </Text>
-          ) : null}
-        </View>
+      <View style={contentStyle}>
+        <UserMessageImages
+          images={images}
+          serverId={serverId}
+          client={client}
+          onOpenLocal={setLightboxMetadata}
+        />
+        {hasBubble ? (
+          <UserMessageBubble onPress={onPressBubble} onLongPress={onLongPressBubble}>
+            {bubbleContent}
+          </UserMessageBubble>
+        ) : null}
         {hasText ? (
           <View
             style={trailingRowStyle}
@@ -560,6 +684,7 @@ export const UserMessage = memo(function UserMessage({
             <Text style={userMessageStylesheet.timestampText} testID="user-message-timestamp">
               {formattedTimestamp}
             </Text>
+            <SettledDeliveryTick state={isPending ? undefined : deliveryState} />
             {capabilities && messageId ? (
               <RewindMenu
                 capabilities={capabilities}
@@ -632,7 +757,6 @@ export const AssistantTurnFooter = memo(function AssistantTurnFooter({
   onFork,
 }: AssistantTurnFooterProps) {
   const { t } = useTranslation();
-  const [hovered, setHovered] = useState(false);
   const [pressedReveal, setPressedReveal] = useState(false);
   const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -655,14 +779,16 @@ export const AssistantTurnFooter = memo(function AssistantTurnFooter({
     [completedAt],
   );
 
-  const primaryLabel = durationLabel || timestampLabel;
-  const canSwap = Boolean(durationLabel && timestampLabel);
-  const showTimestamp = canSwap && (isWeb ? hovered : pressedReveal);
+  // Desktop/web shows duration and end time together; the phone keeps tap-to-swap.
+  const { label, sizer, canSwap } = resolveAssistantFooterLabels({
+    durationLabel,
+    timestampLabel,
+    showBoth: isWeb,
+    revealTimestamp: pressedReveal,
+  });
 
-  const handleHoverIn = useCallback(() => setHovered(true), []);
-  const handleHoverOut = useCallback(() => setHovered(false), []);
   const handlePress = useCallback(() => {
-    if (isWeb || !canSwap) return;
+    if (!canSwap) return;
     if (revealTimerRef.current) {
       clearTimeout(revealTimerRef.current);
     }
@@ -687,23 +813,22 @@ export const AssistantTurnFooter = memo(function AssistantTurnFooter({
         containerStyle={assistantTurnFooterStylesheet.copyButton}
       />
       {canFork ? <AssistantForkMenu onFork={handleFork} /> : null}
-      {primaryLabel ? (
+      {label ? (
         <Pressable
           onPress={handlePress}
-          onHoverIn={handleHoverIn}
-          onHoverOut={handleHoverOut}
           accessibilityRole={canSwap ? "button" : undefined}
-          accessibilityLabel={canSwap ? `${durationLabel}, ended ${timestampLabel}` : primaryLabel}
+          accessibilityLabel={
+            durationLabel && timestampLabel ? `${durationLabel}, ended ${timestampLabel}` : label
+          }
+          testID="assistant-turn-footer-label"
         >
           <View style={assistantTurnFooterStylesheet.labelWrapper}>
-            {/* Sizer reserves space for whichever label is longer so the
-                container width is stable across hover transitions. */}
+            {/* Sizer reserves space for the longer label so the container
+                width stays stable when the phone swaps labels on tap. */}
             <Text style={assistantTurnFooterStylesheet.labelSizer} aria-hidden>
-              {primaryLabel.length >= timestampLabel.length ? primaryLabel : timestampLabel}
+              {sizer}
             </Text>
-            <Text style={assistantTurnFooterStylesheet.labelOverlay}>
-              {showTimestamp ? timestampLabel : primaryLabel}
-            </Text>
+            <Text style={assistantTurnFooterStylesheet.labelOverlay}>{label}</Text>
           </View>
         </Pressable>
       ) : null}
@@ -3040,6 +3165,13 @@ interface ToolCallProps {
   defaultExpanded?: boolean;
   forceInline?: boolean;
   maxDetailHeight?: number;
+  /**
+   * Set when the row arrived compacted (compactTimeline): the full detail is loaded from this
+   * agent's host when the row is expanded.
+   */
+  compactServerId?: string;
+  compactAgentId?: string;
+  compactCallId?: string;
 }
 
 export const ToolCall = memo(function ToolCall({
@@ -3060,14 +3192,29 @@ export const ToolCall = memo(function ToolCall({
   defaultExpanded,
   forceInline = false,
   maxDetailHeight = 400,
+  compactServerId,
+  compactAgentId,
+  compactCallId,
 }: ToolCallProps) {
   const { openToolCall } = useToolCallSheet();
   const [isExpanded, setIsExpanded] = useState(defaultExpanded ?? false);
+  const [fullDetail, setFullDetail] = useState<ToolCallDetail | null>(null);
+  const loadFullDetail = useMemo(() => {
+    if (!compactServerId || !compactAgentId || !compactCallId) return undefined;
+    return async (): Promise<ToolCallDetail | null> => {
+      const client = useSessionStore.getState().sessions[compactServerId]?.client;
+      if (!client) return null;
+      return loadFullToolCallDetail(client, compactAgentId, compactCallId);
+    };
+  }, [compactServerId, compactAgentId, compactCallId]);
 
   const isMobile = useIsCompactFormFactor();
   const shouldRenderInline = !isMobile || forceInline;
 
   const effectiveDetail = useMemo<ToolCallDetail | undefined>(() => {
+    if (fullDetail) {
+      return fullDetail;
+    }
     if (detail) {
       return detail;
     }
@@ -3079,7 +3226,7 @@ export const ToolCall = memo(function ToolCall({
       };
     }
     return undefined;
-  }, [detail, args, result]);
+  }, [fullDetail, detail, args, result]);
 
   const presentation = useMemo(
     () =>
@@ -3105,19 +3252,54 @@ export const ToolCall = memo(function ToolCall({
 
   const handleToggle = useCallback(() => {
     if (!shouldRenderInline) {
-      openToolCall({
-        toolName,
-        displayName: presentation.displayName,
-        summary: presentation.summary,
-        detail: presentation.detail,
-        errorText: presentation.errorText,
-        icon: presentation.icon,
-        showLoadingSkeleton: presentation.isLoadingDetails,
-      });
+      const open = (fullPresentationDetail: ToolCallDetail | null) =>
+        openToolCall({
+          toolName,
+          displayName: presentation.displayName,
+          summary: presentation.summary,
+          detail: fullPresentationDetail
+            ? buildToolCallPresentation({
+                agentMessage,
+                toolName,
+                status,
+                error: error ?? null,
+                detail: fullPresentationDetail,
+                metadata,
+                cwd,
+                resolveIcon: resolveToolCallIcon,
+              }).detail
+            : presentation.detail,
+          errorText: presentation.errorText,
+          icon: presentation.icon,
+          showLoadingSkeleton: presentation.isLoadingDetails,
+        });
+      if (loadFullDetail && !fullDetail) {
+        void loadFullDetail().then((loaded) => {
+          if (loaded) setFullDetail(loaded);
+          open(loaded);
+          return undefined;
+        });
+        return;
+      }
+      open(null);
     } else {
+      if (loadFullDetail && !fullDetail && !isExpanded) {
+        void loadFullDetail().then((loaded) => {
+          if (loaded) setFullDetail(loaded);
+          return undefined;
+        });
+      }
       setIsExpanded((prev) => !prev);
     }
   }, [
+    loadFullDetail,
+    fullDetail,
+    isExpanded,
+    agentMessage,
+    status,
+    error,
+    metadata,
+    cwd,
     shouldRenderInline,
     openToolCall,
     toolName,

@@ -1,5 +1,5 @@
 import { OpenCodeRuntimeClient } from "./opencode/runtime-client.js";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -395,6 +395,13 @@ test.each([
     let original: Awaited<ReturnType<typeof client.createSession>> | undefined;
     let resumed: Awaited<ReturnType<typeof client.resumeSession>> | undefined;
     try {
+      // npm 12 skips install scripts unless allowed, and the CLI's postinstall places the
+      // binary its bin links to. Older npm ignores the field.
+      const cliName = cliPackage.slice(0, cliPackage.lastIndexOf("@"));
+      await writeFile(
+        path.join(root, "package.json"),
+        JSON.stringify({ private: true, allowScripts: { [cliName]: true } }),
+      );
       await execCommand(
         "npm",
         ["install", "--prefix", root, "--no-audit", "--no-fund", cliPackage],

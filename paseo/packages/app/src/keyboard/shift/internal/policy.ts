@@ -10,29 +10,36 @@ export function reserveKeyboardLayoutShift(input: {
   return input.phase === "start" ? Math.max(input.current, input.target) : input.target;
 }
 
+/**
+ * Scroll room at the inverted chat's far end (the visual top). The keyboard shift translates the
+ * list up by `settledShift`; `farEndOverlayInset` is chrome floating over the top of the list (the
+ * phone's glass header), which the history scrolls under but must be able to clear.
+ */
 export function resolveStreamKeyboardInset(input: {
   platform: "android" | "ios";
   settledShift: number;
+  farEndOverlayInset?: number;
 }): {
   contentContainerPaddingBottom: number;
   contentInset: { bottom: number } | undefined;
 } {
   const settledShift = Math.max(0, input.settledShift);
+  const farEnd = settledShift + Math.max(0, input.farEndOverlayInset ?? 0);
   if (input.platform === "ios") {
     return {
       contentContainerPaddingBottom: 0,
-      contentInset: { bottom: settledShift },
+      contentInset: { bottom: farEnd },
     };
   }
   return {
-    contentContainerPaddingBottom: settledShift,
+    contentContainerPaddingBottom: farEnd,
     contentInset: undefined,
   };
 }
 
 export function shouldUseCompactExplorerKeyboardPadding(input: {
   isGit: boolean;
-  explorerTab: "changes" | "files" | "pr";
+  explorerTab: "changes" | "files" | "pr" | "network";
 }): boolean {
   return !input.isGit || input.explorerTab !== "changes";
 }

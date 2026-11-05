@@ -13,6 +13,7 @@ import {
   useLastWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
+import { useMobileHomeStartRoute, useStartHome } from "@/plugins/mobile-home-runtime";
 
 const isDesktop = shouldUseDesktopDaemon();
 
@@ -32,6 +33,9 @@ export default function Index() {
     workspaceSelectionWorkspaceId,
   );
 
+  const mobileHome = useStartHome();
+  const mobileHomeStart = useMobileHomeStartRoute();
+
   const startupRoute = resolveStartupRoute({
     route: { kind: "index", pathname },
     startupBlocker: bootstrapState.startupBlocker,
@@ -45,6 +49,11 @@ export default function Index() {
     }),
     isWorkspaceSelectionLoaded,
     hasGivenUpWaitingForHost: bootstrapState.hasGivenUpWaitingForHost,
+    mobileHome:
+      mobileHome && mobileHomeStart.route
+        ? { serverId: mobileHome.serverId, route: mobileHomeStart.route }
+        : null,
+    isMobileHomeLoaded: mobileHomeStart.ready,
   });
 
   if (startupRoute.kind === "redirect") {

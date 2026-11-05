@@ -103,6 +103,7 @@ describe("plugin context snapshots", () => {
       thinkingOptionId: "high",
       requiresAttention: true,
       attentionReason: "permission",
+      pendingPermissionCount: 0,
       parentAgentId: null,
       labels: { phase: "implementation" },
     });
@@ -115,5 +116,13 @@ describe("plugin context snapshots", () => {
     expect(snapshot.labels).toEqual({ phase: "implementation" });
     expect(agent.title).toBe("Implement plugin panels");
     expect(agent.labels).toEqual({ phase: "implementation" });
+  });
+
+  it("counts the agent's open permission prompts", () => {
+    const waiting = {
+      ...agent,
+      pendingPermissions: [{}, {}] as unknown as Agent["pendingPermissions"],
+    };
+    expect(createPluginAgentSnapshot(waiting, workspace.id).pendingPermissionCount).toBe(2);
   });
 });

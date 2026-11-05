@@ -122,6 +122,7 @@ import type { SpeechReadinessSnapshot } from "./speech/speech-runtime.js";
 
 interface WebSocketServerInternals {
   attachSocket(ws: unknown, req: unknown): Promise<void>;
+  attachAuthenticatedSocket(ws: unknown, req: unknown, password: string): Promise<void>;
 }
 
 const TEST_DAEMON_VERSION = "1.2.3-test";
@@ -572,6 +573,118 @@ describe("relay external socket reconnect behavior", () => {
           accepts: ["password"],
         }),
       );
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("issues a session token to a capable client whose password came in the upgrade headers", async () => {
+    const hash = "$2b$12$OLxyuuP9uLK30Uzc4wQX0O6liuU/Q1t5P2b0Ebf36mULvpVK3DRZW";
+    const server = createServer({ auth: { password: hash } });
+    try {
+      // A direct socket: header validation pauses it until the hello handler is ready.
+      const socket = Object.assign(new MockSocket(), { pause() {}, resume() {} });
+      const request = createDirectRequest();
+      await asInternals<WebSocketServerInternals>(server).attachAuthenticatedSocket(
+        socket,
+        { ...request, headers: { ...request.headers, authorization: "Bearer correct-password" } },
+        hash,
+      );
+      socket.emit(
+        "message",
+        JSON.stringify(createHelloMessage("browser", { capabilities: { session_tokens: true } })),
+      );
+      await vi.waitFor(() => expect(sentServerInfoEnvelopes(socket)).toHaveLength(1));
+      const frames = socket.sent
+        .filter((data): data is string => typeof data === "string")
+        .map((data) => JSON.parse(data) as { type: string; token?: string });
+      expect(frames.find((frame) => frame.type === "session.token")?.token).toMatch(/^pst1\./);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("issues a session token after a password hello and admits it in place of the password", async () => {
+    const server = createServer({
+      auth: { password: "$2b$12$OLxyuuP9uLK30Uzc4wQX0O6liuU/Q1t5P2b0Ebf36mULvpVK3DRZW" },
+    });
+    const sessionTokenFrames = (socket: MockSocket) =>
+      socket.sent
+        .filter((data): data is string => typeof data === "string")
+        .map((data) => JSON.parse(data) as { type: string; token?: string; expiresAt?: number })
+        .filter((frame) => frame.type === "session.token");
+    try {
+      const passwordSocket = new MockSocket();
+      await server.attachExternalSocket(passwordSocket, { transport: "relay" });
+      passwordSocket.emit(
+        "message",
+        JSON.stringify({
+          ...createHelloMessage("phone", { capabilities: { session_tokens: true } }),
+          auth: { kind: "password", password: "correct-password" },
+        }),
+      );
+      await vi.waitFor(() => expect(sentServerInfoEnvelopes(passwordSocket)).toHaveLength(1));
+      const [issued] = sessionTokenFrames(passwordSocket);
+      expect(issued?.token).toMatch(/^pst1\./);
+      expect(issued?.expiresAt).toBeGreaterThan(Date.now());
+
+      const tokenSocket = new MockSocket();
+      await server.attachExternalSocket(tokenSocket, { transport: "relay" });
+      tokenSocket.emit(
+        "message",
+        JSON.stringify({
+          ...createHelloMessage("phone", { capabilities: { session_tokens: true } }),
+          auth: { kind: "sessionToken", token: issued!.token },
+        }),
+      );
+      await vi.waitFor(() => expect(sentServerInfoEnvelopes(tokenSocket)).toHaveLength(1));
+      // A fresh token is not due yet: none is sent back.
+      expect(sessionTokenFrames(tokenSocket)).toHaveLength(0);
+
+      // The same secret from another device is refused, as a token problem, not a wrong password.
+      const otherSocket = new MockSocket();
+      await server.attachExternalSocket(otherSocket, { transport: "relay" });
+      otherSocket.emit(
+        "message",
+        JSON.stringify({
+          ...createHelloMessage("laptop", { capabilities: { session_tokens: true } }),
+          auth: { kind: "sessionToken", token: issued!.token },
+        }),
+      );
+      await vi.waitFor(() => expect(otherSocket.readyState).toBe(3));
+      expect(otherSocket.sent).toContain(
+        JSON.stringify({
+          type: "hello.rejected",
+          reason: "session_token_invalid",
+          accepts: ["password"],
+        }),
+      );
+
+      // Revoked: refused too.
+      expect(server.revokeSessionToken("phone")).toBe(true);
+      const revokedSocket = new MockSocket();
+      await server.attachExternalSocket(revokedSocket, { transport: "relay" });
+      revokedSocket.emit(
+        "message",
+        JSON.stringify({
+          ...createHelloMessage("phone", { capabilities: { session_tokens: true } }),
+          auth: { kind: "sessionToken", token: issued!.token },
+        }),
+      );
+      await vi.waitFor(() => expect(revokedSocket.readyState).toBe(3));
+
+      // A client that does not advertise session_tokens never gets one.
+      const oldClientSocket = new MockSocket();
+      await server.attachExternalSocket(oldClientSocket, { transport: "relay" });
+      oldClientSocket.emit(
+        "message",
+        JSON.stringify({
+          ...createHelloMessage("old-phone"),
+          auth: { kind: "password", password: "correct-password" },
+        }),
+      );
+      await vi.waitFor(() => expect(sentServerInfoEnvelopes(oldClientSocket)).toHaveLength(1));
+      expect(sessionTokenFrames(oldClientSocket)).toHaveLength(0);
     } finally {
       await server.close();
     }
@@ -1147,6 +1260,18 @@ describe("relay external socket reconnect behavior", () => {
     expect(serverInfo.features?.["terminal-size-ownership"]).toBe(true);
     expect(serverInfo.features?.agentTurnIdentity).toBeUndefined();
     expect(serverInfo.permissions).toEqual(DAEMON_PERMISSIONS);
+    await server.close();
+  });
+
+  test("sends DinoBot's display version beside the engine version", async () => {
+    const server = createServer();
+    const socket = new MockSocket();
+
+    const serverInfo = await attachRelayAndHello({ server, socket, clientId: "cid-display" });
+
+    expect(serverInfo.version).toBe(TEST_DAEMON_VERSION);
+    expect(serverInfo.productName).toBe("DinoBot");
+    expect(serverInfo.displayVersion).toBe("0.1.3");
     await server.close();
   });
 

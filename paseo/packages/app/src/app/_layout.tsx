@@ -1,4 +1,7 @@
 import "@/styles/unistyles";
+import { startOutboxRuntime } from "@/runtime/outbox-runtime";
+import { startNetworkMonitor } from "@/runtime/network-monitor";
+import { getOutboxSender } from "@/composer/outbox/sender";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { PortalProvider } from "@gorhom/portal";
 import { LucideProvider } from "lucide-react-native";
@@ -59,8 +62,11 @@ import {
   resolveDesktopSidebarVisibility,
 } from "@/components/desktop-sidebar-layout";
 import { isNative, isWeb } from "@/constants/platform";
+import { APP_LINK_SCHEME, RELEASE_POLICY } from "@/constants/flavour";
+import { pairLinkFromIncoming } from "@/hosts/pair-deep-link";
 import { HorizontalScrollProvider } from "@/contexts/horizontal-scroll-context";
 import { SessionProvider } from "@/contexts/session-context";
+import { startDesktopPowerResume } from "@/desktop/electron/power-resume";
 import { SidebarCalloutProvider } from "@/contexts/sidebar-callout-context";
 import { ToastProvider } from "@/contexts/toast-context";
 import { VoiceProvider } from "@/contexts/voice-context";
@@ -76,6 +82,7 @@ import { registerWorkspaceRouteNavigationRef } from "@/navigation/workspace-rout
 import { ThemedStack } from "@/navigation/themed-stack";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
 import { AgentNavigationListener } from "@/desktop/agent-navigation";
+import { AppLinkNavigationListener } from "@/desktop/app-link-navigation";
 import { LegacyAgentSkillsMigration } from "@/agent-skills/legacy-migration";
 import { legacyFavoriteProfileMigration } from "@/agent-profiles/migration";
 import { listenToDesktopEvent } from "@/desktop/electron/events";
@@ -130,8 +137,10 @@ import {
   parseServerIdFromPathname,
 } from "@/utils/host-routes";
 import { buildNotificationRoute, resolveNotificationTarget } from "@/utils/notification-routing";
+import { isApnsPluginPush } from "@/push-notifications/internal/push-config";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
-import { PluginCatalogSync } from "@/plugins";
+import { PluginCacheRestore, PluginCatalogSync } from "@/plugins";
+import { MobileHomeSync } from "@/plugins/mobile-home-runtime";
 import {
   ensureOsNotificationPermission,
   WEB_NOTIFICATION_CLICK_EVENT,
@@ -225,14 +234,18 @@ function PushNotificationRouter() {
     }
 
     Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        // When the app is open, don't show OS banners.
-        shouldShowAlert: false,
-        shouldShowBanner: false,
-        shouldShowList: false,
-        shouldPlaySound: false,
-        shouldSetBadge: false,
-      }),
+      handleNotification: async (notification) => {
+        // When the app is open, don't show OS banners, except for pushes from the paseo-apns
+        // plugin (bot DMs to the owner): those are sent deliberately and show in the foreground too.
+        const show = isApnsPluginPush(notification.request.content.data);
+        return {
+          shouldShowAlert: show,
+          shouldShowBanner: show,
+          shouldShowList: show,
+          shouldPlaySound: show,
+          shouldSetBadge: false,
+        };
+      },
     });
 
     const openFromResponse = (response: Notifications.NotificationResponse) => {
@@ -314,6 +327,10 @@ function HostSessionManager() {
       {hosts.map((daemon) => (
         <ManagedDaemonSession key={daemon.serverId} daemon={daemon} />
       ))}
+      {/* Plugin cache: cached plugin UI shows before the host connects (no client yet). */}
+      {hosts.map((daemon) => (
+        <PluginCacheRestore key={`plugin-cache:${daemon.serverId}`} serverId={daemon.serverId} />
+      ))}
     </>
   );
 }
@@ -365,6 +382,10 @@ async function shouldStartBuiltInDaemon(): Promise<boolean> {
   if (hasConfiguredLocalDaemonOverride()) {
     return false;
   }
+  // Public flavour: the computer already runs the installed server; pair with it like the phone.
+  if (!RELEASE_POLICY.desktopBuiltInDaemon) {
+    return false;
+  }
   const settings = await loadDesktopSettings();
   return settings.daemon.manageBuiltInDaemon;
 }
@@ -374,6 +395,33 @@ function HostRuntimeBootstrapProvider({ children }: { children: ReactNode }) {
     const store = getHostRuntimeStore();
     return bindHostRuntimeAppState(store, AppState);
   }, []);
+
+  useEffect(() => startOutboxRuntime(getHostRuntimeStore()), []);
+
+  // Desktop: lid open / unlock reconnects now instead of at the next heartbeat or backoff.
+  useEffect(
+    () =>
+      startDesktopPowerResume({
+        onResume: () => {
+          getHostRuntimeStore().ensureConnectedAll({ verify: true });
+          getOutboxSender()?.retryNow();
+        },
+      }),
+    [],
+  );
+
+  useEffect(
+    () =>
+      startNetworkMonitor({
+        onReconnectNeeded: () => {
+          // A path change can leave a socket that looks open but is dead: probe it now rather
+          // than at the next heartbeat, and stop the outbox waiting out its backoff.
+          getHostRuntimeStore().ensureConnectedAll({ verify: true });
+          getOutboxSender()?.retryNow();
+        },
+      }),
+    [],
+  );
 
   useEffect(() => {
     const store = getHostRuntimeStore();
@@ -675,6 +723,8 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
         <OfferLinkListener />
         <HostSessionManager />
         <FaviconStatusSync />
+        {/* Writes the phone-home record that the cold-start redirect reads (paseo:mobile-home). */}
+        <MobileHomeSync />
         {children}
       </VoiceProvider>
     </AppearanceProvider>
@@ -708,6 +758,9 @@ function OfferLinkListener() {
       if (!url) return;
       if (!url.includes("#offer=") && !url.includes("#connect=") && !url.startsWith("relay://"))
         return;
+      // <scheme>://pair links open the /pair screen (+native-intent.tsx), which shows progress,
+      // the password prompt and errors; pairing them here too would pair twice.
+      if (pairLinkFromIncoming(url, APP_LINK_SCHEME)) return;
       try {
         const result = await getHostRuntimeStore().importConnectionLink(url, "openProject");
         if (!cancelled && result.status === "connected") router.replace(buildOpenProjectRoute());
@@ -863,6 +916,7 @@ function AppWithSidebar({ children }: { children: ReactNode }) {
       pathname === "/new" ||
       pathname === "/sessions" ||
       pathname === "/schedules" ||
+      pathname === "/network" ||
       routeHasKnownHost);
 
   return <AppContainer chromeEnabled={shouldShowAppChrome}>{children}</AppContainer>;
@@ -896,7 +950,14 @@ function RootStack() {
         <Stack.Screen name="sessions" />
         <Stack.Screen name="schedules" />
         <Stack.Screen name="pair-scan" />
+        <Stack.Screen name="network" />
       </Stack.Protected>
+      {/* Outside the guard: a cold-start deep link must not be redirected away before load. */}
+      <Stack.Screen name="pair" />
+      <Stack.Screen name="provider-link" />
+      <Stack.Screen name="setup" />
+      <Stack.Screen name="setup-signin" />
+      <Stack.Screen name="setup-models" />
       <Stack.Screen name="h/[serverId]" />
       <Stack.Screen name="settings/hosts/[serverId]/index" />
       <Stack.Screen name="settings/hosts/[serverId]/[hostSection]" />
@@ -923,6 +984,7 @@ function AppShell() {
       <HorizontalScrollProvider>
         <OpenProjectListener />
         <AgentNavigationListener />
+        <AppLinkNavigationListener />
         <AppWithSidebar>
           <WorkspaceRouteNavigationBridge />
           <RootStack />

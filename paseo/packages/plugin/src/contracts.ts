@@ -11,6 +11,11 @@ export interface PluginTheme {
     readonly foregroundMuted: string;
     readonly accent: string;
     readonly accentForeground: string;
+    /**
+     * The accent as a foreground on surface0-2 (text, outlines, dots), readable where the accent
+     * itself is a pale fill colour. Missing on apps before it was added: fall back to `accent`.
+     */
+    readonly accentText?: string;
     readonly statusSuccess: string;
     readonly statusWarning: string;
     readonly statusDanger: string;
@@ -48,6 +53,8 @@ export interface PluginAgentSnapshot {
   readonly thinkingOptionId: string | null;
   readonly requiresAttention: boolean;
   readonly attentionReason: "finished" | "error" | "permission" | null;
+  /** Permission prompts waiting for an answer. Older hosts leave it out. */
+  readonly pendingPermissionCount?: number;
   readonly parentAgentId: string | null;
   readonly labels: Readonly<Record<string, string>>;
 }

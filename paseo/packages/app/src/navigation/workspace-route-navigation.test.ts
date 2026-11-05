@@ -3,6 +3,7 @@ import type { NavigationContainerRefWithCurrent } from "@react-navigation/native
 import {
   navigateToHostWorkspaceRoute,
   registerWorkspaceRouteNavigationRef,
+  setWorkspaceNavigationMobileHome,
 } from "./workspace-route-navigation";
 
 function createNavigationRef(rootState: unknown, options: { ready?: boolean } = {}) {
@@ -37,6 +38,7 @@ describe("navigateToHostWorkspaceRoute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     registerWorkspaceRouteNavigationRef(createNavigationRef({}).navigationRef)();
+    setWorkspaceNavigationMobileHome(null);
   });
 
   it("falls back to route navigation when no host route is mounted yet", () => {
@@ -213,5 +215,74 @@ describe("navigateToHostWorkspaceRoute", () => {
     registerWorkspaceRouteNavigationRef(replacement.navigationRef);
 
     expect(dismissTo).toHaveBeenCalledWith("/h/server-1/workspace/workspace-a");
+  });
+
+  describe("phone home", () => {
+    // Sam 2026-10-12: "can we have a nice swipe between the bot home page and chats, at the
+    // moment its a harsh transition". The chat replaced the home (dismissTo, no animation).
+    const HOME = { serverId: "server-1", pluginId: "bots", screenId: "home" };
+    const homeRoute = {
+      key: "home",
+      name: "plugin/[pluginId]/[contributionKind]/[contributionId]",
+      params: { pluginId: "bots", contributionKind: "surface", contributionId: "home" },
+    };
+    const chatRoute = {
+      key: "chat",
+      name: "workspace/[workspaceId]/index",
+      params: { workspaceId: "workspace-a" },
+    };
+    function rootState(hostRoutes: object[]) {
+      return {
+        key: "root-stack",
+        index: 0,
+        routes: [
+          {
+            key: "host-server-1",
+            name: "h/[serverId]",
+            params: { serverId: "server-1" },
+            state: { key: "host-stack", index: hostRoutes.length - 1, routes: hostRoutes },
+          },
+        ],
+      };
+    }
+
+    it("pushes a chat opened from the home over it", () => {
+      setWorkspaceNavigationMobileHome(HOME);
+      const { navigationRef, dispatch } = createNavigationRef(rootState([homeRoute]));
+      registerWorkspaceRouteNavigationRef(navigationRef);
+      const dismissTo = vi.fn();
+      const push = vi.fn();
+
+      navigateToHostWorkspaceRoute("/h/server-1/workspace/workspace-a", { dismissTo, push });
+
+      expect(push).toHaveBeenCalledExactlyOnceWith("/h/server-1/workspace/workspace-a");
+      expect(dismissTo).not.toHaveBeenCalled();
+      expect(dispatch).not.toHaveBeenCalled();
+    });
+
+    it("keeps chat to chat in place (no push stacking chats)", () => {
+      setWorkspaceNavigationMobileHome(HOME);
+      const { navigationRef } = createNavigationRef(rootState([homeRoute, chatRoute]));
+      registerWorkspaceRouteNavigationRef(navigationRef);
+      const dismissTo = vi.fn();
+      const push = vi.fn();
+
+      navigateToHostWorkspaceRoute("/h/server-1/workspace/workspace-b", { dismissTo, push });
+
+      expect(push).not.toHaveBeenCalled();
+      expect(dismissTo).toHaveBeenCalledWith("/h/server-1/workspace/workspace-b");
+    });
+
+    it("does not push without a phone home (laptop unchanged)", () => {
+      const { navigationRef } = createNavigationRef(rootState([homeRoute]));
+      registerWorkspaceRouteNavigationRef(navigationRef);
+      const dismissTo = vi.fn();
+      const push = vi.fn();
+
+      navigateToHostWorkspaceRoute("/h/server-1/workspace/workspace-a", { dismissTo, push });
+
+      expect(push).not.toHaveBeenCalled();
+      expect(dismissTo).toHaveBeenCalledWith("/h/server-1/workspace/workspace-a");
+    });
   });
 });

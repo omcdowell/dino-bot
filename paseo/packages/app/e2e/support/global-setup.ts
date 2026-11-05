@@ -2,7 +2,9 @@ import { warmMetro } from "./metro-warmup.mjs";
 export { warmMetro } from "./metro-warmup.mjs";
 import { spawn, type ChildProcess } from "node:child_process";
 import { killProcessTree } from "./helpers/spawn-node";
-import { existsSync } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
+import { stat } from "node:fs/promises";
+import http from "node:http";
 import path from "node:path";
 import net from "node:net";
 import dotenv from "dotenv";
@@ -129,7 +131,11 @@ function startMetro(port: number, buffer: ReturnType<typeof createLineBuffer>): 
   const appDir = path.resolve(__dirname, "../..");
   const expoCli = require.resolve("expo/bin/cli");
   // Spawns Node directly to bypass Windows .cmd shim execution restrictions without shell: true.
-  const child = spawn(process.execPath, [expoCli, "start", "--web", "--port", String(port)], {
+  // E2E_METRO_MAX_WORKERS caps Metro's transform workers on hosts short of memory.
+  const maxWorkers = process.env.E2E_METRO_MAX_WORKERS;
+  const args = [expoCli, "start", "--web", "--port", String(port)];
+  if (maxWorkers) args.push("--max-workers", maxWorkers);
+  const child = spawn(process.execPath, args, {
     cwd: appDir,
     env: {
       ...process.env,
@@ -150,6 +156,53 @@ function startMetro(port: number, buffer: ReturnType<typeof createLineBuffer>): 
   return child;
 }
 
+const STATIC_CONTENT_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".ttf": "font/ttf",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".wasm": "application/wasm",
+};
+
+// E2E_WEB_DIST serves a prebuilt `expo export --platform web` directory instead of starting
+// Metro. Bundling the app takes ~3 GB cold; serving the export takes almost nothing, so
+// hosts short of memory build once (in its own capped job) and test against the files.
+async function startStaticWebServer(distDir: string, port: number): Promise<http.Server> {
+  const root = path.resolve(distDir);
+  const indexHtml = path.join(root, "index.html");
+  if (!existsSync(indexHtml)) throw new Error(`E2E_WEB_DIST has no index.html: ${root}`);
+  const server = http.createServer(async (request, response) => {
+    const url = new URL(request.url ?? "/", "http://localhost");
+    if (url.pathname === "/status") {
+      response.end("packager-status:running");
+      return;
+    }
+    let filePath = path.join(root, decodeURIComponent(url.pathname));
+    if (!filePath.startsWith(root)) filePath = indexHtml;
+    const info = await stat(filePath).catch(() => null);
+    // Single-page app: unknown routes get index.html, like Metro's web dev server.
+    if (!info?.isFile()) filePath = indexHtml;
+    response.writeHead(200, {
+      "content-type":
+        STATIC_CONTENT_TYPES[path.extname(filePath).toLowerCase()] ?? "application/octet-stream",
+      "cache-control": "no-cache",
+    });
+    createReadStream(filePath).pipe(response);
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => resolve());
+  });
+  return server;
+}
+
 async function loadHarnessEnvironment(repoRoot: string): Promise<void> {
   const envTestPath = path.join(repoRoot, ".env.test");
   if (existsSync(envTestPath)) dotenv.config({ path: envTestPath });
@@ -166,6 +219,16 @@ export default async function globalSetup() {
   await loadHarnessEnvironment(repoRoot);
 
   const metroPort = await getAvailableE2EPort();
+  const webDist = process.env.E2E_WEB_DIST?.trim();
+  if (webDist) {
+    const server = await startStaticWebServer(webDist, metroPort);
+    process.env.E2E_METRO_PORT = String(metroPort);
+    console.log(`[e2e] Serving prebuilt web export ${webDist} on port ${metroPort} (no Metro)`);
+    return async () => {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    };
+  }
   const metroOutput = createLineBuffer();
   let metroProcess: ChildProcess | null = null;
 

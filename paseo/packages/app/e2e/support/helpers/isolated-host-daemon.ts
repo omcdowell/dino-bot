@@ -169,9 +169,12 @@ export async function startIsolatedHostDaemon(
       stdio: ["ignore", "ignore", "pipe"],
       detached: false,
     };
-    const child = publishedPackageRoot
-      ? spawn(process.execPath, ["dist/scripts/supervisor-entrypoint.js"], spawnOptions)
-      : spawnTsx("scripts/supervisor-entrypoint.ts", ["--dev"], spawnOptions);
+    // E2E_DAEMON_FROM_DIST=1 runs the built server (`npm run build --workspace=@getpaseo/server`)
+    // instead of tsx on the sources: about half the memory, but the build must be current.
+    const child =
+      publishedPackageRoot || process.env.E2E_DAEMON_FROM_DIST === "1"
+        ? spawn(process.execPath, ["dist/scripts/supervisor-entrypoint.js"], spawnOptions)
+        : spawnTsx("scripts/supervisor-entrypoint.ts", ["--dev"], spawnOptions);
 
     let stderr = "";
     child.stderr?.on("data", (chunk: Buffer) => {

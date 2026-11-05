@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   AgentStatusSchema,
+  AgentTimelineImageSchema,
   AgentTimelineItemPayloadSchema,
   WorkspaceGitHubRuntimePayloadSchema,
 } from "@getpaseo/protocol/messages";
@@ -15,6 +16,7 @@ import {
   type WorkspaceDescriptor,
 } from "@/stores/session-store";
 import {
+  isChatImageReference,
   isUnreconciledLocalUserMessage,
   type AgentToolCallData,
   type StreamItem,
@@ -25,10 +27,19 @@ import {
   REPLICA_SINGLETON_ROW_ID,
   type ReplicaRow,
   type ReplicaRowChanges,
+  type ReplicaRowIndexEntry,
   type ReplicaRowKey,
   type ReplicaRowKind,
   type ReplicaRowStore,
 } from "./row-store";
+import { utf8ByteLength } from "./row-store-sqlite";
+import {
+  archivedChainEnd,
+  parseTimelinePageId,
+  planTimelineSeal,
+  timelinePageId,
+  type ArchivedPageRef,
+} from "./timeline-persistence";
 
 export type DirectoryReplicaMutation =
   | { kind: "agent"; type: "upsert"; id: string; value: Agent }
@@ -68,9 +79,19 @@ export interface CachedTimeline {
   hasOlder: boolean;
 }
 
+/** An older page read from disk: items in display order and the exact range they cover. */
+export interface CachedTimelinePage {
+  items: StreamItem[];
+  range: { epoch: string; startSeq: number; endSeq: number };
+  hasOlder: boolean;
+}
+
 const PERSIST_DELAY_MS = 1_000;
 const MAX_TIMELINE_ITEMS = 50;
+/** Default budget; the native app passes 500 MB (2026-10-10). */
 const MAX_CACHE_BYTES = 32 * 1024 * 1024;
+/** After an over-budget write, evict down to this share so the next writes don't evict again. */
+const EVICT_TO_RATIO = 0.9;
 const IsoDateSchema = z.iso.datetime();
 const TimelinePositionSchema = z.strictObject({
   epoch: z.string(),
@@ -118,6 +139,8 @@ const StoredTimelineItemSchema = z.discriminatedUnion("kind", [
     clientMessageId: z.string().optional(),
     messageId: z.string().optional(),
     text: z.string(),
+    // chatImages references only; local attachments make the row display-only.
+    images: z.array(AgentTimelineImageSchema).optional(),
   }),
   z.strictObject({
     ...TimelineItemBaseShape,
@@ -348,6 +371,16 @@ const StoredTimelineSchema = z.strictObject({
   hasOlder: z.boolean(),
 });
 
+const StoredTimelinePageSchema = z.strictObject({
+  agentId: z.string(),
+  epoch: z.string(),
+  startSeq: z.number().int().nonnegative(),
+  endSeq: z.number().int().nonnegative(),
+  hasOlder: z.boolean(),
+  items: z.array(StoredTimelineItemSchema),
+});
+
+type StoredTimelinePage = z.infer<typeof StoredTimelinePageSchema>;
 type StoredAgent = z.infer<typeof StoredAgentSchema>;
 type StoredTimeline = z.infer<typeof StoredTimelineSchema>;
 type StoredTimelineItem = z.infer<typeof StoredTimelineItemSchema>;
@@ -422,6 +455,7 @@ function serializeAgentToolCall(data: AgentToolCallData): StoredToolCall {
     detail: data.detail,
     ...(data.metadata ? { metadata: data.metadata } : {}),
     ...(data.agentMessage ? { agentMessage: data.agentMessage } : {}),
+    ...(data.images?.length ? { images: data.images } : {}),
   };
   switch (data.status) {
     case "running":
@@ -443,6 +477,9 @@ function serializeTimelineItem(item: StreamItem): StoredTimelineItem | null {
         ...(item.clientMessageId ? { clientMessageId: item.clientMessageId } : {}),
         ...(item.messageId ? { messageId: item.messageId } : {}),
         text: item.text,
+        ...(item.images?.length && item.images.every(isChatImageReference)
+          ? { images: item.images.map(({ local: _local, ...image }) => image) }
+          : {}),
       };
     case "assistant_message":
       return {
@@ -516,6 +553,10 @@ function deserializeTimelineItem(item: StoredTimelineItem): StreamItem {
   return deserializeBuiltinTimelineItem(item);
 }
 
+function withImages<T>(images: T[] | undefined): { images?: T[] } {
+  return images && images.length > 0 ? { images } : {};
+}
+
 function deserializeBuiltinTimelineItem(
   item: Exclude<StoredTimelineItem, { kind: "plugin" }>,
 ): StreamItem {
@@ -533,6 +574,7 @@ function deserializeBuiltinTimelineItem(
         ...(item.clientMessageId ? { clientMessageId: item.clientMessageId } : {}),
         ...(item.messageId ? { messageId: item.messageId } : {}),
         text: item.text,
+        ...withImages(item.images),
       };
     case "assistant_message":
       return {
@@ -586,6 +628,7 @@ function deserializeBuiltinTimelineItem(
             detail: tool.detail,
             ...(tool.metadata ? { metadata: tool.metadata } : {}),
             ...(tool.agentMessage ? { agentMessage: tool.agentMessage } : {}),
+            ...(tool.images?.length ? { images: tool.images } : {}),
           },
         },
       };
@@ -742,7 +785,9 @@ function serializeProject(project: ProjectDescriptor): StoredProject {
 function isTimelineItemStoredLosslessly(item: StreamItem): boolean {
   switch (item.kind) {
     case "user_message":
-      return (item.images?.length ?? 0) === 0 && (item.attachments?.length ?? 0) === 0;
+      return (
+        (item.images ?? []).every(isChatImageReference) && (item.attachments?.length ?? 0) === 0
+      );
     case "tool_call":
       return item.payload.source === "agent";
     default:
@@ -750,16 +795,45 @@ function isTimelineItemStoredLosslessly(item: StreamItem): boolean {
   }
 }
 
-function serializeTimeline(timeline: CachedTimeline): StoredTimeline | null {
+interface SerializedTimeline {
+  head: StoredTimeline;
+  pages: StoredTimelinePage[];
+}
+
+function displayOnlyTimeline(agentId: string, items: StoredTimelineItem[]): SerializedTimeline {
+  return {
+    head: { agentId, items: items.slice(-MAX_TIMELINE_ITEMS), range: null, hasOlder: false },
+    pages: [],
+  };
+}
+
+/**
+ * Head row plus newly sealed pages. Coverage survives only for a contiguous, lossless, fully
+ * positioned window; otherwise the head is display-only (paints, certifies nothing).
+ * `archived` lists this agent's pages already on disk.
+ */
+function serializeTimeline(
+  timeline: CachedTimeline,
+  archived: readonly ArchivedPageRef[] = [],
+): SerializedTimeline {
   const canonicalItems = timeline.items.filter(
     (item) => item.kind !== "user_message" || !isUnreconciledLocalUserMessage(item),
   );
-  const items = canonicalItems.map(serializeTimelineItem).filter((item) => item !== null);
+  const serializedByItem = new Map<StreamItem, StoredTimelineItem>();
+  for (const item of canonicalItems) {
+    const stored = serializeTimelineItem(item);
+    if (stored) serializedByItem.set(item, stored);
+  }
+  const items = [...serializedByItem.values()];
+  const reuse = (segment: readonly StreamItem[]) =>
+    segment.flatMap((item) => {
+      const stored = serializedByItem.get(item);
+      return stored ? [stored] : [];
+    });
   const range = timeline.range;
   const canPersistCoverage =
     range !== null &&
     range.retainedRanges === undefined &&
-    canonicalItems.length <= MAX_TIMELINE_ITEMS &&
     items.length === canonicalItems.length &&
     canonicalItems.every(
       (item) =>
@@ -769,13 +843,30 @@ function serializeTimeline(timeline: CachedTimeline): StoredTimeline | null {
         item.timelineCursor.seq <= range.endSeq,
     ) &&
     canonicalItems.some((item) => item.timelineCursor?.seq === range.endSeq);
+  if (!canPersistCoverage || !range) return displayOnlyTimeline(timeline.agentId, items);
+  const archivedEnd = archivedChainEnd(archived, range.epoch, range.startSeq);
+  const plan = planTimelineSeal({
+    items: canonicalItems,
+    range: { epoch: range.epoch, startSeq: range.startSeq, endSeq: range.endSeq },
+    hasOlder: timeline.hasOlder,
+    archivedEnd: archivedEnd >= range.startSeq ? archivedEnd : null,
+  });
+  if (!plan) return displayOnlyTimeline(timeline.agentId, items);
   return {
-    agentId: timeline.agentId,
-    items: items.slice(-MAX_TIMELINE_ITEMS),
-    range: canPersistCoverage
-      ? { epoch: range.epoch, startSeq: range.startSeq, endSeq: range.endSeq }
-      : null,
-    hasOlder: canPersistCoverage ? timeline.hasOlder : false,
+    head: {
+      agentId: timeline.agentId,
+      items: reuse(plan.head.items),
+      range: plan.head.range,
+      hasOlder: plan.head.hasOlder,
+    },
+    pages: plan.pages.map((page) => ({
+      agentId: timeline.agentId,
+      epoch: page.range.epoch,
+      startSeq: page.range.startSeq,
+      endSeq: page.range.endSeq,
+      hasOlder: page.hasOlder,
+      items: reuse(page.items),
+    })),
   };
 }
 
@@ -787,32 +878,18 @@ function pendingRowKey(key: ReplicaRowKey): string {
   return `${key.serverId}\u0000${rowKey(key)}`;
 }
 
-// Budget accounting runs over every stored row of a touched host on each persist. Rows are
-// immutable once stored, so their size is computed once. The count itself avoids the JS Buffer
-// polyfill, which materialises the whole byte array just to measure it.
-const rowBytesCache = new WeakMap<ReplicaRow, number>();
-
-function utf8ByteLength(text: string): number {
-  let bytes = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    const code = text.charCodeAt(index);
-    if (code < 0x80) bytes += 1;
-    else if (code < 0x800) bytes += 2;
-    else if (code >= 0xd800 && code <= 0xdbff) {
-      bytes += 4;
-      index += 1;
-    } else bytes += 3;
-  }
-  return bytes;
+function rowBytes(row: { bytes: number }): number {
+  return row.bytes;
 }
 
-function rowBytes(row: ReplicaRow): number {
-  let bytes = rowBytesCache.get(row);
-  if (bytes === undefined) {
-    bytes = utf8ByteLength(row.payload);
-    rowBytesCache.set(row, bytes);
-  }
-  return bytes;
+function indexEntryForRow(row: ReplicaRow, touchedAt: number): ReplicaRowIndexEntry {
+  return {
+    serverId: row.serverId,
+    kind: row.kind,
+    id: row.id,
+    bytes: utf8ByteLength(row.payload),
+    touchedAt,
+  };
 }
 
 function parseJsonPayload(payload: string): unknown {
@@ -873,6 +950,10 @@ function applyDirectoryRow(
   }
 }
 
+function isTimelineKind(kind: ReplicaRowKind): boolean {
+  return kind === "timeline" || kind === "timeline_page";
+}
+
 function directoryEntityForRow(row: ReplicaRow): keyof DirectoryCheckpoint | undefined {
   if (row.kind === "agent") return "agents";
   if (row.kind === "workspace") return "workspaces";
@@ -883,7 +964,9 @@ function directoryEntityForRow(row: ReplicaRow): keyof DirectoryCheckpoint | und
 export class ReplicaCache {
   private readonly activeServerIds = new Set<string>();
   private readonly hostRevisions = new Map<string, number>();
-  private readonly storedRows = new Map<string, Map<string, ReplicaRow>>();
+  // Keys, sizes and access times only: payloads stay on disk, so a 500 MB cache costs a few
+  // hundred bytes of memory per row.
+  private readonly storedRows = new Map<string, Map<string, ReplicaRowIndexEntry>>();
   private readonly hostBytes = new Map<string, number>();
   private readonly hostWriteOrder = new Map<string, true>();
   private pendingUpserts = new Map<string, StructuredReplicaUpsert>();
@@ -896,6 +979,7 @@ export class ReplicaCache {
   private writeQueue: Promise<void> = Promise.resolve();
   private preparePromise: Promise<void> | null = null;
   private storedIndexPromise: Promise<void> | null = null;
+  private storedRowsLoaded = false;
 
   constructor(
     private readonly rowStore: ReplicaRowStore,
@@ -984,11 +1068,83 @@ export class ReplicaCache {
     try {
       const stored = parseStoredPayload(StoredTimelineSchema, row.payload);
       if (stored.agentId !== agentId) return undefined;
+      this.touchRows([row]);
       return deserializeTimeline(stored) ?? undefined;
     } catch {
       await this.deleteInvalidRow(row);
       return undefined;
     }
+  }
+
+  /**
+   * The sealed page that ends right before `beforeSeq` in `epoch`, if this device has it.
+   * Scrolling up reads history from here before asking the daemon.
+   */
+  async readTimelinePageBefore(
+    serverId: string,
+    agentId: string,
+    cursor: { epoch: string; beforeSeq: number },
+  ): Promise<CachedTimelinePage | undefined> {
+    if (!this.activeServerIds.has(serverId)) return undefined;
+    try {
+      await this.prepareStore();
+      await this.ensureStoredIndex();
+    } catch {
+      return undefined;
+    }
+    const page = this.agentPages(serverId, agentId).find(
+      ({ ref }) => ref.epoch === cursor.epoch && ref.endSeq === cursor.beforeSeq - 1,
+    );
+    if (!page) return undefined;
+    const row = (await this.readRows(serverId, ["timeline_page"], [page.key.id]))[0];
+    if (!row) return undefined;
+    try {
+      const stored = parseStoredPayload(StoredTimelinePageSchema, row.payload);
+      if (stored.agentId !== agentId) return undefined;
+      this.touchRows([row]);
+      return {
+        items: stored.items.map(deserializeTimelineItem),
+        range: { epoch: stored.epoch, startSeq: stored.startSeq, endSeq: stored.endSeq },
+        hasOlder: stored.hasOlder,
+      };
+    } catch {
+      await this.deleteInvalidRow(row);
+      return undefined;
+    }
+  }
+
+  /**
+   * Highest sequence of `epoch` this device holds on disk contiguously from `fromSeq`, or
+   * undefined when the index is not loaded yet. In-memory history at or below it can be dropped
+   * without losing it.
+   */
+  archivedThrough(
+    serverId: string,
+    agentId: string,
+    cursor: { epoch: string; fromSeq: number },
+  ): number | undefined {
+    if (!this.storedRowsLoaded) return undefined;
+    const end = archivedChainEnd(
+      this.agentPages(serverId, agentId).map((page) => page.ref),
+      cursor.epoch,
+      cursor.fromSeq,
+    );
+    return end >= cursor.fromSeq ? end : undefined;
+  }
+
+  /** Total bytes the cache holds on disk (after the index has loaded). */
+  storedBytes(): number {
+    return this.totalBytes;
+  }
+
+  private touchRows(rows: readonly ReplicaRowKey[]): void {
+    const at = Date.now();
+    for (const row of rows) {
+      const entry = this.storedRows.get(row.serverId)?.get(rowKey(row));
+      if (entry) entry.touchedAt = at;
+    }
+    const keys = rows.map((row) => ({ serverId: row.serverId, kind: row.kind, id: row.id }));
+    void this.queueOperation(() => this.rowStore.touch(keys, at));
   }
 
   private async readRows(
@@ -1175,7 +1331,7 @@ export class ReplicaCache {
     this.advanceHostRevision(newServerId);
     const rows = this.storedRows.get(oldServerId);
     if (rows) {
-      const newRows = this.storedRows.get(newServerId) ?? new Map<string, ReplicaRow>();
+      const newRows = this.storedRows.get(newServerId) ?? new Map<string, ReplicaRowIndexEntry>();
       this.totalBytes -=
         (this.hostBytes.get(oldServerId) ?? 0) + (this.hostBytes.get(newServerId) ?? 0);
       this.storedRows.delete(oldServerId);
@@ -1306,21 +1462,80 @@ export class ReplicaCache {
     const deletes = new Map(pending.deletes.map((row) => [pendingRowKey(row), row]));
     const upserts: ReplicaRow[] = [];
     for (const upsert of pending.upserts) {
+      if (upsert.kind === "timeline") {
+        const rows = this.materializeTimeline(upsert.serverId, upsert.id, upsert.value);
+        upserts.push(...rows.upserts);
+        for (const key of rows.deletes) deletes.set(pendingRowKey(key), key);
+        continue;
+      }
       const row = this.materializeUpsert(upsert);
       if (row) upserts.push(row);
       else deletes.set(pendingRowKey(upsert), upsert);
     }
+    for (const key of pending.deletes) {
+      // A deleted chat takes its sealed pages with it.
+      if (key.kind !== "timeline") continue;
+      for (const page of this.agentPages(key.serverId, key.id)) {
+        deletes.set(pendingRowKey(page.key), page.key);
+      }
+    }
     for (const serverId of pending.baselines) {
       const replacementKeys = new Set(
-        upserts.filter((row) => row.serverId === serverId && row.kind !== "timeline").map(rowKey),
+        upserts.filter((row) => row.serverId === serverId && !isTimelineKind(row.kind)).map(rowKey),
       );
       for (const row of this.storedRows.get(serverId)?.values() ?? []) {
-        if (row.kind !== "timeline" && !replacementKeys.has(rowKey(row))) {
+        if (!isTimelineKind(row.kind) && !replacementKeys.has(rowKey(row))) {
           deletes.set(pendingRowKey(row), row);
         }
       }
     }
     return { upserts, deletes: [...deletes.values()] };
+  }
+
+  private agentPages(
+    serverId: string,
+    agentId: string,
+  ): Array<{ key: ReplicaRowKey; ref: ArchivedPageRef }> {
+    const pages: Array<{ key: ReplicaRowKey; ref: ArchivedPageRef }> = [];
+    const prefix = `${agentId}|`;
+    for (const entry of this.storedRows.get(serverId)?.values() ?? []) {
+      if (entry.kind !== "timeline_page" || !entry.id.startsWith(prefix)) continue;
+      const ref = parseTimelinePageId(entry.id);
+      if (ref?.agentId === agentId) {
+        pages.push({ key: { serverId, kind: "timeline_page", id: entry.id }, ref });
+      }
+    }
+    return pages;
+  }
+
+  private materializeTimeline(
+    serverId: string,
+    agentId: string,
+    timeline: CachedTimeline,
+  ): ReplicaRowChanges {
+    const pages = this.agentPages(serverId, agentId);
+    const epoch = timeline.range?.epoch;
+    const serialized = serializeTimeline(
+      timeline,
+      pages.map((page) => page.ref),
+    );
+    const upserts: ReplicaRow[] = [
+      { serverId, kind: "timeline", id: agentId, payload: JSON.stringify(serialized.head) },
+      ...serialized.pages.map(
+        (page): ReplicaRow => ({
+          serverId,
+          kind: "timeline_page",
+          id: timelinePageId(agentId, page.epoch, page.startSeq, page.endSeq),
+          payload: JSON.stringify(page),
+        }),
+      ),
+    ];
+    // Pages from an older epoch (rewind, reset) can never be adjacent again.
+    const deletes =
+      epoch === undefined
+        ? []
+        : pages.filter((page) => page.ref.epoch !== epoch).map((page) => page.key);
+    return { upserts, deletes };
   }
 
   private materializeUpsert(upsert: StructuredReplicaUpsert): ReplicaRow | null {
@@ -1336,8 +1551,7 @@ export class ReplicaCache {
         value = serializeProject(upsert.value);
         break;
       case "timeline":
-        value = serializeTimeline(upsert.value);
-        if (!value) return null;
+        value = serializeTimeline(upsert.value).head;
         break;
       case "checkpoint":
         value = serializeDirectoryCheckpoint(upsert.value);
@@ -1388,13 +1602,15 @@ export class ReplicaCache {
       }
       touchedServerIds.add(key.serverId);
     }
+    const now = Date.now();
     for (const row of changes.upserts) {
-      const rows = this.storedRows.get(row.serverId) ?? new Map<string, ReplicaRow>();
+      const rows = this.storedRows.get(row.serverId) ?? new Map<string, ReplicaRowIndexEntry>();
       const previous = rows.get(rowKey(row));
       const previousBytes = previous ? rowBytes(previous) : 0;
-      rows.set(rowKey(row), row);
+      const entry = indexEntryForRow(row, now);
+      rows.set(rowKey(row), entry);
       this.storedRows.set(row.serverId, rows);
-      this.adjustHostBytes(row.serverId, rowBytes(row) - previousBytes);
+      this.adjustHostBytes(row.serverId, rowBytes(entry) - previousBytes);
       touchedServerIds.add(row.serverId);
     }
     for (const serverId of touchedServerIds) {
@@ -1419,40 +1635,50 @@ export class ReplicaCache {
   private async fitChangesToBudget(
     changes: ReplicaRowChanges,
   ): Promise<{ changes: ReplicaRowChanges; evicted: Set<string> }> {
+    const changedKeys = new Set<string>();
+    let projectedTotal = this.totalBytes;
+    const projectedHostBytes = new Map(this.hostBytes);
+    const adjust = (serverId: string, delta: number) => {
+      projectedTotal += delta;
+      projectedHostBytes.set(serverId, (projectedHostBytes.get(serverId) ?? 0) + delta);
+    };
+    for (const key of changes.deletes) {
+      changedKeys.add(pendingRowKey(key));
+      const previous = this.storedRows.get(key.serverId)?.get(rowKey(key));
+      if (previous) adjust(key.serverId, -rowBytes(previous));
+    }
+    for (const row of changes.upserts) {
+      changedKeys.add(pendingRowKey(row));
+      const previous = this.storedRows.get(row.serverId)?.get(rowKey(row));
+      adjust(row.serverId, utf8ByteLength(row.payload) - (previous ? rowBytes(previous) : 0));
+    }
+    if (projectedTotal <= this.maxBytes) return { changes, evicted: new Set() };
+
+    const target = Math.floor(this.maxBytes * EVICT_TO_RATIO);
+    const evictedRows = this.pickHistoryEvictions(changedKeys, projectedTotal - target);
+    for (const entry of evictedRows) adjust(entry.serverId, -rowBytes(entry));
+    const boundedChanges: ReplicaRowChanges = {
+      upserts: changes.upserts,
+      deletes: [
+        ...changes.deletes,
+        ...evictedRows.map(({ serverId, kind, id }) => ({ serverId, kind, id })),
+      ],
+    };
+    const evicted = new Set<string>();
+    if (projectedTotal <= this.maxBytes) return { changes: boundedChanges, evicted };
+
     const touchedServerIds = new Set<string>();
     for (const key of changes.deletes) touchedServerIds.add(key.serverId);
     for (const row of changes.upserts) touchedServerIds.add(row.serverId);
-
-    const projectedRows = new Map<string, Map<string, ReplicaRow>>();
-    const projectedBytes = new Map(this.hostBytes);
-    for (const serverId of touchedServerIds) {
-      projectedRows.set(serverId, new Map(this.storedRows.get(serverId)));
-    }
-    for (const key of changes.deletes) {
-      projectedRows.get(key.serverId)?.delete(rowKey(key));
-    }
-    for (const row of changes.upserts) {
-      projectedRows.get(row.serverId)?.set(rowKey(row), row);
-    }
-    for (const [serverId, rows] of projectedRows) {
-      projectedBytes.set(
-        serverId,
-        [...rows.values()].reduce((sum, row) => sum + rowBytes(row), 0),
-      );
-    }
-
     const writeOrder = [...this.hostWriteOrder.keys()].filter(
       (serverId) => !touchedServerIds.has(serverId),
     );
     writeOrder.push(...touchedServerIds);
-    let projectedTotal = [...projectedBytes.values()].reduce((sum, bytes) => sum + bytes, 0);
-    const evicted = new Set<string>();
     while (projectedTotal > this.maxBytes) {
       const serverId = writeOrder.shift();
       if (serverId === undefined) break;
-      const bytes = projectedBytes.get(serverId) ?? 0;
-      projectedTotal -= bytes;
-      projectedBytes.delete(serverId);
+      projectedTotal -= projectedHostBytes.get(serverId) ?? 0;
+      projectedHostBytes.delete(serverId);
       evicted.add(serverId);
       this.invalidatedHosts.add(serverId);
       if (this.storedRows.has(serverId)) await this.rowStore.deleteHost(serverId);
@@ -1461,11 +1687,39 @@ export class ReplicaCache {
 
     return {
       changes: {
-        upserts: changes.upserts.filter((row) => !evicted.has(row.serverId)),
-        deletes: changes.deletes.filter((key) => !evicted.has(key.serverId)),
+        upserts: boundedChanges.upserts.filter((row) => !evicted.has(row.serverId)),
+        deletes: boundedChanges.deletes.filter((key) => !evicted.has(key.serverId)),
       },
       evicted,
     };
+  }
+
+  /**
+   * Least recently used chat history first: sealed pages, then whole chat heads. Directory rows
+   * are never evicted row by row; a host only goes as a last resort.
+   */
+  private pickHistoryEvictions(
+    changedKeys: ReadonlySet<string>,
+    bytesToFree: number,
+  ): ReplicaRowIndexEntry[] {
+    const picked: ReplicaRowIndexEntry[] = [];
+    let freed = 0;
+    for (const kind of ["timeline_page", "timeline"] as const) {
+      if (freed >= bytesToFree) break;
+      const candidates: ReplicaRowIndexEntry[] = [];
+      for (const rows of this.storedRows.values()) {
+        for (const entry of rows.values()) {
+          if (entry.kind === kind && !changedKeys.has(pendingRowKey(entry))) candidates.push(entry);
+        }
+      }
+      candidates.sort((left, right) => left.touchedAt - right.touchedAt);
+      for (const entry of candidates) {
+        if (freed >= bytesToFree) break;
+        picked.push(entry);
+        freed += rowBytes(entry);
+      }
+    }
+    return picked;
   }
 
   private removeStoredHost(serverId: string): void {
@@ -1509,23 +1763,25 @@ export class ReplicaCache {
   }
 
   private ensureStoredIndex(): Promise<void> {
-    this.storedIndexPromise ??= this.rowStore.readAll().then(async (hosts) => {
+    this.storedIndexPromise ??= this.rowStore.readIndex().then(async (entries) => {
       this.storedRows.clear();
       this.hostBytes.clear();
       this.hostWriteOrder.clear();
       this.totalBytes = 0;
-      for (const host of hosts) {
-        if (!this.activeServerIds.has(host.serverId)) {
-          await this.rowStore.deleteHost(host.serverId);
+      const inactive = new Set<string>();
+      for (const entry of entries) {
+        if (!this.activeServerIds.has(entry.serverId)) {
+          inactive.add(entry.serverId);
           continue;
         }
-        const rows = new Map(host.rows.map((row) => [rowKey(row), row]));
-        const bytes = host.rows.reduce((sum, row) => sum + rowBytes(row), 0);
-        this.storedRows.set(host.serverId, rows);
-        this.hostBytes.set(host.serverId, bytes);
-        this.totalBytes += bytes;
-        this.touchHost(host.serverId);
+        const rows = this.storedRows.get(entry.serverId) ?? new Map<string, ReplicaRowIndexEntry>();
+        rows.set(rowKey(entry), entry);
+        this.storedRows.set(entry.serverId, rows);
+        this.adjustHostBytes(entry.serverId, rowBytes(entry));
       }
+      for (const serverId of this.storedRows.keys()) this.touchHost(serverId);
+      for (const serverId of inactive) await this.rowStore.deleteHost(serverId);
+      this.storedRowsLoaded = true;
       return undefined;
     });
     return this.storedIndexPromise;

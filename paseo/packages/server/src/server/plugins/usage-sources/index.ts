@@ -46,6 +46,7 @@ interface AgentReports {
   provider: string;
   model?: string;
   sessionKey: string;
+  sourceGeneration: number;
   reports: Map<string, KnownReport>;
 }
 
@@ -57,6 +58,8 @@ export class UsageSourceRegistry {
   private readonly byAgent = new Map<string, AgentReports>();
   private readonly cache = new Map<string, { at: number; entry: UsageReportEntry }>();
   private readonly pending = new Map<string, Promise<UsageReportEntry>>();
+  // Bumped by register() so agent mappings discovered before a source existed are re-discovered.
+  private sourceGeneration = 0;
 
   constructor(
     private readonly now: () => number = Date.now,
@@ -69,6 +72,7 @@ export class UsageSourceRegistry {
   register(source: UsageSource): void {
     if (this.sources.has(source.id)) throw new Error(`Duplicate usage source: ${source.id}`);
     this.sources.set(source.id, source);
+    this.sourceGeneration++;
   }
 
   unregister(id: string): void {
@@ -126,8 +130,10 @@ export class UsageSourceRegistry {
     const session = this.agents.usageSession(agentId);
     if (!session) return [];
     const previous = this.byAgent.get(agentId);
+    const sourceGeneration = this.sourceGeneration;
     const sameScope =
-      previous?.sessionKey === session.sessionKey &&
+      previous?.sourceGeneration === sourceGeneration &&
+      previous.sessionKey === session.sessionKey &&
       previous.provider === session.provider &&
       previous.model === session.model;
     if (sameScope) return [...previous.reports.keys()];
@@ -141,6 +147,7 @@ export class UsageSourceRegistry {
     if (this.agents.usageSession(agentId)?.sessionKey !== session.sessionKey) return [];
     this.byAgent.set(agentId, {
       sessionKey: session.sessionKey,
+      sourceGeneration,
       provider: session.provider,
       model: session.model,
       reports,

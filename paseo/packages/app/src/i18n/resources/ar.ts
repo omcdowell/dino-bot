@@ -341,6 +341,7 @@ export const ar: TranslationResources = {
       closeImage: "إغلاق الصورة",
       imageLoadFailed: "تعذر تحميل الصورة",
       imageUnavailable: "الصورة غير متاحة",
+      downloadImage: "تنزيل الصورة",
       imagePreviewUnavailable: "معاينة الصورة غير متاحة.",
       imagePreviewLoadFailed: "غير قادر على تحميل معاينة الصورة.",
       review: "مراجعة",
@@ -627,6 +628,8 @@ export const ar: TranslationResources = {
         trigger: "تبديل علامات التبويب (فتح{{count}})",
         title: "علامة التبويب التبديل",
         searchPlaceholder: "علامات تبويب البحث",
+        groupLabel: "علامات التبويب",
+        groupCount: "{{count}} مفتوحة",
       },
       menu: {
         openFor: "فتح القائمة لـ{{label}}",
@@ -1643,6 +1646,11 @@ export const ar: TranslationResources = {
     retrying: "جارٍ إعادة المحاولة...",
     noMatches: "لا توجد نماذج تطابق بحثك",
     noMatchesForQuery: 'لا توجد نماذج تطابق "{{query}}"',
+    scopeScoped: "المحدد",
+    scopeAll: "الكل",
+    scopeAdd: "إضافة إلى المحدد",
+    scopeRemove: "إزالة من المحدد",
+    scopeEmpty: "لا توجد نماذج محددة بعد. حدّد النماذج بعلامة صح في الكل.",
     searchAllPlaceholder: "ابحث في كل النماذج...",
     searchPlaceholder: "نماذج البحث...",
     openProviderSettings: "افتح إعدادات{{provider}}",
@@ -2103,6 +2111,8 @@ export const ar: TranslationResources = {
     general: {
       title: "عام",
       sending: "الإرسال",
+      network: en.settings.general.network,
+      meteredNetwork: en.settings.general.meteredNetwork,
       browserData: {
         title: "بيانات المتصفح",
         siteData: "ملفات تعريف الارتباط وبيانات المواقع",
@@ -2808,4 +2818,6 @@ export const ar: TranslationResources = {
       },
     },
   },
+  delivery: en.delivery,
+  network: en.network,
 };

@@ -20,9 +20,17 @@ import { createPaseoApi, type PaseoApi } from "@getpaseo/client";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPluginDaemonTransportFactory } from "./daemon-transport.js";
 import { createPluginClientId } from "./plugin-session-identity.js";
+import { CLIENT_CAPS } from "@getpaseo/protocol/client-capabilities";
 
 import { PluginSettingsStore } from "./settings/index.js";
 import { readPluginProviderIcon } from "./provider-icon.js";
+const PLUGIN_EVENT_MAX_BYTES = 256 * 1024;
+const PLAIN_FRAME_CAPABILITIES = {
+  [CLIENT_CAPS.compressedFrames]: false,
+  [CLIENT_CAPS.checkedFrames]: false,
+  [CLIENT_CAPS.zstdFrames]: false,
+};
+
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -134,6 +142,17 @@ export function createPluginWorker(options: {
       throw new Error(`Invalid command for plugin provider ${id}`);
     if (providers.has(id)) throw new Error(`Duplicate plugin provider ID: ${id}`);
     providers.set(id, { ...provider, id });
+  }
+
+  /** pluginEvents: push a JSON event to this plugin's clients on every connected app. */
+  function emitEvent(name: string, data: unknown): void {
+    if (stopping) return;
+    if (!/^[a-z][a-z0-9._-]*$/.test(name)) throw new Error(`Invalid plugin event name: ${name}`);
+    const encoded = JSON.stringify(data ?? null);
+    if (encoded.length > PLUGIN_EVENT_MAX_BYTES) {
+      throw new Error(`Plugin event ${name} is larger than ${PLUGIN_EVENT_MAX_BYTES} bytes`);
+    }
+    send({ type: "event", name, data: JSON.parse(encoded) as unknown });
   }
 
   function registerUsageSource(source: UsageSourceRegistration): void {
@@ -271,6 +290,10 @@ export function createPluginWorker(options: {
       // The runtime re-attaches a session when the daemon drops this socket.
       reconnect: { enabled: true },
       transportFactory,
+      // An IPC link to the local daemon, often in the daemon's own process: compressing it buys
+      // no bytes and costs a zstd/DEFLATE context, a decoder and a resend buffer per plugin.
+      capabilities: PLAIN_FRAME_CAPABILITIES,
+      compressUplink: false,
     });
     paseo = createPaseoApi(daemonClient);
     await daemonClient.connect();
@@ -282,6 +305,7 @@ export function createPluginWorker(options: {
     const contributedCleanup = contribute({
       handle: (contract, handler) =>
         register(contract, (input, context) => handler(contract.input.parse(input), context)),
+      emit: emitEvent,
       registerProvider,
       registerUsageSource,
       registerSettings,

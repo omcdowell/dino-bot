@@ -13,6 +13,10 @@ import type {
 } from "../speech/speech-provider.js";
 import { toResolver, type Resolvable } from "../speech/provider-resolver.js";
 import { parsePcmRateFromFormat, pcm16lePeakAbs } from "../speech/audio.js";
+import {
+  createDictationAudioDecoder,
+  type DictationAudioDecoder,
+} from "./dictation-audio-decoder.js";
 
 const PCM_CHANNELS = 1;
 const PCM_BITS_PER_SAMPLE = 16;
@@ -22,6 +26,11 @@ const DICTATION_FINAL_TIMEOUT_MAX_MS = 5 * 60 * 1000;
 const DICTATION_FINAL_TIMEOUT_PER_PENDING_SEGMENT_MS = 15 * 1000;
 const DICTATION_FINAL_TIMEOUT_PER_PENDING_AUDIO_SECOND_MS = 1500;
 const DICTATION_FINAL_TIMEOUT_PER_MISSING_SEQ_MS = 250;
+/**
+ * How long a stream whose socket went away stays resumable. Matches the session's reconnect
+ * grace (EXTERNAL_SESSION_DISCONNECT_GRACE_MS); after it the session itself is gone.
+ */
+const DEFAULT_DICTATION_RESUME_GRACE_MS = 90_000;
 const DICTATION_SILENCE_PEAK_THRESHOLD = Number.parseInt(
   process.env.PASEO_DICTATION_SILENCE_PEAK_THRESHOLD ?? "300",
   10,
@@ -67,10 +76,18 @@ function convertPCMToWavBuffer(
   return wavBuffer;
 }
 
-interface DictationStreamState {
+export interface DictationStreamState {
   dictationId: string;
+  /** The manager (one per socket) that gets this stream's messages; null while parked. */
+  owner: DictationStreamManager | null;
+  /** Set while parked (socket gone): closes the stream if nobody resumes it in time. */
+  parkTimer: ReturnType<typeof setTimeout> | null;
   sessionId: string;
   inputFormat: string;
+  /** PCM passthrough or Opus -> PCM16 at inputRate; fed in seq order. */
+  decoder: DictationAudioDecoder;
+  /** True once the first ack (-1) went out; a resume only reuses a ready stream. */
+  ready: boolean;
   stt: StreamingTranscriptionSession;
   inputRate: number;
   outputRate: number;
@@ -96,7 +113,10 @@ interface DictationStreamState {
 }
 
 export type DictationStreamOutboundMessage =
-  | { type: "dictation_stream_ack"; payload: { dictationId: string; ackSeq: number } }
+  | {
+      type: "dictation_stream_ack";
+      payload: { dictationId: string; ackSeq: number; resumed?: boolean };
+    }
   | {
       type: "dictation_stream_finish_accepted";
       payload: { dictationId: string; timeoutMs: number };
@@ -126,16 +146,27 @@ export type DictationStreamOutboundMessage =
       };
     };
 
+/**
+ * The dictation streams of one client session, shared by the per-socket managers so a stream
+ * outlives the socket that started it (see DictationStreamManager.cleanupAll).
+ */
+export type DictationStreamRegistry = Map<string, DictationStreamState>;
+
+export function createDictationStreamRegistry(): DictationStreamRegistry {
+  return new Map();
+}
+
 export class DictationStreamManager {
   private readonly logger: pino.Logger;
-  private readonly emit: (msg: DictationStreamOutboundMessage) => void;
+  private readonly ownEmit: (msg: DictationStreamOutboundMessage) => void;
   private readonly sessionId: string;
   private readonly resolveStt: () => SpeechToTextProvider | null;
   private readonly language: string;
   private readonly finalTimeoutMs: number;
   private readonly autoCommitSeconds: number;
   private readonly onIdle: (() => void) | undefined;
-  private readonly streams = new Map<string, DictationStreamState>();
+  private readonly streams: DictationStreamRegistry;
+  private readonly resumeGraceMs: number;
 
   constructor(params: {
     logger: pino.Logger;
@@ -146,10 +177,20 @@ export class DictationStreamManager {
     finalTimeoutMs?: number;
     autoCommitSeconds?: number;
     onIdle?: () => void;
+    /** Session-wide registry; omitted = private to this manager (streams die with it). */
+    streams?: DictationStreamRegistry;
+    resumeGraceMs?: number;
   }) {
     this.onIdle = params.onIdle;
     this.logger = params.logger.child({ component: "dictation-stream-manager" });
-    this.emit = params.emit;
+    this.ownEmit = params.emit;
+    this.streams = params.streams ?? createDictationStreamRegistry();
+    // Only a shared registry can hand a stream to the next socket; a private one closes on cleanup.
+    this.resumeGraceMs = params.streams
+      ? (params.resumeGraceMs ??
+        parseNonNegativeNumber(process.env.PASEO_DICTATION_RESUME_GRACE_MS) ??
+        DEFAULT_DICTATION_RESUME_GRACE_MS)
+      : 0;
     this.sessionId = params.sessionId;
     this.resolveStt = toResolver(params.stt);
     this.language = params.language ?? "en";
@@ -161,14 +202,26 @@ export class DictationStreamManager {
   }
 
   get hasDemand(): boolean {
-    return this.streams.size > 0;
+    for (const state of this.streams.values()) {
+      if (state.owner === this) return true;
+    }
+    return false;
   }
 
+  /**
+   * This manager's socket is gone. Its ready streams are parked (kept, STT running, messages
+   * dropped) for the resume grace so a reconnecting client can resume them; the rest close.
+   */
   public cleanupAll(): void {
     const failures: unknown[] = [];
-    for (const dictationId of this.streams.keys()) {
+    for (const [dictationId, state] of this.streams) {
+      if (state.owner !== this) continue;
       try {
-        this.cleanupDictationStream(dictationId);
+        if (state.ready && this.resumeGraceMs > 0) {
+          this.parkDictationStream(state);
+        } else {
+          this.cleanupDictationStream(dictationId);
+        }
       } catch (error) {
         failures.push(error);
       }
@@ -176,7 +229,43 @@ export class DictationStreamManager {
     if (failures.length) throw new AggregateError(failures, "Dictation cleanup failed");
   }
 
-  public async handleStart(dictationId: string, format: string): Promise<void> {
+  private parkDictationStream(state: DictationStreamState): void {
+    state.owner = null;
+    if (state.parkTimer) clearTimeout(state.parkTimer);
+    state.parkTimer = setTimeout(() => {
+      if (this.streams.get(state.dictationId) !== state || state.owner !== null) return;
+      this.logger.debug({ dictationId: state.dictationId }, "Parked dictation stream expired");
+      this.cleanupDictationStream(state.dictationId);
+    }, this.resumeGraceMs);
+    state.parkTimer.unref?.();
+    this.logger.debug(
+      { dictationId: state.dictationId, ackSeq: state.ackSeq, graceMs: this.resumeGraceMs },
+      "Dictation stream parked until its client resumes",
+    );
+  }
+
+  /** Messages for a stream go to its current owner (dropped while parked). */
+  private emit(msg: DictationStreamOutboundMessage): void {
+    const dictationId =
+      msg.type === "activity_log"
+        ? (msg.payload.metadata.dictationId as string | undefined)
+        : msg.payload.dictationId;
+    const state = dictationId === undefined ? undefined : this.streams.get(dictationId);
+    if (!state) {
+      this.ownEmit(msg);
+      return;
+    }
+    state.owner?.ownEmit(msg);
+  }
+
+  public async handleStart(
+    dictationId: string,
+    format: string,
+    options: { resume?: boolean } = {},
+  ): Promise<void> {
+    if (options.resume && this.tryResumeDictationStream(dictationId, format)) {
+      return;
+    }
     this.cleanupDictationStream(dictationId);
 
     const sttProvider = this.resolveStt();
@@ -202,21 +291,15 @@ export class DictationStreamManager {
       return;
     }
 
-    const inputRate = parsePcmRateFromFormat(format, 16000) ?? 16000;
-    if (!Number.isFinite(inputRate) || inputRate <= 0) {
-      this.failDictationStream(
-        dictationId,
-        `Invalid dictation input rate in format: ${format}`,
-        false,
-      );
-      try {
-        stt.close();
-      } catch {
-        // no-op
-      }
+    const inputRate = this.parseInputRateOrFail(dictationId, format, stt);
+    if (inputRate === null) {
       return;
     }
 
+    const decoder = this.createDecoderOrFail(dictationId, format, inputRate, stt);
+    if (!decoder) {
+      return;
+    }
     const debugChunkWriter = createDictationDebugChunkWriter(
       { sessionId: this.sessionId, dictationId },
       this.logger,
@@ -230,8 +313,12 @@ export class DictationStreamManager {
 
     this.streams.set(dictationId, {
       dictationId,
+      owner: this,
+      parkTimer: null,
       sessionId: this.sessionId,
       inputFormat: format,
+      decoder,
+      ready: false,
       stt,
       inputRate,
       outputRate,
@@ -324,7 +411,7 @@ export class DictationStreamManager {
     });
 
     try {
-      await stt.connect();
+      await Promise.all([stt.connect(), decoder.ready]);
     } catch (error) {
       if (this.streams.get(dictationId)?.stt !== stt) return;
       const message = error instanceof Error ? error.message : String(error);
@@ -332,9 +419,77 @@ export class DictationStreamManager {
       this.cleanupDictationStream(dictationId);
       return;
     }
-    if (this.streams.get(dictationId)?.stt !== stt) return;
+    const started = this.streams.get(dictationId);
+    if (started?.stt !== stt) return;
+    started.ready = true;
 
-    this.emitDictationAck(dictationId, -1);
+    this.emitDictationAck(dictationId, -1, options.resume ? false : undefined);
+  }
+
+  /**
+   * Resume: the client lost its socket but this stream survived (same session within the
+   * reconnect grace). Tell it what we already have; it resends only seq > ackSeq. False when
+   * there is nothing to resume (fresh start, ack -1 = full replay).
+   */
+  private tryResumeDictationStream(dictationId: string, format: string): boolean {
+    const existing = this.streams.get(dictationId);
+    if (!existing || existing.inputFormat !== format) {
+      return false;
+    }
+    // This socket owns the stream from now on (the old one is gone or stale).
+    const previousOwner = existing.owner;
+    existing.owner = this;
+    if (existing.parkTimer) {
+      clearTimeout(existing.parkTimer);
+      existing.parkTimer = null;
+    }
+    if (previousOwner && previousOwner !== this && !previousOwner.hasDemand) {
+      previousOwner.onIdle?.();
+    }
+    if (!existing.ready) {
+      // Its start is still connecting; that start's ack (-1) answers this one too.
+      return true;
+    }
+    this.logger.debug(
+      { dictationId, ackSeq: existing.ackSeq, buffered: existing.receivedChunks.size },
+      "Dictation stream resumed",
+    );
+    this.emitDictationAck(dictationId, existing.ackSeq, true);
+    return true;
+  }
+
+  private parseInputRateOrFail(
+    dictationId: string,
+    format: string,
+    stt: StreamingTranscriptionSession,
+  ): number | null {
+    const inputRate = parsePcmRateFromFormat(format, 16000) ?? 16000;
+    if (Number.isFinite(inputRate) && inputRate > 0) {
+      return inputRate;
+    }
+    this.failDictationStream(
+      dictationId,
+      `Invalid dictation input rate in format: ${format}`,
+      false,
+    );
+    closeQuietly(stt);
+    return null;
+  }
+
+  private createDecoderOrFail(
+    dictationId: string,
+    format: string,
+    inputRate: number,
+    stt: StreamingTranscriptionSession,
+  ): DictationAudioDecoder | null {
+    try {
+      return createDictationAudioDecoder(format, inputRate);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.failDictationStream(dictationId, message, false);
+      closeQuietly(stt);
+      return null;
+    }
   }
 
   public async handleChunk(params: {
@@ -369,8 +524,21 @@ export class DictationStreamManager {
 
     while (state.receivedChunks.has(state.nextSeqToForward)) {
       const seq = state.nextSeqToForward;
-      const pcm16 = state.receivedChunks.get(seq)!;
+      const encoded = state.receivedChunks.get(seq)!;
       state.receivedChunks.delete(seq);
+
+      let pcm16: Buffer;
+      try {
+        pcm16 = state.decoder.decode(encoded);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        void this.failAndCleanupDictationStream(
+          params.dictationId,
+          `Invalid dictation audio at seq ${seq}: ${message}`,
+          false,
+        );
+        return;
+      }
 
       const resampled = state.resampler ? state.resampler.processChunk(pcm16) : pcm16;
       if (resampled.length > 0) {
@@ -487,8 +655,11 @@ export class DictationStreamManager {
     this.cleanupDictationStream(dictationId);
   }
 
-  private emitDictationAck(dictationId: string, ackSeq: number): void {
-    this.emit({ type: "dictation_stream_ack", payload: { dictationId, ackSeq } });
+  private emitDictationAck(dictationId: string, ackSeq: number, resumed?: boolean): void {
+    this.emit({
+      type: "dictation_stream_ack",
+      payload: { dictationId, ackSeq, ...(resumed === undefined ? {} : { resumed }) },
+    });
   }
 
   private emitDictationPartial(dictationId: string, text: string): void {
@@ -575,11 +746,17 @@ export class DictationStreamManager {
     if (state.finalTimeout) {
       clearTimeout(state.finalTimeout);
     }
+    if (state.parkTimer) {
+      clearTimeout(state.parkTimer);
+    }
+    const owner = state.owner;
+    state.owner = null;
     this.streams.delete(dictationId);
+    state.decoder.close();
     try {
       state.stt.close();
     } finally {
-      if (this.streams.size === 0) this.onIdle?.();
+      if (owner && !owner.hasDemand) owner.onIdle?.();
     }
   }
 
@@ -808,6 +985,14 @@ export class DictationStreamManager {
       }
       this.cleanupDictationStream(dictationId);
     })();
+  }
+}
+
+function closeQuietly(stt: StreamingTranscriptionSession): void {
+  try {
+    stt.close();
+  } catch {
+    // no-op
   }
 }
 

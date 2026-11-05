@@ -2,7 +2,7 @@ import type pino from "pino";
 import type { ProviderAvailability } from "../../agent/agent-manager.js";
 import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
 import { getPidLockInfo } from "../../pid-lock.js";
-import { generateLocalPairingOffer } from "../../pairing-offer.js";
+import { directEndpointsFromEnv, generateLocalPairingOffer } from "../../pairing-offer.js";
 import {
   collectDaemonDiagnostics,
   type DaemonWebSocketRuntimeDiagnosticSnapshot,
@@ -24,6 +24,7 @@ export interface DaemonRuntimeConfig {
     publicEndpoint: string;
     useTls: boolean;
     publicUseTls: boolean;
+    requireProtectedSecurity?: boolean;
   } | null;
 }
 
@@ -224,9 +225,19 @@ export class DaemonSession {
         relayPublicEndpoint: relay?.publicEndpoint,
         relayUseTls: relay?.useTls,
         relayPublicUseTls: relay?.publicUseTls,
+        relayRequireProtectedSecurity: relay?.requireProtectedSecurity ?? false,
         appBaseUrl: this.daemonRuntimeConfig?.appBaseUrl,
         includeQr: true,
         logger: this.logger,
+        // Relay off: a direct (v3) offer for the listen address. This client is already
+        // authenticated, so handing it the password adds no access. The response travels over
+        // this session: encrypted for relay and direct-E2EE clients, in clear for a plaintext
+        // direct client (PASEO_DIRECT_E2EE=required keeps those to this machine).
+        direct: {
+          listen: this.daemonRuntimeConfig?.listen,
+          password: process.env.PASEO_PASSWORD,
+          extraEndpoints: directEndpointsFromEnv(),
+        },
       });
       this.host.emit({
         type: "daemon.get_pairing_offer.response",

@@ -5,6 +5,7 @@ import {
   currentPluginScreen,
   getPluginSurfaceContributionServerIds,
   parsePluginOpenScreenInput,
+  pluginScreenOpensLikeChat,
   resolvePluginScreenTitle,
   resolvePluginSurfaceContribution,
 } from "./surface-contribution";
@@ -112,6 +113,26 @@ describe("plugin surface contribution identity", () => {
       resolvePluginSurfaceContribution(installations[2] ?? null, { kind: "sidebar", id: "missing" })
         .surface,
     ).toBeNull();
+  });
+});
+
+describe("pluginScreenOpensLikeChat", () => {
+  const bots = installation("srv", ["home", "group"], [], "bots");
+  bots.surfaces[1] = { ...bots.surfaces[1]!, mobileFloatingHeader: {} };
+
+  it("is true for a screen registered with mobileFloatingHeader on that host", () => {
+    expect(
+      pluginScreenOpensLikeChat([bots], { serverId: "srv", pluginId: "bots", screenId: "group" }),
+    ).toBe(true);
+  });
+
+  it("is false for other screens, plugins and hosts", () => {
+    const ask = (serverId: string, pluginId: string, screenId: string) =>
+      pluginScreenOpensLikeChat([bots], { serverId, pluginId, screenId });
+    expect(ask("srv", "bots", "home")).toBe(false);
+    expect(ask("srv", "other", "group")).toBe(false);
+    expect(ask("other", "bots", "group")).toBe(false);
+    expect(ask("srv", "bots", "missing")).toBe(false);
   });
 });
 

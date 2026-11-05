@@ -43,6 +43,9 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
         agentId: string;
       } | null>,
   },
+  appLinks: {
+    take: () => ipcRenderer.invoke("paseo:app-link:take") as Promise<string | null>,
+  },
   events: {
     on: (event: string, handler: EventHandler): Promise<() => void> => {
       const listener = (_ipcEvent: Electron.IpcRendererEvent, payload: unknown) => {
@@ -93,6 +96,12 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
   },
   opener: {
     openUrl: (url: string) => ipcRenderer.invoke("paseo:opener:openUrl", url),
+  },
+  networkProbe: {
+    listInterfaces: () => ipcRenderer.invoke("paseo:network-probe:listInterfaces"),
+    resolve: (host: string) => ipcRenderer.invoke("paseo:network-probe:resolve", host),
+    tcpConnect: (host: string, port: number, timeoutMs: number) =>
+      ipcRenderer.invoke("paseo:network-probe:tcpConnect", host, port, timeoutMs),
   },
   editor: {
     listTargets: () => ipcRenderer.invoke("paseo:editor:listTargets"),

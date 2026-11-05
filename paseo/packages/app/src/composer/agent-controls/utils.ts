@@ -6,6 +6,8 @@ import {
   PLAN_MODE_FEATURE_ID,
   SPEED_FEATURE_ID,
 } from "@/agent-controls/policy";
+import { isPublicFlavour } from "@/constants/flavour";
+import { displayModelLabel } from "@/utils/model-label";
 
 export type ExplainedAgentControl = "mode" | "model" | "thinking";
 export type FeatureHighlightColor = "blue" | "default" | "green" | "yellow";
@@ -132,8 +134,10 @@ function resolveModelDisplay(
 ): { activeModelId: string | null; displayModel: string } {
   return {
     activeModelId: selectedModel?.id ?? preferredModelId ?? null,
-    displayModel:
+    displayModel: displayModelLabel(
       selectedModel?.label ?? preferredModelId ?? fallbackModel?.label ?? unknownModelLabel,
+      isPublicFlavour,
+    ),
   };
 }
 

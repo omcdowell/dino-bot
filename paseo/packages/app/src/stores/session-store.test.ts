@@ -7,6 +7,7 @@ import {
   normalizeWorkspaceDescriptor,
   selectAgentTurnPresentation,
   selectAgentTimelineState,
+  toDaemonServerInfo,
   useSessionStore,
   type Agent,
   type WorkspaceDescriptor,
@@ -781,6 +782,49 @@ describe("setWorkspaces", () => {
     expect(after.session).toBe(before.session);
     expect(after.workspaces).toBe(before.workspaces);
     expect(after.workspaces.get(workspace.id)).toBe(before.workspaces.get(workspace.id));
+  });
+});
+
+describe("server info display version (DinoBot)", () => {
+  it("keeps the display version beside the engine version and updates it", () => {
+    const store = useSessionStore.getState();
+    initializeTestSession();
+    const info = toDaemonServerInfo({
+      status: "server_info",
+      serverId: "test-server",
+      hostname: null,
+      version: "0.11.2",
+      productName: "DinoBot",
+      displayVersion: "0.1.3",
+    });
+    expect(info).toMatchObject({
+      version: "0.11.2",
+      productName: "DinoBot",
+      displayVersion: "0.1.3",
+    });
+    store.updateSessionServerInfo("test-server", info);
+    expect(useSessionStore.getState().sessions["test-server"]?.serverInfo).toMatchObject({
+      version: "0.11.2",
+      productName: "DinoBot",
+      displayVersion: "0.1.3",
+    });
+
+    store.updateSessionServerInfo("test-server", { ...info, displayVersion: "0.1.4" });
+    expect(useSessionStore.getState().sessions["test-server"]?.serverInfo?.displayVersion).toBe(
+      "0.1.4",
+    );
+  });
+
+  it("an older daemon leaves the fields absent", () => {
+    const info = toDaemonServerInfo({
+      status: "server_info",
+      serverId: "s",
+      hostname: null,
+      version: "0.11.2",
+    });
+    expect(info.version).toBe("0.11.2");
+    expect(info).not.toHaveProperty("displayVersion");
+    expect(info).not.toHaveProperty("productName");
   });
 });
 

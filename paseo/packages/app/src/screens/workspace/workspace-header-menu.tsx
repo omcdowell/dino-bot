@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useMemo, type ReactNode } from "react";
 import { View } from "react-native";
 import { useRouter, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
@@ -49,6 +49,7 @@ const MENU_NEW_TERMINAL_ICON = <TerminalProfileIcon iconKey={undefined} size={16
 const MENU_IMPORT_ICON = <ThemedImport size={16} uniProps={mutedColorMapping} />;
 const MENU_COPY_ICON = <ThemedCopy size={16} uniProps={mutedColorMapping} />;
 const MENU_SETTINGS_ICON = <ThemedSettings size={16} uniProps={mutedColorMapping} />;
+
 function WorkspaceHeaderMenuTriggerIcon() {
   return (
     <ThemedEllipsis
@@ -201,6 +202,16 @@ function HeaderMenuProfileItem({
 
 export interface WorkspaceHeaderMenuMobileProps extends WorkspaceHeaderWorkspaceActions {
   normalizedServerId: string;
+  /**
+   * Render the sheet with no trigger of its own: something else opens it through `open` /
+   * `onOpenChange` (the phone's title pill). Only valid where the menu presents as a sheet, which
+   * needs no anchor.
+   */
+  hideTrigger?: boolean;
+  /** Rendered first in the sheet: the workspace context card and the Tabs group. */
+  leadingContent?: ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   showCreateBrowserTab: boolean;
   createTerminalDisabled: boolean;
   onCreateDraftTab: () => void;
@@ -221,6 +232,10 @@ export function WorkspaceHeaderMenuMobile({
   onCreateTerminal,
   onCreateTerminalWithProfile,
   onCreateBrowser,
+  hideTrigger = false,
+  leadingContent,
+  open,
+  onOpenChange,
   ...workspaceActions
 }: WorkspaceHeaderMenuMobileProps) {
   const { t } = useTranslation();
@@ -236,22 +251,30 @@ export function WorkspaceHeaderMenuMobile({
   }, [normalizedServerId, router]);
 
   return (
-    <DropdownMenu compactMode="sheet">
-      <DropdownMenuTrigger
-        testID="workspace-header-menu-trigger"
-        style={workspaceHeaderMenuButtonStyle}
-        hitSlop={COMPACT_HEADER_BUTTON_HIT_SLOP}
-        accessibilityRole="button"
-        accessibilityLabel={t("workspace.header.actions.workspaceActions")}
-      >
-        <WorkspaceHeaderMenuTriggerIcon />
-      </DropdownMenuTrigger>
+    <DropdownMenu compactMode="sheet" open={open} onOpenChange={onOpenChange}>
+      {hideTrigger ? null : (
+        <DropdownMenuTrigger
+          testID="workspace-header-menu-trigger"
+          style={workspaceHeaderMenuButtonStyle}
+          hitSlop={COMPACT_HEADER_BUTTON_HIT_SLOP}
+          accessibilityRole="button"
+          accessibilityLabel={t("workspace.header.actions.workspaceActions")}
+        >
+          <WorkspaceHeaderMenuTriggerIcon />
+        </DropdownMenuTrigger>
+      )}
       <DropdownMenuContent
         align="start"
         width={220}
         testID="workspace-header-menu"
-        sheetTitle={t("workspace.header.actions.workspaceActions")}
+        sheetTitle={leadingContent ? undefined : t("workspace.header.actions.workspaceActions")}
       >
+        {leadingContent ? (
+          <>
+            {leadingContent}
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
         <DropdownMenuItem
           testID="workspace-header-new-agent"
           leading={MENU_NEW_AGENT_ICON}

@@ -31,6 +31,41 @@ const pluginThemeMapping = (theme: Theme) => ({
 function PluginPanelBody({ theme }: { theme: PluginTheme }) {
   const { serverId, workspaceId, target } = usePaneContext();
   invariant(target.kind === "plugin", "PluginPanel requires plugin target");
+  return (
+    <PluginPanelContent
+      theme={theme}
+      serverId={serverId}
+      workspaceId={workspaceId}
+      target={target}
+    />
+  );
+}
+
+type PluginPanelTarget = Extract<
+  import("@/workspace-tabs/model").WorkspaceTabTarget,
+  { kind: "plugin" }
+>;
+
+/** A plugin panel outside a workspace pane: the phone Explorer's plugin tabs. */
+export function PluginWorkspacePanelView(props: {
+  serverId: string;
+  workspaceId: string;
+  target: PluginPanelTarget;
+}) {
+  return <ThemedPluginPanelContent {...props} uniProps={pluginThemeMapping} />;
+}
+
+function PluginPanelContent({
+  theme,
+  serverId,
+  workspaceId,
+  target,
+}: {
+  theme: PluginTheme;
+  serverId: string;
+  workspaceId: string;
+  target: PluginPanelTarget;
+}) {
   const plugin = useInstalledPlugin(serverId, target.pluginId);
   const contribution = resolvePluginWorkspacePanel(plugin, target);
   const workspaceExists = useWorkspaceExists(serverId, workspaceId);
@@ -104,6 +139,7 @@ function PluginPanelBody({ theme }: { theme: PluginTheme }) {
 }
 
 const ThemedPluginPanelBody = withUnistyles(PluginPanelBody);
+const ThemedPluginPanelContent = withUnistyles(PluginPanelContent);
 
 function PluginPanel() {
   return <ThemedPluginPanelBody uniProps={pluginThemeMapping} />;

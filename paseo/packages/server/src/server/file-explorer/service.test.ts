@@ -233,6 +233,30 @@ describe("file explorer service", () => {
     }
   });
 
+  it("streams in the chunk size a client asks for, clamped to 8 KB..256 KB", async () => {
+    const root = await createTempDir("paseo-file-stream-chunks-");
+    try {
+      await writeFile(path.join(root, "photo.jpg"), Buffer.alloc(100 * 1024, 0x61));
+      const sizes = async (chunkBytes?: number) => {
+        const seen: number[] = [];
+        await streamExplorerFile(
+          { root, relativePath: "photo.jpg" },
+          async (file) => {
+            for await (const chunk of file.chunks) seen.push(chunk.byteLength);
+          },
+          { chunkBytes },
+        );
+        return seen;
+      };
+      expect(await sizes()).toEqual([100 * 1024]);
+      expect(await sizes(40 * 1024)).toEqual([40 * 1024, 40 * 1024, 20 * 1024]);
+      expect((await sizes(1)).length).toBe(13);
+      expect(await sizes(10 * 1024 * 1024)).toEqual([100 * 1024]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("fails a stream when the file shrinks below its advertised size", async () => {
     const root = await createTempDir("paseo-file-stream-truncate-");
 

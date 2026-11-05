@@ -10,6 +10,7 @@ import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ScrollableCodeSurface, SurfaceCard } from "@/components/ui/scrollable-code-surface";
 import { useToast } from "@/contexts/toast-context";
 import {
+  brandDaemonDiagnostic,
   formatAppDiagnosticHeader,
   formatDiagnosticSection,
   formatHostRuntimeSection,
@@ -289,7 +290,7 @@ async function collectHostDiagnosticSections(
 
     if (serverInfo?.features?.daemonDiagnostics === true) {
       const result = await client.collectDiagnostics();
-      sections.push(result.diagnostic);
+      sections.push(brandDaemonDiagnostic(result.diagnostic));
     } else {
       sections.push(
         formatDiagnosticSection(`Daemon diagnostics: ${host.label}`, [
@@ -364,7 +365,7 @@ const styles = StyleSheet.create((theme) => ({
     width: 8,
     height: 8,
     borderRadius: theme.borderRadius.full,
-    backgroundColor: theme.colors.success,
+    backgroundColor: theme.colors.accentText,
   },
   statusDotFailed: {
     width: 8,

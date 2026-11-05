@@ -160,6 +160,24 @@ guarantee compatibility with another host's renderer.
 
 These exact module specifiers use the host's runtime instances. A client bundle that requests another host module fails with `Module "<name>" is not available in plugin client code`.
 
+### Show the last known data at start-up
+
+The app keeps each host's plugin client bundles on the device and starts them before the host
+connects, so plugin screens and sidebar items appear at once. Queries that should render from the
+device until the host answers opt in with `meta: { persist: true }`:
+
+```tsx
+const list = useQuery({
+  queryKey: ["bots", "list"],
+  queryFn: () => listBots({}),
+  meta: { persist: true },
+});
+```
+
+Only successful data of persisted queries is kept, per host and plugin (up to about 1 MB of JSON
+each). While the host has not answered, RPCs fail with "not connected"; when it connects, persisted
+queries refetch. Keep secrets and large payloads out of persisted queries.
+
 Do not import `lucide-react-native`, `react-native-svg`, or DOM libraries. Set contribution `icon` fields to a [Lucide icon name](https://lucide.dev/icons/); Paseo validates the name and renders the icon.
 
 ### Cross-platform rules
@@ -957,6 +975,7 @@ of its items, else the first host.
 | `currentScreen`           | `{ screenId, params }` of this plugin's screen open on the item's host, or `null`.            |
 | `openScreen(input)`       | Opens one of this plugin's screens: `{ screenId, params? }`. Unknown screen IDs throw.        |
 | `openPopover(Content)`    | Opens `Content` anchored to the pressed row on wide layouts and as a bottom sheet on compact. |
+| `navigation`              | Optional. As in `PluginScreenProps`; it also closes the popover and compact sidebar first.    |
 
 `Content` receives `theme`, `host`, `layout`, `close()`, and `openScreen(input)`. Opening a screen
 closes the popover.
@@ -1111,6 +1130,22 @@ export function IssueActions({ theme }: PluginSurfaceProps) {
   );
 }
 ```
+
+### Markdown
+
+Import `Markdown` from `@getpaseo/plugin/client/ui` to render a string with Paseo's
+Markdown presentation (the same renderer as PR comments and file previews):
+
+```tsx
+import * as ui from "@getpaseo/plugin/client/ui";
+
+const { Markdown } = ui; // undefined on older apps: fall back to plain <Text>
+{Markdown ? <Markdown>{"## Review\n\nThe checks **passed**."}</Markdown> : <Text>{text}</Text>}
+```
+
+`children` is the only prop and must be a string; an empty string renders nothing. The host
+supplies theme, text selection, code blocks, tables and link handling. The component adds no
+padding or scroll container.
 
 ### Modal
 

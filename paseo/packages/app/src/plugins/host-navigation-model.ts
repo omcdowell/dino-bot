@@ -10,15 +10,24 @@ interface HostNavigationOwner {
   createBrowser(input: { initialUrl: string }): { browserId: string };
 }
 
+/**
+ * `beforeNavigate` runs once a request is valid and just before it navigates. Sidebar items use it to
+ * close their popover and the compact drawer, as their `openScreen` does.
+ */
 export function createPluginHostNavigation(
   serverId: string,
   owner: HostNavigationOwner,
+  beforeNavigate?: () => void,
 ): NonNullable<PluginSurfaceProps["navigation"]> {
   return {
-    openAgent: ({ agentId, serverId: targetServerId }) =>
-      owner.openAgent({ serverId: targetServerId ?? serverId, agentId }),
-    openWorkspace: ({ workspaceId, serverId: targetServerId }) =>
-      owner.openWorkspace({ serverId: targetServerId ?? serverId, workspaceId }),
+    openAgent: ({ agentId, serverId: targetServerId }) => {
+      beforeNavigate?.();
+      owner.openAgent({ serverId: targetServerId ?? serverId, agentId });
+    },
+    openWorkspace: ({ workspaceId, serverId: targetServerId }) => {
+      beforeNavigate?.();
+      owner.openWorkspace({ serverId: targetServerId ?? serverId, workspaceId });
+    },
     openBrowser: owner.browserAvailable
       ? ({ url, workspaceId, serverId: targetServerId }) => {
           if (!isHttpUrl(url)) throw new Error("Only absolute HTTP(S) URLs are supported.");
@@ -30,6 +39,7 @@ export function createPluginHostNavigation(
           });
           if (!destinationWorkspaceId)
             throw new Error("Workspace is unavailable on the requested host.");
+          beforeNavigate?.();
           const { browserId } = owner.createBrowser({ initialUrl: url });
           owner.openWorkspace({
             serverId: destinationServerId,
