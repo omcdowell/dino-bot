@@ -1,0 +1,17 @@
+# gitleaks config (read by build/publish-public.sh's scan from the repo root): the default rules,
+# minus exactly the known test fixtures below (each one checked by hand on 5 Nov). A new finding
+# still fails the scan; add it here only after reading it.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known test fixtures, not secrets"
+regexes = [
+  # optchat/test/room-mode.test.ts: a fake OpenAI key the room-mode redaction test must catch
+  '''sk-proj-0123456789abcdefghij''',
+  # paseo/packages/app/src/utils/direct-e2ee.test.ts: base64 of "daemon-public-key-for-tests-0123456"
+  '''ZGFlbW9uLXB1YmxpYy1rZXktZm9yLXRlc3RzLTAxMjM0NTY=''',
+  # paseo/packages/relay/src/crypto.test.ts (upstream): published X25519 low-order points
+  '''e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800''',
+  '''5f9c95bca3508c24b1d0b1559c83ef5b04445cc4581c8e86d8224eddd09f1157''',
+]
