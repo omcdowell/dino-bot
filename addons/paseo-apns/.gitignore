@@ -1,0 +1,5 @@
+node_modules/
+scratch/
+*.log
+*.p8
+.env
