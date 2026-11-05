@@ -2,15 +2,15 @@
   "node": "24.21.0",
   "paseo": {
     "repo": "omcdowell/dino-bot",
-    "commit": "5f7bacb3ba8319dc455014508ea76a9a10bb1d6e"
+    "commit": "ff881c2bd6cc403838ee36fa6d5cd725b40842c9"
   },
   "bots": {
     "repo": "omcdowell/dino-bot",
-    "commit": "62143663219437b8dde606ee3b88fca9406a5254"
+    "commit": "8e259b91169bdf6bff27596178d9ec4d64883fac"
   },
   "optchat": {
     "repo": "omcdowell/dino-bot",
-    "commit": "4d1ce44ae22385c943e3f6aaeaaaa039be8a0e95"
+    "commit": "2e3b0207749834e75b3df1d7c094ba728f0796b8"
   },
   "pi": "1.4.0",
   "herdr": {
