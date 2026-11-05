@@ -1,0 +1,3 @@
+{"v":1,"type":"message","id":"01K6ZQ5V8M0000000000000003","ts":"2026-10-08T06:01:00.000Z","from":"worker:wp1-bot-dm","to":"bitzer","kind":"report","thread":"01K6ZQ5V8M0000000000000003","re":null,"hop":1,"subject":"WP1 finished","body":"WP1 finished. Report at /tmp/r.md","attachments":[],"expects_reply":false,"from_agent_id":null,"to_agent_id":"11ba726e-deca-4ba6-8658-396fae9c3ac2","origin":"bot-dm/1"}
+{"v":1,"type":"status","id":"01K6ZQ5V8M0000000000000003","ts":"2026-10-08T06:01:00.000Z","status":"queued","detail":null}
+{"v":1,"type":"status","id":"01K6ZQ5V8M0000000000000003","ts":"2026-10-08T06:01:00.900Z","status":"started","detail":null}
