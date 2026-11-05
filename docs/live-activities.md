@@ -56,8 +56,8 @@ In [Certificates, Identifiers & Profiles](https://developer.apple.com/account/re
 On the Mac:
 
 ```sh
-git clone --depth 1 --branch src/paseo https://github.com/omcdowell/dino-bot.git dinobot-app
-cd dinobot-app
+git clone --depth 1 https://github.com/omcdowell/dino-bot.git dinobot
+cd dinobot/paseo
 npm ci
 cd packages/app
 export PASEO_BUNDLE_ID=com.yourname.dinobot       # your bundle ID

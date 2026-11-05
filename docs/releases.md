@@ -47,19 +47,21 @@ more per archive with the default).
 
 ## How a release is made
 
-1. `build/prepare-sources.sh OUT PASEO BOTS OPTCHAT` makes one fresh commit per source tree
-   (`src/paseo`, `src/paseo-bots`, `src/pi-optchat`) and pins them in `build/sources.json`.
-2. `SOURCES_GIT=OUT build/preflight-release.sh` runs, locally and on the exact tree to be pushed,
+1. The sources are folders of this repo: `paseo/` (the Paseo fork: daemon and app),
+   `plugins/bots/`, `optchat/`, `addons/paseo-apns/`. A change to any of them is a normal commit
+   here; upstream Paseo and pi-optchat come in with `git subtree pull` (docs/upstream.md).
+   `build/sources.json` pins only what comes from outside (Node, pi, herdr with checksums).
+2. `build/preflight-release.sh` runs, locally and on the exact tree to be pushed,
    the workflow's tests, a full `ci-build.sh linux-x64` under a 7 GB cap, the workflow rules and
    actionlint.
 3. `build/publish-public.sh` (dry run by default) builds the one-commit public tree, checks it
    (`build/public-check.mjs`, `build/private-guard.sh`, gitleaks) and, with `--for-real`, pushes
-   `main` and `src/*`; with `TAG=v<semver>` it also pushes the tag. The tag must be `v` plus
+   `main` (one commit, every folder); with `TAG=v<semver>` it also pushes the tag. The tag must be `v` plus
    `version` in `lib/product.json` (the release workflow checks it; the install shows it in
    `MANIFEST.json` and `dinobot doctor`).
 4. The tag starts `.github/workflows/release.yml`: tests, builds linux-x64 and linux-arm64, then
    darwin-arm64 (macOS minutes count 10x, so only after Linux passed), each on its own runner from
-   `build/sources.json` (`build/ci-build.sh`); adds the compressed cosign binaries
+   the tagged commit's folders (`build/ci-build.sh`); adds the compressed cosign binaries
    (`build/cosign-assets.sh`); signs every file with `cosign sign-blob` (only the release job
    has `id-token: write`), re-verifies exactly as clients do, and creates the GitHub Release.
    The `desktop` job builds the desktop app in the same run (below).
@@ -70,7 +72,7 @@ older run of the same tag.
 ## The desktop app (basic)
 
 Every release also carries the desktop app, built by the `desktop` job with
-`build/ci-desktop.sh` from the same pinned paseo commit (public flavour: DinoBot name,
+`build/ci-desktop.sh` from the same commit's `paseo/` (public flavour: DinoBot name,
 `dinobot://` links, no built-in daemon, no update feed; it is a client for a DinoBot host):
 
 - `DinoBot-<version>-arm64.dmg` (macOS, Apple silicon). Signed ad hoc, not with an Apple
