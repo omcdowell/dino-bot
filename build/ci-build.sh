@@ -37,6 +37,10 @@ PI_ALLOW=--allow-scripts=protobufjs,@google/genai
 no_skipped() { if grep -i 'install scripts blocked\|not yet covered by allowScripts' "$1"; then echo "ci-build: npm skipped install scripts (see above); review them and add them to DAEMON_ALLOW/PI_ALLOW" >&2; exit 1; fi; }
 say() { printf '== %s\n' "$*"; }
 rm -rf "$WORK"; mkdir -p "$WORK"
+# lefthook's npm postinstall runs `lefthook install -f` unless CI is set; inside this monorepo (or on a
+# host with a global core.hooksPath) that overwrites someone else's git hooks. paseo/package.json
+# blocks it for npm 12 (allowScripts lefthook: false); CI=true covers npm 11. GitHub sets CI anyway.
+export CI=${CI:-true}
 
 host_os=$(uname -s | tr '[:upper:]' '[:lower:]')
 case "$(uname -m)" in x86_64|amd64) host_arch=x64 ;; arm64|aarch64) host_arch=arm64 ;; *) host_arch=$(uname -m) ;; esac

@@ -152,7 +152,7 @@
     "node-pty": true,
     "msgpackr-extract": true,
     "unrs-resolver": true,
-    "lefthook": true,
+    "lefthook": false,
     "dtrace-provider": false,
     "electron-winstaller": false
   }

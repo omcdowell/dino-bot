@@ -36,6 +36,10 @@ want_node=v$(q s.node)
 P=$SRC/paseo
 [ -z "$(git -C "$SRC" status --porcelain --untracked-files=no -- paseo)" ] || { echo "ci-desktop: $P has uncommitted changes; commit first" >&2; exit 2; }
 
+# lefthook's npm postinstall runs `lefthook install -f` unless CI is set; inside this monorepo (or on a
+# host with a global core.hooksPath) that overwrites someone else's git hooks. paseo/package.json
+# blocks it for npm 12 (allowScripts lefthook: false); CI=true covers npm 11. GitHub sets CI anyway.
+export CI=${CI:-true}
 export PASEO_FLAVOUR=public LEFTHOOK=0 EXPO_NO_TELEMETRY=1 CSC_IDENTITY_AUTO_DISCOVERY=false
 export NODE_OPTIONS=${NODE_OPTIONS:---max-old-space-size=4096}
 cd "$P"
