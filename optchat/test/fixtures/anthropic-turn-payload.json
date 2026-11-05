@@ -1,0 +1,751 @@
+{
+  "model": "claude-opus-5-5",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "<chat>\n0+1|user: line 0 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n1+1|talk: line 1 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n2+1|tool: line 2 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n3+1|echo: line 3 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n4+1|user: line 4 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n5+1|talk: line 5 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n6+1|tool: line 6 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n7+1|echo: line 7 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n8+1|user: line 8 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n9+1|talk: line 9 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n10+1|tool: line 10 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n11+1|echo: line 11 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n12+1|user: line 12 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n13+1|talk: line 13 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n14+1|tool: line 14 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n15+1|echo: line 15 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n16+1|user: line 16 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n17+1|talk: line 17 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n18+1|tool: line 18 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n19+1|echo: line 19 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n20+1|user: line 20 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n21+1|talk: line 21 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n22+1|tool: line 22 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n23+1|echo: line 23 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n24+1|user: line 24 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n25+1|talk: line 25 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n26+1|tool: line 26 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n27+1|echo: line 27 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n28+1|user: line 28 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n29+1|talk: line 29 of a captured view; it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome. it records a decision, a path such as src/memory.ts and an outcome.\n</chat>"
+        },
+        {
+          "type": "text",
+          "text": "What did we decide about the cache marks?",
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ]
+    },
+    {
+      "role": "system",
+      "content": [],
+      "output_config": {
+        "effort": "medium"
+      }
+    }
+  ],
+  "max_tokens": 128000,
+  "stream": true,
+  "betas": [
+    "claude-code-20250219",
+    "oauth-2025-04-20",
+    "mid-conversation-output-config-2026-07-01",
+    "thinking-binding-controls-2026-08-01"
+  ],
+  "system": [
+    {
+      "type": "text",
+      "text": "You are Claude Code, Anthropic's official CLI for Claude.",
+      "cache_control": {
+        "type": "ephemeral"
+      }
+    },
+    {
+      "type": "text",
+      "text": "You are OptChat, an AI agent that works for one user in a single chat that\nnever ends. Do the user's tasks yourself, with your tools, following\nthe user's instructions at the end of this prompt: they say who the\nuser is, how their files are organized and how they want work done.\nUse subagents only when the user asks for them.\n\nYou keep no memory between turns. Each turn starts with the view below,\nfollowed by the user's new message. Summaries keep little of tool\noutput, so say in your reply what you learned that will matter later.\nMessages the user sends while you work reach you between tool calls.\n\n[Rest of the Pi system prompt left out of this fixture.]",
+      "cache_control": {
+        "type": "ephemeral"
+      }
+    }
+  ],
+  "tools": [
+    {
+      "name": "Read",
+      "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+      "eager_input_streaming": true,
+      "strict": true,
+      "input_schema": {
+        "type": "object",
+        "required": ["path", "offset", "limit"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the file to read (relative or absolute)"
+          },
+          "offset": {
+            "anyOf": [
+              {
+                "type": "number",
+                "description": "Line number to start reading from (1-indexed)"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "number",
+                "description": "Maximum number of lines to read"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "Bash",
+      "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+      "eager_input_streaming": true,
+      "strict": true,
+      "input_schema": {
+        "type": "object",
+        "required": ["command", "timeout"],
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Shell command to execute"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "number",
+                "description": "Timeout in seconds (optional, no default timeout)"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "Edit",
+      "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+      "eager_input_streaming": true,
+      "strict": true,
+      "input_schema": {
+        "type": "object",
+        "required": ["path", "edits"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the file to edit (relative or absolute)"
+          },
+          "edits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["oldText", "newText"],
+              "properties": {
+                "oldText": {
+                  "type": "string",
+                  "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                },
+                "newText": {
+                  "type": "string",
+                  "description": "Replacement text for this targeted edit."
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "Write",
+      "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+      "eager_input_streaming": true,
+      "strict": true,
+      "input_schema": {
+        "type": "object",
+        "required": ["path", "content"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the file to write (relative or absolute)"
+          },
+          "content": {
+            "type": "string",
+            "description": "Content to write to the file"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "zoom",
+      "description": "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole.",
+      "eager_input_streaming": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": ["id", "n"]
+      }
+    },
+    {
+      "name": "search_memory",
+      "description": "Find original messages containing every term (case-insensitive), newest first. Each hit is id+0|kind date: snippet; zoom id 1 for the whole message. Use it when the view may have summarized away a name, number, path or decision.",
+      "eager_input_streaming": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "date",
+      "description": "The date and time of message id.",
+      "eager_input_streaming": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "ffgrep",
+      "description": "Grep file contents. Smart-case, auto-detects regex vs literal, git-aware. Results are ranked by frecency (most-accessed files first); matches within a file stay in source order. Default limit 20.",
+      "eager_input_streaming": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Search pattern (literal text or regex)"
+          },
+          "path": {
+            "type": "string",
+            "description": "Path constraint. Directory prefix (src/ or src/foo/), bare filename with extension (main.rs), or glob (*.ts, src/**/*.cc, {src,lib}/**). Applied to the full repo-relative path. Absolute, ~/, and ../ paths outside the workspace are also supported and searched with a separate index."
+          },
+          "exclude": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "Exclude paths (comma/space-separated or array). Same syntax as path: directory prefix ('test/'), filename with extension ('config.json'), or glob ('*.min.js', '**/*.{rs,go}'). A leading '!' is optional and ignored \u2014 both 'test/' and '!test/' work. Example: 'test/,*.min.js,!vendor/'."
+          },
+          "caseSensitive": {
+            "type": "boolean",
+            "description": "Force case-sensitive matching. Default uses smart-case (case-insensitive when pattern is all lowercase)."
+          },
+          "context": {
+            "type": "number",
+            "description": "Context lines before+after each match (0-20)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max matches (default 20)"
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Pagination cursor from previous result"
+          }
+        },
+        "required": ["pattern"]
+      }
+    },
+    {
+      "name": "fffind",
+      "description": "Fuzzy path search and glob search. Matches against the whole repo-relative path, not just the filename. Frecency-ranked, git-aware. Multi-word = narrower (AND). Default limit 30.",
+      "eager_input_streaming": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Fuzzy filename search and glob search. Frecency-ranked, git-aware. Multi-word = narrower (AND) not bound to order, use for multi word related concept search. Prefer this over ls/find/bash as the first exploration step whenever the user names a concept, feature, or symbol \u2014 it surfaces the relevant files in one call. Only use ls/read on a directory when you specifically need the alphabetical layout of an unknown repo, or when a concept search returned nothing."
+          },
+          "path": {
+            "type": "string",
+            "description": "Path constraint. Directory prefix (src/ or src/foo/), bare filename with extension (main.rs), or glob (*.ts, src/**/*.cc, {src,lib}/**). Applied to the full repo-relative path. Absolute, ~/, and ../ paths outside the workspace are also supported and searched with a separate index."
+          },
+          "exclude": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "Exclude paths (comma/space-separated or array). Same syntax as path: directory prefix ('test/'), filename with extension ('config.json'), or glob ('*.min.js', '**/*.{rs,go}'). A leading '!' is optional and ignored \u2014 both 'test/' and '!test/' work. Example: 'test/,*.min.js,!vendor/'."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results per page (default 30)"
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Pagination cursor from previous result"
+          }
+        },
+        "required": ["pattern"]
+      }
+    },
+    {
+      "name": "web_search",
+      "description": "Search the web with OpenAI, Brave, Parallel, Parallel MCP, TinyFish, Search1API, Searchinfinity, Querit, Tavily, You.com, Firecrawl, Jina, SearXNG, DuckDuckGo, Perplexity, Gemini, Kimi, Exa, SERPdive, Kagi, Ollama, Anysearch, xAI, Mistral, Bright Data, SerpBase, SerpApi, Serper, Serply, Valyu, Bocha, XCrawl, Baizhi, Z.ai. Provider arrays run simultaneously; all searches eligible allowed providers (OpenAI, Brave, Parallel, TinyFish, Search1API, Searchinfinity, Querit, Tavily, Firecrawl, Jina, SearXNG, Perplexity, Gemini, Exa, SERPdive, Kagi, Ollama, Bocha); explicit-only allowed providers (Parallel MCP, You.com, DuckDuckGo, Kimi, Anysearch, xAI, Mistral, Bright Data, SerpBase, SerpApi, Serper, Serply, Valyu, XCrawl, Baizhi, Z.ai) remain excluded. The default workflow is none: it returns bounded source-linked search results or provider answers without a curator or generated summary, identifies the providers used, and stores full results for retrieval by responseId. For comprehensive research, prefer queries (plural) with 2-4 varied angles over a single query. When includeContent is true, full page content is fetched in the background. Set workflow to \"summary-review\" to open the curator with an auto-generated summary draft or \"auto-summary\" to generate a summary without the browser curator. The configured provider is used when provider is omitted or set to auto; omit provider unless explicitly overriding it.",
+      "eager_input_streaming": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Single search query. For research tasks, prefer 'queries' with multiple varied angles instead."
+          },
+          "queries": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Multiple queries searched concurrently (up to three at a time), each returning source-linked search results or a provider answer. Prefer this for research \u2014 vary phrasing, scope, and angle across 2-4 queries to maximize coverage. Good: ['React vs Vue performance benchmarks 2026', 'React vs Vue developer experience comparison', 'React ecosystem size vs Vue ecosystem']. Bad: ['React vs Vue', 'React vs Vue comparison', 'React vs Vue review'] (too similar, redundant results)."
+          },
+          "numResults": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "Results per query (default: 5, max: 20)"
+          },
+          "includeContent": {
+            "type": "boolean",
+            "description": "Fetch full page content (async)"
+          },
+          "recencyFilter": {
+            "type": "string",
+            "enum": ["day", "week", "month", "year"],
+            "description": "Filter by recency"
+          },
+          "domainFilter": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Limit to domains (prefix with - to exclude)"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "all",
+                  "openai",
+                  "brave",
+                  "parallel",
+                  "parallel-mcp",
+                  "tinyfish",
+                  "search1api",
+                  "searchinfinity",
+                  "querit",
+                  "tavily",
+                  "you",
+                  "firecrawl",
+                  "jina",
+                  "searxng",
+                  "duckduckgo",
+                  "perplexity",
+                  "gemini",
+                  "kimi",
+                  "exa",
+                  "serpdive",
+                  "kagi",
+                  "ollama",
+                  "anysearch",
+                  "xai",
+                  "mistral",
+                  "brightdata",
+                  "serpbase",
+                  "serpapi",
+                  "serper",
+                  "serply",
+                  "valyu",
+                  "bocha",
+                  "xcrawl",
+                  "baizhi",
+                  "zai"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "openai",
+                    "brave",
+                    "parallel",
+                    "parallel-mcp",
+                    "tinyfish",
+                    "search1api",
+                    "searchinfinity",
+                    "querit",
+                    "tavily",
+                    "you",
+                    "firecrawl",
+                    "jina",
+                    "searxng",
+                    "duckduckgo",
+                    "perplexity",
+                    "gemini",
+                    "kimi",
+                    "exa",
+                    "serpdive",
+                    "kagi",
+                    "ollama",
+                    "anysearch",
+                    "xai",
+                    "mistral",
+                    "brightdata",
+                    "serpbase",
+                    "serpapi",
+                    "serper",
+                    "serply",
+                    "valyu",
+                    "bocha",
+                    "xcrawl",
+                    "baizhi",
+                    "zai"
+                  ]
+                },
+                "minItems": 1
+              }
+            ],
+            "description": "Search provider or non-empty list of allowed providers to search simultaneously; all searches eligible allowed providers (OpenAI, Brave, Parallel, TinyFish, Search1API, Searchinfinity, Querit, Tavily, Firecrawl, Jina, SearXNG, Perplexity, Gemini, Exa, SERPdive, Kagi, Ollama, Bocha); explicit-only allowed providers (Parallel MCP, You.com, DuckDuckGo, Kimi, Anysearch, xAI, Mistral, Bright Data, SerpBase, SerpApi, Serper, Serply, Valyu, XCrawl, Baizhi, Z.ai) remain excluded; omit this field to use the configured provider, or use auto when none is configured"
+          },
+          "workflow": {
+            "type": "string",
+            "enum": ["none", "summary-review", "auto-summary"],
+            "description": "Search workflow mode: none = no curator (default), summary-review = open curator with auto summary draft, auto-summary = generate summary without opening curator"
+          },
+          "proxy": {
+            "type": "string",
+            "description": "http(s) or socks proxy URL (e.g. http://host:port or socks5h://host:port) used for every outbound request in this call (search APIs and content fetches). Node fetch ignores HTTP(S)_PROXY env vars, so set this (or `proxy` in web-search.json) when direct access is blocked; empty string forces direct access."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "source_check",
+      "description": "Gather web sources for a claim and return a bounded machine-readable research artifact with exact passage citations for manual review.",
+      "eager_input_streaming": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "claim": {
+            "type": "string",
+            "description": "The assertion to gather web sources for."
+          },
+          "queries": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Search queries (default: the claim)."
+          },
+          "numResults": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "Results per query (default: 5, max: 20)."
+          },
+          "fetchContent": {
+            "type": "boolean",
+            "description": "Fetch up to 5 result pages for exact passage extraction."
+          },
+          "recencyFilter": {
+            "type": "string",
+            "enum": ["day", "week", "month", "year"],
+            "description": "Filter by recency."
+          },
+          "domainFilter": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Limit to domains; prefix with - to exclude."
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "all",
+                  "openai",
+                  "brave",
+                  "parallel",
+                  "parallel-mcp",
+                  "tinyfish",
+                  "search1api",
+                  "searchinfinity",
+                  "querit",
+                  "tavily",
+                  "you",
+                  "firecrawl",
+                  "jina",
+                  "searxng",
+                  "duckduckgo",
+                  "perplexity",
+                  "gemini",
+                  "kimi",
+                  "exa",
+                  "serpdive",
+                  "kagi",
+                  "ollama",
+                  "anysearch",
+                  "xai",
+                  "mistral",
+                  "brightdata",
+                  "serpbase",
+                  "serpapi",
+                  "serper",
+                  "serply",
+                  "valyu",
+                  "bocha",
+                  "xcrawl",
+                  "baizhi",
+                  "zai"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "openai",
+                    "brave",
+                    "parallel",
+                    "parallel-mcp",
+                    "tinyfish",
+                    "search1api",
+                    "searchinfinity",
+                    "querit",
+                    "tavily",
+                    "you",
+                    "firecrawl",
+                    "jina",
+                    "searxng",
+                    "duckduckgo",
+                    "perplexity",
+                    "gemini",
+                    "kimi",
+                    "exa",
+                    "serpdive",
+                    "kagi",
+                    "ollama",
+                    "anysearch",
+                    "xai",
+                    "mistral",
+                    "brightdata",
+                    "serpbase",
+                    "serpapi",
+                    "serper",
+                    "serply",
+                    "valyu",
+                    "bocha",
+                    "xcrawl",
+                    "baizhi",
+                    "zai"
+                  ]
+                },
+                "minItems": 1
+              }
+            ],
+            "description": "Search provider or non-empty list of allowed providers to search simultaneously; all searches eligible allowed providers (OpenAI, Brave, Parallel, TinyFish, Search1API, Searchinfinity, Querit, Tavily, Firecrawl, Jina, SearXNG, Perplexity, Gemini, Exa, SERPdive, Kagi, Ollama, Bocha); explicit-only allowed providers (Parallel MCP, You.com, DuckDuckGo, Kimi, Anysearch, xAI, Mistral, Bright Data, SerpBase, SerpApi, Serper, Serply, Valyu, XCrawl, Baizhi, Z.ai) remain excluded"
+          },
+          "proxy": {
+            "type": "string",
+            "description": "http(s) or socks proxy URL (e.g. http://host:port or socks5h://host:port) used for every outbound request in this call (search APIs and result-page fetches). Empty string forces direct access."
+          }
+        },
+        "required": ["claim"]
+      }
+    },
+    {
+      "name": "fetch_content",
+      "description": "Fetch URL(s). Available modes: readable (default): extract readable content as markdown; raw: return the exact textual body using direct HTTP only; answer: answer a prompt using only fetched content. Direct image URLs return resized image content when supported by the selected mode. Supports YouTube transcripts, GitHub repositories, PDFs, and local videos when supported by the selected mode. Full original content is stored for retrieval with get_search_content.",
+      "eager_input_streaming": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Single URL to fetch"
+          },
+          "urls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Multiple URLs (parallel)"
+          },
+          "forceClone": {
+            "type": "boolean",
+            "description": "Force cloning large GitHub repositories that exceed the size threshold"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Question or instruction for video analysis, or the page-local question required by answer mode."
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["readable", "raw", "answer"],
+            "description": "Fetch mode. readable (default): extract readable content as markdown; raw: return the exact textual body using direct HTTP only; answer: answer a prompt using only fetched content."
+          },
+          "answerModel": {
+            "type": "string",
+            "description": "Optional provider/model-id override for answer mode. Defaults to fetch.answerProvider + fetch.answerModel when configured, otherwise the current Pi model."
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "Extract video frame(s) at a timestamp or time range. Single: '1:23:45', '23:45', or '85' (seconds). Range: '23:41-25:00' extracts evenly-spaced frames across that span (default 6). Use frames with ranges to control density; single+frames uses a fixed 5s interval. YouTube requires yt-dlp + ffmpeg; local videos require ffmpeg. Use a range when you know the approximate area but not the exact moment \u2014 you'll get a contact sheet to visually identify the right frame."
+          },
+          "frames": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12,
+            "description": "Number of frames to extract. Use with timestamp range for custom density, with single timestamp to get N frames at 5s intervals, or alone to sample across the entire video. Requires yt-dlp + ffmpeg for YouTube, ffmpeg for local video."
+          },
+          "model": {
+            "type": "string",
+            "description": "Override the Gemini model for video/YouTube analysis (e.g. 'gemini-3.6-flash'). Defaults to config or gemini-3.6-flash."
+          },
+          "auth": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              }
+            ],
+            "description": "Opt into an authFetch profile for local browser-cookie fetching. Use a profile name, or true only when exactly one profile exists."
+          },
+          "proxy": {
+            "type": "string",
+            "description": "http(s) or socks proxy URL (e.g. http://host:port or socks5h://host:port) used for this fetch. Needed when the target is unreachable directly; localhost and NO_PROXY hosts always bypass the proxy. Empty string forces direct access."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "get_search_content",
+      "description": "Retrieve bounded pages of full stored search results or fetched content, or find matching passages, from a previous web_search, source_check, or fetch_content call.",
+      "eager_input_streaming": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "responseId": {
+            "type": "string",
+            "description": "The responseId from web_search, source_check, or fetch_content"
+          },
+          "query": {
+            "type": "string",
+            "description": "Get content for this query (web_search)"
+          },
+          "queryIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Get content for query at index"
+          },
+          "url": {
+            "type": "string",
+            "description": "Get content for this URL"
+          },
+          "urlIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Get content for URL at index"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Character offset in stored search or fetched URL content (default 0). Ignored when findText is supplied."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30000,
+            "description": "Requested maximum stored-content characters (default and max use maxInlineContentChars). Search-page continuation guidance shares the global output cap and may reduce returnedChars. Ignored when findText is supplied."
+          },
+          "findText": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "minItems": 1,
+                "maxItems": 10
+              }
+            ],
+            "description": "Text or texts to find in the selected stored content. When supplied, offset and limit are ignored."
+          },
+          "findMode": {
+            "type": "string",
+            "enum": ["exact", "case-insensitive", "fuzzy"],
+            "description": "Matching mode for findText (default: case-insensitive). Requires findText."
+          }
+        },
+        "required": ["responseId"]
+      },
+      "cache_control": {
+        "type": "ephemeral"
+      }
+    }
+  ],
+  "thinking": {
+    "type": "adaptive",
+    "display": "summarized",
+    "block_binding": {
+      "prefix_mismatch_behavior": "drop_block"
+    }
+  },
+  "output_config": {
+    "effort": "high"
+  }
+}

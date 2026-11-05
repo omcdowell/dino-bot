@@ -5,11 +5,25 @@ import { type Memory } from './memory.ts';
 // One self-contained, read-only HTML snapshot of a profile's memory.
 export function exportBrowser(memory: Memory, profile: string, directory = memory.directory) {
   const data = JSON.stringify({
-    profile, budget: memory.budget, size: memory.size, view: memory.view,
-    root: memory.root.map(({ i, kind, text, date, origin }) => ({ i, kind, text, date, ...(origin ? { origin: { source: origin.source, title: origin.title } } : {}) })),
+    profile,
+    budget: memory.budget,
+    size: memory.size,
+    view: memory.view,
+    root: memory.root.map(({ i, kind, text, date, origin }) => ({
+      i,
+      kind,
+      text,
+      date,
+      ...(origin ? { origin: { source: origin.source, title: origin.title } } : {}),
+    })),
     tree: [...memory.tree.values()].map(({ l, i, text }) => ({ l, i, text })),
   }).replace(/</g, '\\u003c');
-  const path = join(directory, 'memory.html'); atomicWrite(path, PAGE.replace('__DATA__', () => data)); return path;
+  const path = join(directory, 'memory.html');
+  atomicWrite(
+    path,
+    PAGE.replace('__DATA__', () => data),
+  );
+  return path;
 }
 
 // Client code avoids backticks and template placeholders so it can live in String.raw.
@@ -87,6 +101,10 @@ const SOURCE = { claude: 'Claude Code', 'claude-memory': 'Claude Code memory', c
 const body = e => { const j = e.origin && e.text.startsWith('[Historical ') ? e.text.indexOf(']\n') : -1; return j < 0 ? e.text : e.text.slice(j + 2); };
 const short = (s, n) => { s = s.replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 function who(e) {
+  const dm = e.kind === 'user' && /^\[dm \S+ from ([a-z0-9][a-z0-9_-]{0,63}|worker:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}) to [a-z0-9][a-z0-9_-]{0,63} kind=[a-z]+ hop=\d+ re=\S+( expects-reply)?\]/.exec(e.text);
+  if (dm) return ['DM from ' + dm[1], 'work', 'bot DM'];
+  const room = e.kind === 'user' && /^\[room ([a-z0-9][a-z0-9-]{0,40}) block [A-Za-z0-9][A-Za-z0-9._-]{0,120} msgs [^\]\n]*\]/.exec(e.text);
+  if (room) return ['Room ' + room[1], 'work', 'room block'];
   if (e.kind === 'user') return /^\[[0-9a-f]{6,}\] /.test(e.text) ? ['Subagent', 'work', 'subagent report'] : ['You', 'you', 'from you'];
   if (e.kind === 'talk') return ['OptChat', 'talk', 'reply'];
   if (e.kind === 'tool') return ['Tool call', 'tool', 'tool step'];

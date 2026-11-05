@@ -28,16 +28,28 @@ export class MultiSelect implements Component, Focusable {
     options.signal?.addEventListener('abort', this.abort, { once: true });
     if (options.signal?.aborted) queueMicrotask(this.abort);
   }
-  get focused() { return this.filter.focused; }
-  set focused(value: boolean) { this.filter.focused = value; }
-  private get pageSize() { return Math.max(1, Math.min(20, this.options.rows() - 12)); }
+  get focused() {
+    return this.filter.focused;
+  }
+  set focused(value: boolean) {
+    this.filter.focused = value;
+  }
+  private get pageSize() {
+    return Math.max(1, Math.min(20, this.options.rows() - 12));
+  }
   private readonly abort = () => this.finish(undefined);
   private finish(result: number[] | undefined) {
     if (this.ended) return;
-    this.dispose(); this.options.done(result);
+    this.dispose();
+    this.options.done(result);
   }
-  dispose() { this.ended = true; this.options.signal?.removeEventListener('abort', this.abort); }
-  invalidate() { this.filter.invalidate(); }
+  dispose() {
+    this.ended = true;
+    this.options.signal?.removeEventListener('abort', this.abort);
+  }
+  invalidate() {
+    this.filter.invalidate();
+  }
   handleInput(data: string) {
     if (this.ended) return;
     this.error = '';
@@ -47,7 +59,10 @@ export class MultiSelect implements Component, Focusable {
       this.error = 'Select at least one item with Tab.';
     } else if (matchesKey(data, 'tab') || (matchesKey(data, 'space') && !this.filter.getValue())) {
       const index = this.visible[this.cursor];
-      if (index !== undefined) { if (this.selected.has(index)) this.selected.delete(index); else this.selected.add(index); }
+      if (index !== undefined) {
+        if (this.selected.has(index)) this.selected.delete(index);
+        else this.selected.add(index);
+      }
     } else if (matchesKey(data, 'ctrl+a')) this.visible.forEach(i => this.selected.add(i));
     else if (matchesKey(data, 'ctrl+d')) this.visible.forEach(i => this.selected.delete(i));
     else if (matchesKey(data, 'down')) this.cursor++;
@@ -57,11 +72,13 @@ export class MultiSelect implements Component, Focusable {
     else if (matchesKey(data, 'home')) this.cursor = 0;
     else if (matchesKey(data, 'end')) this.cursor = this.visible.length - 1;
     else {
-      const before = this.filter.getValue(); this.filter.handleInput(data);
+      const before = this.filter.getValue();
+      this.filter.handleInput(data);
       if (this.filter.getValue() !== before) {
         const query = clean(this.filter.getValue()).toLocaleLowerCase();
         this.visible = this.labels.map((_, i) => i).filter(i => this.labels[i].toLocaleLowerCase().includes(query));
-        this.cursor = 0; this.top = 0;
+        this.cursor = 0;
+        this.top = 0;
       }
     }
     this.cursor = Math.max(0, Math.min(this.cursor, this.visible.length - 1));
@@ -88,11 +105,25 @@ export class MultiSelect implements Component, Focusable {
   }
 }
 
-export async function selectMany<T>(ui: Pick<ExtensionUIContext, 'custom'>, title: string, items: T[], label: (item: T) => string, signal: AbortSignal): Promise<T[] | undefined> {
+export async function selectMany<T>(
+  ui: Pick<ExtensionUIContext, 'custom'>,
+  title: string,
+  items: T[],
+  label: (item: T) => string,
+  signal: AbortSignal,
+): Promise<T[] | undefined> {
   if (signal.aborted) return undefined;
-  const indices = await ui.custom<number[] | undefined>((tui, theme, _keys, done) => new MultiSelect({
-    title, labels: items.map(label), rows: () => tui.terminal.rows,
-    redraw: () => tui.requestRender(), done, color: (tone, text) => theme.fg(tone, text), signal,
-  }));
+  const indices = await ui.custom<number[] | undefined>(
+    (tui, theme, _keys, done) =>
+      new MultiSelect({
+        title,
+        labels: items.map(label),
+        rows: () => tui.terminal.rows,
+        redraw: () => tui.requestRender(),
+        done,
+        color: (tone, text) => theme.fg(tone, text),
+        signal,
+      }),
+  );
   return indices?.map(i => items[i]);
 }
