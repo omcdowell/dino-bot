@@ -21,7 +21,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const PINNED_CLI_VERSIONS = ["0.11.1"];
+export const PINNED_CLI_VERSIONS = ["0.11.1", "0.11.2"];
 
 export type AgentInfo = {
   id: string;
