@@ -34,7 +34,7 @@ function fakeKey(dir) {
   chmodSync(p, 0o000);
   return p;
 }
-const KEY = { keyId: "ABCDE12345", teamId: "TEAM123456", topic: "com.example.dinobot" };
+const KEY = { keyId: "ABCDE12345", teamId: "TEAM123456", topic: "org.someone.dinobot" };
 
 describe("push add-on: off by default", () => {
   it("the add-on is in the repo as files only (no history, tests or node_modules) with its licence", () => {
@@ -145,6 +145,7 @@ describe("push add-on: dinobot push enable / disable", () => {
       [{ ...KEY, keyPath, keyId: "short" }, /key ID/],
       [{ ...KEY, keyPath, teamId: "lower12345" }, /Team ID/],
       [{ ...KEY, keyPath, topic: "com.example/app" }, /bundle id/],
+      [{ ...KEY, keyPath, topic: "com.example.dinobot" }, /placeholder/], // the app's default id: build with your own
       [{ local: true, port: "80" }, /--port/],
     ];
     for (const [opts, re] of bad) assert.throws(() => enablePush(L, opts), re);

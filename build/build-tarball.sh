@@ -82,6 +82,7 @@ PI_DIR=${PI_DIR:-$GLOBAL/@earendil-works/pi-coding-agent}
 # Product names: lib/product.json is the one place.
 PRODUCT_ID=$(node -p "require('$HERE/lib/product.json').id")
 PRODUCT_NAME=$(node -p "require('$HERE/lib/product.json').name")
+PRODUCT_VERSION=$(node -p "require('$HERE/lib/product.json').version")
 DOWNLOAD_BASE_URL=$(node -p "require('$HERE/lib/product.json').downloadBaseUrl")
 NAME="$PRODUCT_ID-$OS-$ARCH"
 mkdir -p "$OUT"
@@ -394,6 +395,7 @@ cat >"$STAGE/MANIFEST.json" <<EOF
 {
   "name": "$NAME",
   "product": "$PRODUCT_NAME",
+  "version": "$PRODUCT_VERSION",
   "target": "$OS-$ARCH",
   "built": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "node": "$("$NODE_BIN" -v)",

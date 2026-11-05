@@ -46,6 +46,8 @@ jobs:
       - name: tag is a release version (v<major>.<minor>.<patch>[-x])
         run: |
           case "$GITHUB_REF_NAME" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "tag $GITHUB_REF_NAME is not v<major>.<minor>.<patch>[-x]"; exit 1 ;; esac
+          want="v$(jq -r .version lib/product.json)" # the version the install reports (MANIFEST.json, doctor)
+          [ "$GITHUB_REF_NAME" = "$want" ] || { echo "tag $GITHUB_REF_NAME, but lib/product.json says $want"; exit 1; }
       - name: unit tests (incl. fail-closed checksum + signature)
         run: node --test test/unit.test.mjs test/wave2.test.mjs test/providers.test.mjs test/signing.test.mjs test/public-tree.test.mjs test/push.test.mjs
 

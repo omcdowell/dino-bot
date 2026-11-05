@@ -18,7 +18,7 @@ import { herdrSocketDir, herdrWrapper, socketPathFits } from "../lib/herdr.mjs";
 import { offerEndpoints } from "../lib/offer.mjs";
 import { isReadyStatus, probeWs, waitForReady } from "../lib/ready.mjs";
 import { insecureUrlProblem, updateSource } from "../lib/update.mjs";
-import { DOWNLOAD_BASE_URL, LINK_SCHEME, PRODUCT, PRODUCT_ID, BUNDLE_ID } from "../lib/util.mjs";
+import { DOWNLOAD_BASE_URL, LINK_SCHEME, PRODUCT, PRODUCT_ID, VERSION } from "../lib/util.mjs";
 
 const HERE = join(import.meta.dirname, "..");
 const TMP = join(HERE, ".test-tmp2");
@@ -29,10 +29,14 @@ const TS = { running: true, dnsName: "box.tail1.ts.net", ip: "100.64.0.7" };
 
 describe("product names (one place)", () => {
   const p = JSON.parse(readFileSync(join(HERE, "lib", "product.json"), "utf8"));
-  it("DinoBot display name, placeholder bundle id", () => {
+  it("DinoBot display name, release version, no iOS bundle id wired in", () => {
     assert.equal(PRODUCT, "DinoBot");
-    assert.equal(BUNDLE_ID, "com.dinobot.test");
     assert.equal(PRODUCT_ID, p.id);
+    assert.match(VERSION, /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
+    assert.equal(VERSION, "0.1.3");
+    // Self-builders sign the app with their own Apple account: the id is a build setting (5 Nov).
+    assert.equal(p.bundleId, undefined);
+    assert.doesNotMatch(readFileSync(join(HERE, "lib", "product.json"), "utf8"), /com\.dinobot\./);
   });
   it("install.sh's stamped copies match lib/product.json", () => {
     const sh = readFileSync(join(HERE, "install.sh"), "utf8");

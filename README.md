@@ -29,7 +29,9 @@ Many thanks to the Paseo project.</p>
 > **Push notifications and the Live Activity need your own Apple developer build.** Apple only
 > delivers pushes signed by the team that built the app, so they work when you build the iPhone
 > app with your own (paid) Apple developer account and give DinoBot your own push key. They are
-> off in a normal install, which works fully without them. How to set them up:
+> off in a normal install, which works fully without them. Your bundle ID, Live Activity ID and
+> Team ID are build settings you fill in (`PASEO_BUNDLE_ID`, `PASEO_WIDGET_BUNDLE_ID`,
+> `PASEO_APPLE_TEAM_ID`); no IDs are wired into the source. How to set them up:
 > [Live Activities and push](docs/live-activities.md).
 
 ## Quick start

@@ -1,9 +1,9 @@
 {
   "name": "DinoBot",
   "id": "dinobot",
-  "bundleId": "com.dinobot.test",
+  "version": "0.1.3",
   "installUrl": "https://omcdowell.github.io/dino-bot/install",
   "downloadBaseUrl": "https://github.com/omcdowell/dino-bot/releases/latest/download",
   "releaseRepo": "omcdowell/dino-bot",
-  "_note": "THE one place for the product's names. name: shown to users. id: command, ~/.<id> dir, service and tarball names (dinobot, owner decision 27 Oct). bundleId: iOS app (test id). installUrl: the one-line command's script (owner decision: not shortened). downloadBaseUrl: tarballs (GitHub Releases of releaseRepo; install.sh and `update` download from it). releaseRepo: the GitHub repo that builds, signs and publishes releases. install.sh carries stamped copies of name, id and downloadBaseUrl; build/build-tarball.sh restamps them and test/wave2.test.mjs fails on drift."
+  "_note": "THE one place for the product's names. name: shown to users. id: command, ~/.<id> dir, service and tarball names (dinobot, owner decision 27 Oct). version: the release (tag v<version>; release.yml checks they match; MANIFEST.json and doctor show it). No iOS bundle id here: whoever builds the iPhone app uses their own Apple account and sets it at build time (docs/live-activities.md). installUrl: the one-line command's script (owner decision: not shortened). downloadBaseUrl: tarballs (GitHub Releases of releaseRepo; install.sh and `update` download from it). releaseRepo: the GitHub repo that builds, signs and publishes releases. install.sh carries stamped copies of name, id and downloadBaseUrl; build/build-tarball.sh restamps them and test/wave2.test.mjs fails on drift."
 }

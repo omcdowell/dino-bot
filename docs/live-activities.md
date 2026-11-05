@@ -27,7 +27,7 @@ You will collect four values. Write them down as you go:
 | Value | Example | Where it comes from |
 |---|---|---|
 | Team ID | `<TEAM_ID>` (10 characters) | developer.apple.com › Account › Membership details |
-| Bundle ID | `com.example.dinobot` | you choose it; it must be unique to you |
+| Bundle ID | `com.yourname.dinobot` | you choose it; it must be unique to you |
 | Key ID | `<KEY_ID>` (10 characters) | shown when you create the push key |
 | Key file | `/path/to/AuthKey_<KEY_ID>.p8` | downloaded when you create the push key |
 
@@ -35,15 +35,15 @@ You will collect four values. Write them down as you go:
 
 In [Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources):
 
-1. **Identifiers › +  › App IDs › App.** Bundle ID (explicit): `com.example.dinobot` (use your
+1. **Identifiers › +  › App IDs › App.** Bundle ID (explicit): `com.yourname.dinobot` (use your
    own). Under Capabilities tick **Push Notifications**.
-2. Again for the Lock Screen widget: Bundle ID `com.example.dinobot.LiveActivity` (your app's ID
+2. Again for the Lock Screen widget: Bundle ID `com.yourname.dinobot.LiveActivity` (your app's ID
    plus `.LiveActivity`). No extra capabilities.
 3. **Devices › +**: add your iPhone (its UDID is in Finder or Xcode when the phone is plugged in).
 4. **Profiles › + › iOS App Development**, one for each App ID, both with your iPhone and your
    development certificate. Name them exactly:
-   - `Paseo Dev` for `com.example.dinobot`
-   - `Paseo LiveActivity Dev` for `com.example.dinobot.LiveActivity`
+   - `Paseo Dev` for `com.yourname.dinobot`
+   - `Paseo LiveActivity Dev` for `com.yourname.dinobot.LiveActivity`
 
    (The app's build looks the profiles up by these names.) Download both and double-click them
    so Xcode has them.
@@ -60,7 +60,7 @@ git clone --depth 1 --branch src/paseo https://github.com/omcdowell/dino-bot.git
 cd dinobot-app
 npm ci
 cd packages/app
-export PASEO_OWN_BUNDLE_ID=com.example.dinobot   # your bundle ID
+export PASEO_BUNDLE_ID=com.yourname.dinobot       # your bundle ID
 export PASEO_APPLE_TEAM_ID=<TEAM_ID>             # your Team ID
 export PASEO_PUSH_TRANSPORT=apns                 # pushes from the add-on on your computer
 export PASEO_APNS_ENVIRONMENT=development        # Xcode / development-profile builds
@@ -68,6 +68,19 @@ node scripts/apply-flavour.mjs                   # points the widget at your bun
 npx expo prebuild --platform ios --clean
 npm run ios:release -- --device                  # pick your iPhone
 ```
+
+The three Apple values are build settings, not part of the source: nobody's real IDs are in the
+code, and every build is signed by whoever builds it.
+
+| Setting | What | Default |
+|---|---|---|
+| `PASEO_BUNDLE_ID` | the app's bundle ID (`PASEO_OWN_BUNDLE_ID` is the older name and still works) | a placeholder, `com.example.paseo` (or `com.example.dinobot` with `PASEO_FLAVOUR=public`) |
+| `PASEO_WIDGET_BUNDLE_ID` | the Live Activity (lock screen widget) extension's bundle ID; Apple requires it to start with the app's ID and a dot | the app's ID plus `.LiveActivity` |
+| `PASEO_APPLE_TEAM_ID` | your developer team | none (Xcode asks) |
+
+The placeholders are fine for the simulator. A distribution build of the DinoBot-named app
+(`PASEO_FLAVOUR=public` with `PASEO_APNS_ENVIRONMENT=production`, or an EAS build) stops with an
+error until `PASEO_BUNDLE_ID` is set, so nothing is uploaded under an ID nobody owns.
 
 This is the "own" build of the same app: it is called **Paseo** on the home screen, and shows a
 few extra developer options and raw model names. It sits next to the DinoBot app from the App
@@ -91,7 +104,7 @@ Then:
 ```sh
 ~/.dinobot/bin/dinobot push enable \
   --key-path ~/.dinobot/keys/AuthKey_<KEY_ID>.p8 \
-  --key-id <KEY_ID> --team-id <TEAM_ID> --topic com.example.dinobot
+  --key-id <KEY_ID> --team-id <TEAM_ID> --topic com.yourname.dinobot
 ```
 
 `--topic` is your app's bundle ID. This writes the add-on's settings to `~/.dinobot/apns`

@@ -54,7 +54,9 @@ more per archive with the default).
    actionlint.
 3. `build/publish-public.sh` (dry run by default) builds the one-commit public tree, checks it
    (`build/public-check.mjs`, `build/private-guard.sh`, gitleaks) and, with `--for-real`, pushes
-   `main` and `src/*`; with `TAG=v<semver>` it also pushes the tag.
+   `main` and `src/*`; with `TAG=v<semver>` it also pushes the tag. The tag must be `v` plus
+   `version` in `lib/product.json` (the release workflow checks it; the install shows it in
+   `MANIFEST.json` and `dinobot doctor`).
 4. The tag starts `.github/workflows/release.yml`: tests, builds linux-x64 and linux-arm64, then
    darwin-arm64 (macOS minutes count 10x, so only after Linux passed), each on its own runner from
    `build/sources.json` (`build/ci-build.sh`); adds the compressed cosign binaries
