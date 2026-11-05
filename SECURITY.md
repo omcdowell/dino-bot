@@ -65,7 +65,8 @@ The daemon logs leave out authorization headers and tokens.
   refuses it unless its SHA-256 matches the value written into `install.sh`. It is kept in
   `~/.dinobot/tools` for updates.
 - The whole script runs inside one function, so a download that is cut off part-way runs nothing.
-- Releases are built on clean GitHub runners from the exact commits and versions listed in
+- Releases are built on clean GitHub runners from the tagged commit of this repo (its `paseo/`,
+  `plugins/bots/`, `optchat/` and `addons/paseo-apns/` folders) and the exact versions listed in
   `build/sources.json`, never from a developer's computer.
 
 ### Check a download yourself
