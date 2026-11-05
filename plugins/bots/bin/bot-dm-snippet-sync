@@ -1,0 +1,74 @@
+#!/usr/bin/env node
+// Writes or replaces the bot-dm block in every OptChat profile's AGENTS.md.
+//
+// The block's text lives once in docs/bot-dm-agents-snippet.md. In each profile it sits between
+// `<!-- bot-dm:begin vN -->` and `<!-- bot-dm:end -->`. An existing block (any version) is replaced
+// in place; otherwise the block is appended at the end of the file. Nothing else in the file changes,
+// except that a final newline is added before an appended block if the file lacked one.
+//
+// Usage: bot-dm-snippet-sync [--profiles <dir>] [--dry-run] [profile ...]
+//   --profiles  profiles folder (default: $OPTCHAT_HOME/profiles, else ~/.optchat/profiles)
+//   profile     only these profiles (default: every profile folder that has an AGENTS.md)
+import { existsSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+export const VERSION = 1;
+export const BEGIN = `<!-- bot-dm:begin v${VERSION} -->`;
+export const END = "<!-- bot-dm:end -->";
+const BLOCK_RE = /<!-- bot-dm:begin v\d+ -->\n[\s\S]*?<!-- bot-dm:end -->\n?/;
+
+/** `text` with the block written or replaced. */
+export function applySnippet(text, snippet) {
+  const block = `${BEGIN}\n${snippet.trimEnd()}\n${END}\n`;
+  if (BLOCK_RE.test(text)) return text.replace(BLOCK_RE, block);
+  if (text === "") return block;
+  return `${text.endsWith("\n") ? text : `${text}\n`}\n${block}`;
+}
+
+function main(argv) {
+  const repo = dirname(dirname(realpathSync(fileURLToPath(import.meta.url))));
+  const snippet = readFileSync(join(repo, "docs", "bot-dm-agents-snippet.md"), "utf8");
+  let profilesDir = join(process.env.OPTCHAT_HOME || join(homedir(), ".optchat"), "profiles");
+  let dryRun = false;
+  const only = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--profiles") profilesDir = argv[++i];
+    else if (arg === "--dry-run") dryRun = true;
+    else if (arg === "-h" || arg === "--help") {
+      console.log("Usage: bot-dm-snippet-sync [--profiles <dir>] [--dry-run] [profile ...]");
+      return 0;
+    } else if (arg.startsWith("-")) {
+      console.error(`unknown option ${arg}`);
+      return 2;
+    } else only.push(arg);
+  }
+  const names = only.length
+    ? only
+    : readdirSync(profilesDir).filter((n) => existsSync(join(profilesDir, n, "AGENTS.md"))).sort();
+  let failed = 0;
+  for (const name of names) {
+    const file = join(profilesDir, name, "AGENTS.md");
+    if (!existsSync(file)) {
+      console.error(`${name}: no ${file}`);
+      failed++;
+      continue;
+    }
+    const before = readFileSync(file, "utf8");
+    const after = applySnippet(before, snippet);
+    const state = before === after ? "unchanged" : BLOCK_RE.test(before) ? "replaced" : "appended";
+    if (!dryRun && before !== after) {
+      const tmp = `${file}.bot-dm-${process.pid}`;
+      writeFileSync(tmp, after, { mode: statSync(file).mode & 0o777 });
+      renameSync(tmp, file);
+    }
+    console.log(`${name}: ${state}${dryRun ? " (dry run)" : ""}`);
+  }
+  return failed ? 1 : 0;
+}
+
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
+  process.exitCode = main(process.argv.slice(2));
+}

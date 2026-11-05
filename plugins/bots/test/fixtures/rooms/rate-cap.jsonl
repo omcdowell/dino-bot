@@ -1,0 +1,7 @@
+{"op":"route","now":0,"id":"r1","from":"wallace","text":"@scrat @peggy ping","hop":1,"expect":{"to":["scrat","peggy"],"refused":[],"assign":[]}}
+{"op":"route","now":60000,"id":"r2","from":"scrat","text":"@all ping","hop":1,"expect":{"to":["wallace","peggy"],"refused":[],"assign":[]}}
+{"op":"route","now":120000,"id":"r3","from":"peggy","text":"@wallace @scrat ping","hop":1,"expect":{"to":["wallace","scrat"],"refused":[],"assign":[]}}
+{"op":"route","now":180000,"id":"r4","from":"wallace","text":"@peggy ping","hop":1,"expect":{"to":[],"refused":[{"bot":"peggy","reason":"rate_cap"}],"assign":[]}}
+{"op":"route","now":190000,"id":"r5","from":"user","text":"@all stop pinging","hop":0,"expect":{"to":["wallace","scrat","peggy"],"refused":[],"assign":[]}}
+{"op":"route","now":599999,"id":"r6","from":"wallace","text":"@peggy ping again","hop":1,"expect":{"to":[],"refused":[{"bot":"peggy","reason":"rate_cap"}],"assign":[]}}
+{"op":"route","now":610000,"id":"r7","from":"wallace","text":"@peggy ping again","hop":1,"expect":{"to":["peggy"],"refused":[],"assign":[]}}

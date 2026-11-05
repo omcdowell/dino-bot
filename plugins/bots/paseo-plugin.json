@@ -1,0 +1,7 @@
+{
+  "id": "bots",
+  "name": "Bots",
+  "requirements": {
+    "paseo": ">=0.11.0"
+  }
+}
