@@ -13,7 +13,7 @@
 #   4. the workflow's build step: build/ci-build.sh linux-x64 from the src/* commits, full daemon
 #      build (no prebuilt shortcut), under a 7 GB memory cap (GitHub's private-repo runners:
 #      Linux 8 GB, macOS 7 GB); then the workflow's secret-scan step, verbatim
-#   5. the release job's checks that need no GitHub: checksum, one install.sh, stamped from
+#   5. the release job's checks that need no GitHub (desktop files: stand-ins): checksum, one install.sh, stamped from
 #      lib/signing.json (that step, verbatim, on the one tarball), identityRegexp() loads
 #   Pass: writes PREFLIGHT_DIR/<tree hash> (tree + src/* commits); publish-public.sh needs it for TAG.
 #
@@ -85,6 +85,14 @@ say "secret scan ok"
 # 5. The release job's collect step on this one tarball; the verify step's identity regexp.
 mkdir -p "$W/rel/out/tarball-linux-x64"
 cp "$R"/dist/dinobot-linux-x64.tar.gz "$R"/dist/dinobot-linux-x64.tar.gz.sha256 "$R"/dist/dinobot-linux-x64.tar.zst "$R"/dist/dinobot-linux-x64.tar.zst.sha256 "$R"/dist/install.sh "$W/rel/out/tarball-linux-x64/"
+# The desktop job's two files (not built here: build/ci-desktop.sh needs its own runners): small
+# stand-ins with real .sha256 files, so the step's own checks (one AppImage, one dmg, checksums) run.
+mkdir -p "$W/rel/out/desktop-stand-in"
+N=$(node -p "require('./lib/product.json').name")
+for f in "$N-x86_64.AppImage" "$N-0.0.0-arm64.dmg"; do
+  echo "preflight stand-in" >"$W/rel/out/desktop-stand-in/$f"
+  (cd "$W/rel/out/desktop-stand-in" && sha256sum "$f" >"$f.sha256")
+done
 COLLECT=$(step release "collect, check checksums, one install.sh")
 (cd "$R" && rm -rf release out && cp -r "$W/rel/out" out && bash -euo pipefail -c "$COLLECT" && rm -rf release out) >"$W/collect.log" 2>&1 || { cat "$W/collect.log" >&2; die "release collect step"; }
 (cd "$R" && node -e 'import("./lib/signature.mjs").then(m => { const r = m.identityRegexp(); if (!r) process.exit(1); console.log(r) })') >"$W/identity.log" 2>&1 || { cat "$W/identity.log" >&2; die "identityRegexp"; }
