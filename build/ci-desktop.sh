@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# CI build of the basic DinoBot desktop app from the pinned paseo source (build/sources.json), on a
+# CI build of the basic DinoBot desktop app from this repo's paseo/ folder at the checked-out commit, on a
 # clean runner (release workflow, job `desktop`). Same recipe as the hand builds of 27 Oct-4 Nov.
 #
-#   build/ci-desktop.sh TARGET SRC_DIR
+#   build/ci-desktop.sh TARGET [SRC_DIR]
 #     TARGET   linux-x64 (AppImage) | darwin-arm64 (dmg); must be this runner's platform
-#     SRC_DIR  where the workflow checked out paseo/ at the pinned commit
+#     SRC_DIR  the monorepo checkout (default: this repo); paseo/ must be unchanged from HEAD
 #
 # Output in dist/: DinoBot-<version>-<arch>.AppImage or .dmg, plus .sha256. <version> is
 # packages/desktop/package.json's, so nothing here names a version.
@@ -15,8 +15,8 @@
 # Memory: the web UI export runs with 1 Metro worker and a 4 GB heap, as in build/ci-build.sh.
 set -euo pipefail
 TARGET=${1:?target}
-SRC=$(cd "${2:?source dir}" && pwd)
 HERE=$(cd "$(dirname "$0")/.." && pwd)
+SRC=$(cd "${2:-$HERE}" && pwd)
 OUT=${DESKTOP_OUT:-$HERE/dist}
 J=$HERE/build/sources.json
 q() { node -p "const s=require('$J'); $1"; }
@@ -34,8 +34,7 @@ esac
 want_node=v$(q s.node)
 [ "$(node -v)" = "$want_node" ] || { echo "ci-desktop: node $(node -v), sources.json wants $want_node" >&2; exit 2; }
 P=$SRC/paseo
-got=$(git -C "$P" rev-parse HEAD); want=$(q s.paseo.commit)
-[ "$got" = "$want" ] || { echo "ci-desktop: $P is at $got, sources.json pins $want" >&2; exit 2; }
+[ -z "$(git -C "$SRC" status --porcelain --untracked-files=no -- paseo)" ] || { echo "ci-desktop: $P has uncommitted changes; commit first" >&2; exit 2; }
 
 export PASEO_FLAVOUR=public LEFTHOOK=0 EXPO_NO_TELEMETRY=1 CSC_IDENTITY_AUTO_DISCOVERY=false
 export NODE_OPTIONS=${NODE_OPTIONS:---max-old-space-size=4096}

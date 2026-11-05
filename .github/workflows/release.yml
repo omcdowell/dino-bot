@@ -1,14 +1,12 @@
-# Release: build every tarball from the pinned sources (build/sources.json) on clean runners,
+# Release: build every tarball from this repo's own folders at the tag (paseo/, plugins/bots/,
+# optchat/, addons/paseo-apns/; external pins in build/sources.json) on clean runners,
 # checksum it, sign it keyless with Sigstore (cosign; no key exists anywhere), and publish a
 # GitHub Release. install.sh and `dinobot update` refuse any tarball whose signature is not from
 # THIS file at a v* tag of THIS repo (lib/signing.json), so renaming or moving this file, or
 # releasing from a branch, breaks installs on purpose.
 #
 # Trigger: push a tag v<semver> (e.g. v0.1.0) on a reviewed commit of main.
-# Secrets: none required: the sources are fresh-history branches of this repo (src/paseo,
-#          src/paseo-bots, src/pi-optchat; build/prepare-sources.sh), read with github.token.
-#          DINOBOT_SOURCES_TOKEN is only for sources pinned in OTHER private repos: a fine-grained
-#          token, read-only "Contents" on exactly those repos. Not a signing key.
+# Secrets: none required: every source is a folder of the tagged commit (one checkout).
 #          DINOBOT_PRIVATE_GUARD (optional): build/private-guard.sh's patterns.
 #
 # Why cosign and not GitHub artifact attestations: attestations need a public repo (or Enterprise
@@ -74,38 +72,10 @@ jobs:
         with:
           persist-credentials: false
       - id: src
-        run: |
-          {
-            echo "node=$(jq -r .node build/sources.json)"
-            for k in paseo bots optchat; do
-              echo "${k}_repo=$(jq -r ".$k.repo" build/sources.json)"
-              echo "${k}_commit=$(jq -r ".$k.commit" build/sources.json)"
-            done
-          } >>"$GITHUB_OUTPUT"
+        run: echo "node=$(jq -r .node build/sources.json)" >>"$GITHUB_OUTPUT"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ steps.src.outputs.node }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ steps.src.outputs.paseo_repo }}
-          ref: ${{ steps.src.outputs.paseo_commit }}
-          path: src/paseo
-          token: ${{ secrets.DINOBOT_SOURCES_TOKEN || github.token }}
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ steps.src.outputs.bots_repo }}
-          ref: ${{ steps.src.outputs.bots_commit }}
-          path: src/paseo-bots
-          token: ${{ secrets.DINOBOT_SOURCES_TOKEN || github.token }}
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ steps.src.outputs.optchat_repo }}
-          ref: ${{ steps.src.outputs.optchat_commit }}
-          path: src/pi-optchat
-          token: ${{ secrets.DINOBOT_SOURCES_TOKEN || github.token }}
-          persist-credentials: false
       - name: macOS has shasum, not sha256sum
         if: runner.os == 'macOS'
         run: command -v sha256sum || brew install coreutils
@@ -118,7 +88,7 @@ jobs:
         env:
           # Patterns for build/private-guard.sh (optional repo secret: the names are not in this repo).
           DINOBOT_PRIVATE_GUARD: ${{ secrets.DINOBOT_PRIVATE_GUARD }}
-        run: build/ci-build.sh "${{ matrix.target }}" src
+        run: build/ci-build.sh "${{ matrix.target }}"
       - name: secret scan of the staged tarball
         # A real key, not a placeholder: pi's own docs carry 'sk-ant-oat01-{rand}' (preflight, 28 Oct).
         run: |
@@ -156,38 +126,10 @@ jobs:
         with:
           persist-credentials: false
       - id: src
-        run: |
-          {
-            echo "node=$(jq -r .node build/sources.json)"
-            for k in paseo bots optchat; do
-              echo "${k}_repo=$(jq -r ".$k.repo" build/sources.json)"
-              echo "${k}_commit=$(jq -r ".$k.commit" build/sources.json)"
-            done
-          } >>"$GITHUB_OUTPUT"
+        run: echo "node=$(jq -r .node build/sources.json)" >>"$GITHUB_OUTPUT"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ steps.src.outputs.node }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ steps.src.outputs.paseo_repo }}
-          ref: ${{ steps.src.outputs.paseo_commit }}
-          path: src/paseo
-          token: ${{ secrets.DINOBOT_SOURCES_TOKEN || github.token }}
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ steps.src.outputs.bots_repo }}
-          ref: ${{ steps.src.outputs.bots_commit }}
-          path: src/paseo-bots
-          token: ${{ secrets.DINOBOT_SOURCES_TOKEN || github.token }}
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ steps.src.outputs.optchat_repo }}
-          ref: ${{ steps.src.outputs.optchat_commit }}
-          path: src/pi-optchat
-          token: ${{ secrets.DINOBOT_SOURCES_TOKEN || github.token }}
-          persist-credentials: false
       - name: macOS has shasum, not sha256sum
         if: runner.os == 'macOS'
         run: command -v sha256sum || brew install coreutils
@@ -200,7 +142,7 @@ jobs:
         env:
           # Patterns for build/private-guard.sh (optional repo secret: the names are not in this repo).
           DINOBOT_PRIVATE_GUARD: ${{ secrets.DINOBOT_PRIVATE_GUARD }}
-        run: build/ci-build.sh "${{ matrix.target }}" src
+        run: build/ci-build.sh "${{ matrix.target }}"
       - name: secret scan of the staged tarball
         # A real key, not a placeholder: pi's own docs carry 'sk-ant-oat01-{rand}' (preflight, 28 Oct).
         run: |
@@ -243,22 +185,10 @@ jobs:
         with:
           persist-credentials: false
       - id: src
-        run: |
-          {
-            echo "node=$(jq -r .node build/sources.json)"
-            echo "paseo_repo=$(jq -r .paseo.repo build/sources.json)"
-            echo "paseo_commit=$(jq -r .paseo.commit build/sources.json)"
-          } >>"$GITHUB_OUTPUT"
+        run: echo "node=$(jq -r .node build/sources.json)" >>"$GITHUB_OUTPUT"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ steps.src.outputs.node }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ steps.src.outputs.paseo_repo }}
-          ref: ${{ steps.src.outputs.paseo_commit }}
-          path: src/paseo
-          token: ${{ secrets.DINOBOT_SOURCES_TOKEN || github.token }}
-          persist-credentials: false
       - name: macOS has shasum, not sha256sum
         if: runner.os == 'macOS'
         run: command -v sha256sum || brew install coreutils
@@ -268,7 +198,7 @@ jobs:
       - name: build the desktop app (${{ matrix.target }})
         env:
           DINOBOT_PRIVATE_GUARD: ${{ secrets.DINOBOT_PRIVATE_GUARD }}
-        run: build/ci-desktop.sh "${{ matrix.target }}" src
+        run: build/ci-desktop.sh "${{ matrix.target }}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-${{ matrix.target }}
@@ -375,5 +305,5 @@ jobs:
           # Not marked pre-release, so releases/latest (install.sh, dinobot update) finds it.
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --latest \
             --title "DinoBot $TAG" \
-            --notes "Built from build/sources.json at $GITHUB_SHA by run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Every file has a keyless Sigstore signature (.sigstore.json); install.sh and \`dinobot update\` check it." \
+            --notes "Built from this repo at $GITHUB_SHA (paseo/, plugins/bots/, optchat/; pins in build/sources.json) by run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Every file has a keyless Sigstore signature (.sigstore.json); install.sh and \`dinobot update\` check it." \
             release/*

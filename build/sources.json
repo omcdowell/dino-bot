@@ -1,17 +1,5 @@
 {
   "node": "24.21.0",
-  "paseo": {
-    "repo": "omcdowell/dino-bot",
-    "commit": "ff881c2bd6cc403838ee36fa6d5cd725b40842c9"
-  },
-  "bots": {
-    "repo": "omcdowell/dino-bot",
-    "commit": "8e259b91169bdf6bff27596178d9ec4d64883fac"
-  },
-  "optchat": {
-    "repo": "omcdowell/dino-bot",
-    "commit": "2e3b0207749834e75b3df1d7c094ba728f0796b8"
-  },
   "pi": "1.4.0",
   "herdr": {
     "version": "v0.9.3",
@@ -35,5 +23,5 @@
       }
     }
   },
-  "_note": "What the release workflow (.github/workflows/release.yml -> build/ci-build.sh) builds from: exact commits, exact versions, pinned checksums, so a release tag says exactly what is inside (rel-security H3). paseo/bots/optchat are the fresh-history branches src/paseo, src/paseo-bots and src/pi-optchat of omcdowell/dino-bot (one commit each, made by build/prepare-sources.sh from the public/release trees; build/publish-public.sh SOURCES_GIT=<dir> pushes them). Because they live in the release repo itself, the workflow reads them with its own token: DINOBOT_SOURCES_TOKEN is not needed. Bump: re-run build/prepare-sources.sh, commit this file, push the branches, tag."
+  "_note": "External pins only (Node, pi, herdr with checksums). The sources are folders of this repo (paseo/, plugins/bots/, optchat/, addons/paseo-apns/): the release workflow builds the tagged commit itself, so a release tag says exactly what is inside (rel-security H3). Upstream pulls: docs/upstream.md."
 }

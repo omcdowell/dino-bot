@@ -37,16 +37,21 @@ function fakeKey(dir) {
 const KEY = { keyId: "ABCDE12345", teamId: "TEAM123456", topic: "org.someone.dinobot" };
 
 describe("push add-on: off by default", () => {
-  it("the add-on is in the repo as files only (no history, tests or node_modules) with its licence", () => {
+  it("the add-on is in the repo as a source folder (no history or node_modules; its tests and dev files never ship) with its licence", () => {
+    // Monorepo: addons/paseo-apns keeps its tests and dev files (test/, tsconfig.json, lockfile,
+    // .gitignore), but build-tarball.sh copies only package.json "files" (checked below), so none ship.
+    const DEV = /^(test\/|tsconfig\.json$|package-lock\.json$|\.gitignore$)/;
     const files = [];
-    const walk = (d) => readdirSync(d, { withFileTypes: true }).forEach((e) => (e.isDirectory() ? walk(join(d, e.name)) : files.push(relative(ADDON, join(d, e.name)))));
+    const walk = (d) => readdirSync(d, { withFileTypes: true }).forEach((e) => (e.name === "node_modules" ? null : e.isDirectory() ? walk(join(d, e.name)) : files.push(relative(ADDON, join(d, e.name)))));
     walk(ADDON);
-    assert.ok(!files.some((f) => /(^|\/)(\.git|test|node_modules)(\/|$)/.test(f)), files.join(" "));
+    assert.ok(!files.some((f) => /(^|\/)\.git(\/|$)/.test(f)), files.join(" "));
+    const listedFiles = JSON.parse(readFileSync(join(ADDON, "package.json"), "utf8")).files;
+    assert.ok(!listedFiles.some((l) => DEV.test(l)), `dev files must not be in "files": ${listedFiles}`);
     for (const f of ["paseo-plugin.json", "index.server.ts", "LICENSE", "NOTICE", "package.json"]) assert.ok(files.includes(f), f);
     assert.equal(JSON.parse(readFileSync(join(ADDON, "paseo-plugin.json"), "utf8")).id, APNS_PLUGIN_ID);
     // build-tarball.sh copies the package.json "files" list (+ package.json): every file is in it.
     const listed = JSON.parse(readFileSync(join(ADDON, "package.json"), "utf8")).files.map((f) => f.replace(/\/$/, ""));
-    for (const f of files) assert.ok(f === "package.json" || listed.some((l) => f === l || f.startsWith(`${l}/`)), `${f} not in files`);
+    for (const f of files.filter((f) => !DEV.test(f))) assert.ok(f === "package.json" || listed.some((l) => f === l || f.startsWith(`${l}/`)), `${f} not in files`);
   });
 
   it("build-tarball.sh stages it as apns/ (notices.mjs then needs apns/LICENSE)", () => {

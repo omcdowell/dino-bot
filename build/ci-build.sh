@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# CI build of one release tarball from the pinned sources in build/sources.json, on a clean runner
-# (release workflow; rel-security H3: no more "whatever is installed globally on the build machine").
+# CI build of one release tarball from this repo's own folders (paseo/, plugins/bots/, optchat/,
+# addons/paseo-apns/) at the checked-out commit, plus the external pins in build/sources.json (Node,
+# pi, herdr), on a clean runner (release workflow; rel-security H3: no more "whatever is installed
+# globally on the build machine").
 #
-#   build/ci-build.sh TARGET SRC_DIR
+#   build/ci-build.sh TARGET [SRC_DIR]
 #     TARGET   linux-x64 | linux-arm64 | darwin-arm64 | darwin-x64 (must be this runner's platform:
 #              the daemon's native modules are built for the machine that runs npm)
-#     SRC_DIR  where the workflow checked out paseo/, paseo-bots/ and pi-optchat/ at the pinned commits
+#     SRC_DIR  the monorepo checkout (default: this repo). Its tracked files must be unchanged: the
+#              tarball is built from the committed trees (HEAD:paseo, HEAD:plugins/bots, HEAD:optchat).
 #
 # The daemon step runs the server's prepack, which also exports the daemon web UI with Expo
 # (memory-hungry: a 4 GB-capped local run with 2 Metro workers was killed; 1 worker and a 4 GB heap
@@ -16,8 +19,8 @@
 # Runs locally too (any HOME), but only for this machine's own platform.
 set -euo pipefail
 TARGET=${1:?target}
-SRC=$(cd "${2:?source dir}" && pwd)
 HERE=$(cd "$(dirname "$0")/.." && pwd)
+SRC=$(cd "${2:-$HERE}" && pwd)
 WORK=${CI_WORK:-$HERE/.cache/ci}
 J=$HERE/build/sources.json
 q() { node -p "const s=require('$J'); $1"; }
@@ -41,12 +44,12 @@ case "$(uname -m)" in x86_64|amd64) host_arch=x64 ;; arm64|aarch64) host_arch=ar
 want_node=v$(q s.node)
 [ "$(node -v)" = "$want_node" ] || { echo "ci-build: node $(node -v), sources.json wants $want_node" >&2; exit 2; }
 
-# Each checkout must be exactly the pinned commit.
-for k in paseo:paseo bots:paseo-bots optchat:pi-optchat; do
-  key=${k%%:*}; dir=$SRC/${k#*:}
-  got=$(git -C "$dir" rev-parse HEAD); want=$(q "s.$key.commit")
-  [ "$got" = "$want" ] || { echo "ci-build: $dir is at $got, sources.json pins $want" >&2; exit 2; }
-done
+# The sources are this commit's folders; nothing tracked may differ from it (the MANIFEST names trees).
+[ -z "$(git -C "$SRC" status --porcelain --untracked-files=no -- paseo plugins/bots optchat addons/paseo-apns)" ] ||
+  { echo "ci-build: $SRC has uncommitted changes in the source folders; commit first" >&2; exit 2; }
+COMMIT=$(git -C "$SRC" rev-parse HEAD)
+tree() { git -C "$SRC" rev-parse "HEAD:$1"; }
+PASEO_TREE=$(tree paseo); BOTS_TREE=$(tree plugins/bots); OPTCHAT_TREE=$(tree optchat)
 
 # 1. The daemon: our Paseo fork, built and packed, then installed into one self-contained folder
 #    (the same layout as a global npm install: the package with its dependencies inside).
@@ -57,7 +60,7 @@ if [ -n "${CI_PREBUILT_DAEMON:-}" ]; then
   say "daemon: PREBUILT $CI_PREBUILT_DAEMON (local dry run)"
   DAEMON_DIR=$CI_PREBUILT_DAEMON
 else
-say "daemon: build $(q s.paseo.commit)"
+say "daemon: build paseo/ of $COMMIT (tree $PASEO_TREE)"
 # The daemon's web UI (exported by the server's prepack) is the DinoBot app, not upstream's.
 export PASEO_FLAVOUR=public
 export PASEO_WEB_UI_MAX_WORKERS=${PASEO_WEB_UI_MAX_WORKERS:-1} NODE_OPTIONS=${NODE_OPTIONS:---max-old-space-size=4096}
@@ -82,7 +85,7 @@ DAEMON_DIR=$WORK/daemon/@getpaseo/cli
 mkdir -p "$(dirname "$DAEMON_DIR")"
 mv "$WORK/daemon-stage/node_modules/@getpaseo/cli" "$DAEMON_DIR"
 mv "$WORK/daemon-stage/node_modules" "$DAEMON_DIR/node_modules"
-printf 'commit %s (build/sources.json, CI)\n' "$(q s.paseo.commit)" >"$DAEMON_DIR/COMBINED_DEPLOY.txt"
+printf 'commit %s paseo/ tree %s (CI)\n' "$COMMIT" "$PASEO_TREE" >"$DAEMON_DIR/COMBINED_DEPLOY.txt"
 fi
 
 # 2. pi, pinned, from npm.
@@ -101,14 +104,14 @@ got=$( (sha256sum "$WORK/herdr" 2>/dev/null || shasum -a 256 "$WORK/herdr") | cu
 chmod 755 "$WORK/herdr"
 
 # 4. The bots plugin's one runtime dependency (zod), from its own lockfile.
-( cd "$SRC/paseo-bots" && npm ci --no-audit --no-fund --ignore-scripts >/dev/null )
+( cd "$SRC/plugins/bots" && npm ci --no-audit --no-fund --ignore-scripts >/dev/null )
 
 # 5. The tarball.
 say "tarball $TARGET"
 NODE_BIN=$(command -v node) DAEMON_DIR=$DAEMON_DIR PI_DIR=$PI_DIR PI_VERSION="" HERDR_BIN=$WORK/herdr \
-  PASEO_REPO=$SRC/paseo PASEO_REF=$(q s.paseo.commit) \
-  OPTCHAT_REPO=$SRC/pi-optchat OPTCHAT_REFS=$(q s.optchat.commit) \
-  BOTS_REPO=$SRC/paseo-bots BOTS_REF=$(q s.bots.commit) BOTS_ZOD_DIR=$SRC/paseo-bots/node_modules/zod \
+  PASEO_REPO=$SRC PASEO_REF=$PASEO_TREE \
+  OPTCHAT_REPO=$SRC OPTCHAT_REFS=$OPTCHAT_TREE \
+  BOTS_REPO=$SRC BOTS_REF=$BOTS_TREE BOTS_ZOD_DIR=$SRC/plugins/bots/node_modules/zod \
   BUILD_CACHE=$WORK/cache \
   "$HERE/build/build-tarball.sh" --out "$HERE/dist"
 ls -la "$HERE/dist"

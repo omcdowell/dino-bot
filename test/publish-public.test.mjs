@@ -1,7 +1,7 @@
 // build/publish-public.sh (node --test test/publish-public.test.mjs). GitHub is a fake `gh` on PATH
 // backed by a local bare repo (PUSH_URL), so nothing touches the network.
 //   dry run (default): public/main = ONE root commit of HEAD minus demo/, checks, a plan; no push
-//   --for-real: friend tags/releases and stray branches deleted, main + src/* replaced, clean tags kept
+//   --for-real: friend tags/releases and every branch but main (old src/* too) deleted, main replaced, clean tags kept
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -44,25 +44,14 @@ esac
 
 function setup() {
   const dir = mkdtempSync(join(TMP, "p-"));
-  // The source snapshots: three one-commit branches.
-  const sources = join(dir, "sources");
-  mkdirSync(sources);
-  git(sources, "init", "-q", "-b", "x");
-  const pins = {};
-  for (const [k, b] of [["paseo", "src/paseo"], ["bots", "src/paseo-bots"], ["optchat", "src/pi-optchat"]]) {
-    writeFileSync(join(sources, "README.md"), `${b}\n`);
-    git(sources, "add", "-A");
-    const tree = git(sources, "write-tree");
-    pins[k] = git(sources, "commit-tree", tree, "-m", b);
-    git(sources, "update-ref", `refs/heads/${b}`, pins[k]);
-  }
   // A minimal installer checkout (the script archives HEAD of its own repo).
   const src = join(dir, "installer");
-  for (const d of ["lib", "build", "demo"]) mkdirSync(join(src, d), { recursive: true });
+  for (const d of ["lib", "build", "demo", "paseo", "plugins/bots", "optchat"]) mkdirSync(join(src, d), { recursive: true });
   for (const f of ["build/publish-public.sh", "build/public-check.mjs", "build/private-guard.sh", "install.sh", "lib/product.json", "LICENSE"]) copyFileSync(join(ROOT, f), join(src, f));
   writeFileSync(join(src, "demo", "demo.py"), "print('demo')\n");
-  const sj = { node: "24", ...Object.fromEntries(Object.entries(pins).map(([k, c]) => [k, { repo: REPO, commit: c }])) };
-  writeFileSync(join(src, "build", "sources.json"), `${JSON.stringify(sj, null, 2)}\n`);
+  // The source folders (monorepo): they go into the one public commit with the installer.
+  for (const d of ["paseo", "plugins/bots", "optchat"]) writeFileSync(join(src, d, "README.md"), `${d}\n`);
+  writeFileSync(join(src, "build", "sources.json"), `${JSON.stringify({ node: "24" }, null, 2)}\n`);
   git(src, "init", "-q", "-b", "public/release");
   git(src, "add", "-A");
   git(src, "commit", "-qm", "x");
@@ -90,7 +79,7 @@ function setup() {
   git(seed, "branch", "old-branch");
   git(dir, "clone", "-q", "--bare", seed, join(fake, "remote.git"));
   writeFileSync(join(fake, "releases"), "v0.1.0-friend.3\n");
-  return { dir, src, sources, fake, remote: join(fake, "remote.git"), pins };
+  return { dir, src, fake, remote: join(fake, "remote.git") };
 }
 
 function publish(s, args = [], env = {}) {
@@ -100,7 +89,7 @@ function publish(s, args = [], env = {}) {
     env: {
       ...process.env, PATH: `${join(s.fake, "bin")}:${process.env.PATH}`, FAKE: s.fake, PUSH_URL: s.remote,
       GITLEAKS: join(s.fake, "bin", "gitleaks"), DINOBOT_PUBLIC_CHECK_LOCAL: "0", DINOBOT_PRIVATE_PATTERNS: join(s.dir, "none"),
-      DINOBOT_PUBLIC_CHECK_ALLOW: join(s.dir, "none"), DINOBOT_PRIVATE_GUARD: "zz-private-name", SOURCES_GIT: s.sources, ...env,
+      DINOBOT_PUBLIC_CHECK_ALLOW: join(s.dir, "none"), DINOBOT_PRIVATE_GUARD: "zz-private-name", ...env,
     },
   });
 }
@@ -116,6 +105,7 @@ describe("build/publish-public.sh", () => {
     assert.equal(git(s.src, "rev-list", "--count", "public/main"), "1");
     const files = git(s.src, "ls-tree", "-r", "--name-only", "public/main").split("\n");
     assert.ok(files.includes("install.sh") && !files.some((f) => f.startsWith("demo/")), files.join(" "));
+    for (const d of ["paseo", "plugins/bots", "optchat"]) assert.ok(files.includes(`${d}/README.md`), `${d}/ missing: ${files.join(" ")}`);
     assert.equal(git(s.src, "log", "-1", "--format=%an <%ae> %ad", "--date=iso", "public/main"), "omcdowell <omcdowell@users.noreply.github.com> 2026-11-01 00:00:00 +0000");
     assert.equal(git(s.remote, "for-each-ref"), before);
     assert.ok(!existsSync(join(s.fake, "calls")), "the dry run called gh");
@@ -125,7 +115,7 @@ describe("build/publish-public.sh", () => {
     assert.equal(git(s.src, "rev-parse", "public/main"), first);
   });
 
-  it("refuses a tree with FRIEND-SETUP.md, or a src/* pin that does not match", () => {
+  it("refuses a tree with FRIEND-SETUP.md (also inside a source folder) or a private name", () => {
     let s = setup();
     writeFileSync(join(s.src, "FRIEND-SETUP.md"), "x\n");
     git(s.src, "add", "-A");
@@ -134,13 +124,22 @@ describe("build/publish-public.sh", () => {
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /FRIEND-SETUP\.md/);
     s = setup();
-    git(s.sources, "update-ref", "refs/heads/src/paseo", s.pins.bots);
+    writeFileSync(join(s.src, "plugins", "bots", "FRIEND-SETUP.md"), "x\n");
+    git(s.src, "add", "-A");
+    git(s.src, "commit", "-qm", "friend page in a source folder");
     r = publish(s, [join(s.dir, "out")]);
     assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /sources\.json pins paseo/);
+    assert.match(r.stderr, /FRIEND-SETUP\.md/);
+    s = setup();
+    writeFileSync(join(s.src, "optchat", "notes.md"), "routes via zz-private-name\n");
+    git(s.src, "add", "-A");
+    git(s.src, "commit", "-qm", "private name in a source folder");
+    r = publish(s, [join(s.dir, "out")]);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /private-guard/);
   });
 
-  it("--for-real: friend tags/releases and stray branches gone, main and src/* replaced, clean tag kept", () => {
+  it("--for-real: friend tags/releases and every other branch (old src/* too) gone, main replaced, clean tag kept", () => {
     const s = setup();
     const r = publish(s, ["--for-real", join(s.dir, "out")]);
     assert.equal(r.status, 0, r.stderr + r.stdout);
@@ -148,10 +147,9 @@ describe("build/publish-public.sh", () => {
     assert.deepEqual(tags, ["v0.0.1"]);
     assert.equal(readFileSync(join(s.fake, "releases"), "utf8").trim(), "");
     const branches = git(s.remote, "for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads").split("\n").sort();
-    assert.deepEqual(branches, ["main", "src/paseo", "src/paseo-bots", "src/pi-optchat"]);
+    assert.deepEqual(branches, ["main"]);
     assert.equal(git(s.remote, "rev-parse", "main"), git(s.src, "rev-parse", "public/main"));
     assert.equal(git(s.remote, "rev-list", "--count", "main"), "1");
-    for (const [k, b] of [["paseo", "src/paseo"], ["bots", "src/paseo-bots"], ["optchat", "src/pi-optchat"]]) assert.equal(git(s.remote, "rev-parse", b), s.pins[k]);
     assert.match(r.stdout, /Visibility unchanged \(PRIVATE\)/);
     assert.doesNotMatch(readFileSync(join(s.fake, "calls"), "utf8"), /repo edit|visibility public/);
   });
@@ -183,12 +181,9 @@ describe("build/publish-public.sh", () => {
     assert.equal(git(s.remote, "tag"), "");
   });
 
-  it("--for-real needs SOURCES_GIT and the private-name patterns; TAG needs a preflight pass", () => {
+  it("--for-real needs the private-name patterns; TAG needs a preflight pass", () => {
     let s = setup();
-    let r = publish(s, ["--for-real", join(s.dir, "out")], { SOURCES_GIT: "" });
-    assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /needs SOURCES_GIT/);
-    r = publish(s, ["--for-real", join(s.dir, "out")], { DINOBOT_PRIVATE_GUARD: "", DINOBOT_PRIVATE_GUARD_FILE: join(s.dir, "none") });
+    let r = publish(s, ["--for-real", join(s.dir, "out")], { DINOBOT_PRIVATE_GUARD: "", DINOBOT_PRIVATE_GUARD_FILE: join(s.dir, "none") });
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /private-guard/);
     s = setup();

@@ -19,12 +19,13 @@
 #   DAEMON_DIR     built @getpaseo/cli package (our fork)    default: $(npm root -g)/@getpaseo/cli
 #   PI_VERSION     pi from npm, pinned (installed into .cache) default: 1.4.0 (empty: use PI_DIR)
 #   PI_DIR         @earendil-works/pi-coding-agent package   default: the PI_VERSION install, else $(npm root -g)/…
-#   OPTCHAT_REPO   pi-optchat git repo                       default: ~/code/pi-optchat
-#   OPTCHAT_REFS   one ref, or several merged in memory      default: "release/plugin-boundary release/import"
+#   OPTCHAT_REPO   git repo holding OptChat                  default: this repo (optchat/)
+#   OPTCHAT_REFS   one tree-ish, or several merged in memory default: the tree HEAD:optchat
 #                  (git merge-tree; no branch is changed)
-#   BOTS_REPO      paseo-bots git repo                       default: ~/code/paseo-bots
-#   BOTS_REF       ref                                       default: release/plugin-boundary
-#   BOTS_ZOD_DIR   zod package for the bots CLIs             default: $BOTS_REPO/node_modules/zod
+#   BOTS_REPO      git repo holding the bots plugin          default: this repo (plugins/bots/)
+#   BOTS_REF       tree-ish                                  default: the tree HEAD:plugins/bots
+#   BOTS_ZOD_DIR   zod package for the bots CLIs             default: plugins/bots/node_modules/zod
+#   PASEO_REPO/PASEO_REF  the Paseo fork (LICENSE, NOTICE)    default: this repo, tree HEAD:paseo
 #   HERDR_BIN      herdr binary (optional)                   default: command -v herdr
 #
 # --full keeps the bundled Claude Code binary (@anthropic-ai/claude-agent-sdk-<os>-<arch>, ~240 MB).
@@ -50,11 +51,11 @@ NODE_BIN=${NODE_BIN:-$(command -v node)}
 NODE_BIN=$(readlink -f "$NODE_BIN")
 DAEMON_DIR=${DAEMON_DIR:-$GLOBAL/@getpaseo/cli}
 PI_VERSION=${PI_VERSION-1.4.0}
-OPTCHAT_REPO=${OPTCHAT_REPO:-$HOME/code/pi-optchat}
-OPTCHAT_REFS=${OPTCHAT_REFS:-"release/plugin-boundary release/import"}
-BOTS_REPO=${BOTS_REPO:-$HOME/code/paseo-bots}
-BOTS_REF=${BOTS_REF:-release/plugin-boundary}
-BOTS_ZOD_DIR=${BOTS_ZOD_DIR:-$BOTS_REPO/node_modules/zod}
+OPTCHAT_REPO=${OPTCHAT_REPO:-$HERE}
+OPTCHAT_REFS=${OPTCHAT_REFS:-$(git -C "$HERE" rev-parse HEAD:optchat)}
+BOTS_REPO=${BOTS_REPO:-$HERE}
+BOTS_REF=${BOTS_REF:-$(git -C "$HERE" rev-parse HEAD:plugins/bots)}
+BOTS_ZOD_DIR=${BOTS_ZOD_DIR:-$HERE/plugins/bots/node_modules/zod}
 HERDR_BIN=${HERDR_BIN:-$(command -v herdr || true)}
 
 HOST_OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -152,8 +153,8 @@ if [ "$FULL" = 0 ]; then
   say "         claude-agent-sdk $SDK_VERSION replaced by a placeholder (not redistributed)"
 fi
 # Paseo's licence and our NOTICE (the daemon is a modified Paseo, Apache-2.0 section 4).
-PASEO_REPO=${PASEO_REPO:-$HOME/code/paseo}
-PASEO_REF=${PASEO_REF:-release/demo}
+PASEO_REPO=${PASEO_REPO:-$HERE}
+PASEO_REF=${PASEO_REF:-$(git -C "$HERE" rev-parse HEAD:paseo)}
 rm -f "$STAGE/daemon/LICENSE" "$STAGE/daemon/NOTICE"
 git -C "$PASEO_REPO" show "$PASEO_REF:LICENSE" >"$STAGE/daemon/LICENSE"
 git -C "$PASEO_REPO" show "$PASEO_REF:NOTICE" >"$STAGE/daemon/NOTICE" 2>/dev/null || echo "Modified version of Paseo (https://github.com/getpaseo/paseo), Apache-2.0." >"$STAGE/daemon/NOTICE"

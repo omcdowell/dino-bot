@@ -2,7 +2,7 @@
 # Local gate before ANY release push (28 Oct: "protections not to continually burn credit").
 # build/publish-public.sh refuses to push a release tag unless this passed on the same tree hash.
 #
-#   SOURCES_GIT=<the build/prepare-sources.sh repo> build/preflight-release.sh
+#   build/preflight-release.sh
 #
 # On exactly the tree build/publish-public.sh would push (its dry-run output, a fresh clone of it):
 #   1. build/workflow-check.py policy: every workflow is tag-only, cancels in-progress runs, has
@@ -10,14 +10,14 @@
 #   2. actionlint on .github/workflows (ACTIONLINT=<path>, or on PATH; a pinned copy in
 #      ~/.cache/dinobot-preflight is used if present; skipped with a warning if none)
 #   3. the workflow's own unit-test step (read from release.yml, run verbatim)
-#   4. the workflow's build step: build/ci-build.sh linux-x64 from the src/* commits, full daemon
+#   4. the workflow's build step: build/ci-build.sh linux-x64 from the tree's own folders, full daemon
 #      build (no prebuilt shortcut), under a 7 GB memory cap (GitHub's private-repo runners:
 #      Linux 8 GB, macOS 7 GB); then the workflow's secret-scan step, verbatim
 #   5. the release job's checks that need no GitHub (desktop files: stand-ins): checksum, one install.sh, stamped from
 #      lib/signing.json (that step, verbatim, on the one tarball), identityRegexp() loads
-#   Pass: writes PREFLIGHT_DIR/<tree hash> (tree + src/* commits); publish-public.sh needs it for TAG.
+#   Pass: writes PREFLIGHT_DIR/<tree hash>; publish-public.sh needs it for TAG.
 #
-# Env: SOURCES_GIT (required), TAG, PREFLIGHT_DIR (default ~/.cache/dinobot-preflight/passed),
+# Env: TAG, PREFLIGHT_DIR (default ~/.cache/dinobot-preflight/passed),
 #      PREFLIGHT_WORK (default .cache/preflight), PREFLIGHT_MEM (default 7G; `heavy` cap if present),
 #      GITLEAKS/ACCEPT_SCAN as for build/publish-public.sh. The tarball's private-name guard must
 #      have its patterns here (DINOBOT_REQUIRE_GUARD=1; see build/private-guard.sh).
@@ -25,7 +25,6 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 cd "$HERE"
-: "${SOURCES_GIT:?set SOURCES_GIT to the build/prepare-sources.sh repo (src/* branches)}"
 PREFLIGHT_DIR=${PREFLIGHT_DIR:-$HOME/.cache/dinobot-preflight/passed}
 W=${PREFLIGHT_WORK:-$HERE/.cache/preflight}
 MEM=${PREFLIGHT_MEM:-7G}
@@ -62,14 +61,7 @@ say "tests: $TESTS"
 (cd "$R" && bash -euo pipefail -c "$TESTS") >"$W/tests.log" 2>&1 || { grep -E '^not ok|✖|# (pass|fail)' "$W/tests.log" | head -30 >&2; die "the workflow's unit tests fail on this tree ($W/tests.log)"; }
 say "tests ok ($(grep -E '^ℹ (pass|fail)' "$W/tests.log" | tr '\n' ' '))"
 
-# 4. The build job for linux-x64: sources at the pinned commits, ci-build.sh, secret scan.
-for k in paseo:paseo bots:paseo-bots optchat:pi-optchat; do
-  want=$(jq -r ".${k%%:*}.commit" "$R/build/sources.json")
-  d=$R/src/${k#*:} # where the workflow checks them out
-  git clone -q --no-local --no-checkout "$W/pub/tree" "$d"
-  git -C "$d" fetch -q origin "refs/heads/src/${k#*:}"
-  git -C "$d" -c advice.detachedHead=false checkout -q "$want"
-done
+# 4. The build job for linux-x64: the clone's own folders, ci-build.sh, secret scan.
 BUILD=$(step build-linux "build \${{ matrix.target }}" matrix.target=linux-x64)
 say "build: $BUILD (memory cap $MEM)"
 T0=$(date +%s)
@@ -102,7 +94,7 @@ say "release checks ok (identity $(cat "$W/identity.log"))"
 mkdir -p "$PREFLIGHT_DIR"
 {
   echo "tree $TREE"
-  for k in paseo paseo-bots pi-optchat; do echo "src/$k $(git -C "$W/pub/tree" rev-parse "src/$k")"; done
+  for k in paseo plugins/bots optchat; do echo "$k $(git -C "$R" rev-parse "HEAD:$k")"; done
   echo "installer $(git rev-parse HEAD)"
   echo "linux-x64 $(cut -d' ' -f1 "$R/dist/dinobot-linux-x64.tar.gz.sha256")"
   echo "date $(date -u +%FT%TZ)"

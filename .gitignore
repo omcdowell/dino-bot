@@ -1,9 +1,11 @@
-dist/
-.test-tmp/
-e2e/
-.cache/
-.test-tmp2/
-.test-tmp3/
-.e2e-pub/
-.test-tmp-*/
+# Root-anchored: paseo/, optchat/ and plugins/ have their own ignores (an unanchored e2e/ hid paseo/packages/app/e2e).
+/dist/
+/.test-tmp/
+/e2e/
+/.cache/
+/.test-tmp2/
+/.test-tmp3/
+/.e2e-pub/
+/.test-tmp-*/
 __pycache__/
+node_modules/
