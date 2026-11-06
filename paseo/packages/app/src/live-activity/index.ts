@@ -1,12 +1,18 @@
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
-import type { LiveActivityIconStatus } from "./status";
+import type { IconStatusResult, LiveActivityIconStatus } from "./status";
 
 /** Live Activity of busy bots: iOS only (index.ios.ts). */
 export function startLiveActivity(_input: { client: DaemonClient; serverId: string }): () => void {
   return () => undefined;
 }
 
-export type { LiveActivityIconStatus, WidgetIconReport, WidgetMemory } from "./status";
+export type {
+  IconStatusResult,
+  IconStatusUnavailable,
+  LiveActivityIconStatus,
+  WidgetIconReport,
+  WidgetMemory,
+} from "./status";
 
 /** Timer layers of the Lock Screen dino walk: 3 (3 fps, default) or 6 (6 fps). */
 export type DinoLayers = 3 | 6;
@@ -39,4 +45,9 @@ export async function setDinoFix(_fix: DinoFix): Promise<boolean> {
 /** iOS only (index.ios.ts). */
 export async function getLiveActivityIconStatus(): Promise<LiveActivityIconStatus | null> {
   return null;
+}
+
+/** iOS only (index.ios.ts): elsewhere there is no Live Activity module. */
+export async function readLiveActivityIconStatus(): Promise<IconStatusResult> {
+  return { status: null, unavailable: "noModule", error: null };
 }

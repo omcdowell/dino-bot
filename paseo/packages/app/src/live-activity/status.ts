@@ -196,3 +196,48 @@ export function iconStatusFromNative(
     appearance: appearanceStatus(native.appearance),
   };
 }
+
+/**
+ * Why the Network page has no icon status (it then says so instead of hiding the rows, la-avatars):
+ * - noModule: the build has no PaseoLiveActivity native module (not iOS, or not linked);
+ * - noIconStatus: the native module has no `iconStatus` (an older native build);
+ * - failed: `iconStatus` threw or rejected;
+ * - empty: it answered nothing usable.
+ */
+export type IconStatusUnavailable = "noModule" | "noIconStatus" | "failed" | "empty";
+
+export type IconStatusResult =
+  | { status: LiveActivityIconStatus; unavailable: null; error: null }
+  | { status: null; unavailable: IconStatusUnavailable; error: string | null };
+
+function unavailable(reason: IconStatusUnavailable, error: string | null = null): IconStatusResult {
+  return { status: null, unavailable: reason, error };
+}
+
+/** Asks the native module for the icon status; says why when it cannot. */
+export async function readIconStatus(
+  native: { iconStatus?: () => Promise<NativeIconStatus> } | null | undefined,
+  readIndex: () => Promise<string | null>,
+): Promise<IconStatusResult> {
+  if (!native) return unavailable("noModule");
+  if (typeof native.iconStatus !== "function") return unavailable("noIconStatus");
+  let answer: unknown;
+  try {
+    answer = await native.iconStatus();
+  } catch (error) {
+    return unavailable("failed", error instanceof Error ? error.message : String(error));
+  }
+  if (
+    typeof answer !== "object" ||
+    answer === null ||
+    typeof (answer as NativeIconStatus).stored !== "number"
+  ) {
+    return unavailable("empty");
+  }
+  const index = await readIndex().catch(() => null);
+  return {
+    status: iconStatusFromNative(answer as NativeIconStatus, index),
+    unavailable: null,
+    error: null,
+  };
+}

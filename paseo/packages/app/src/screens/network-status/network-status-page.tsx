@@ -3,7 +3,7 @@ import { Activity, Copy } from "lucide-react-native";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { Pressable, Text, View } from "react-native";
+import { Platform, Pressable, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { getOutboxSender } from "@/composer/outbox/sender";
 import { Button } from "@/components/ui/button";
@@ -13,11 +13,12 @@ import {
   DINO_FIXES,
   getDinoFix,
   getDinoLayers,
-  getLiveActivityIconStatus,
+  readLiveActivityIconStatus,
   setDinoFix,
   setDinoLayers,
   type DinoFix,
   type DinoLayers,
+  type IconStatusResult,
   type LiveActivityIconStatus,
   type WidgetMemory,
 } from "@/live-activity";
@@ -32,6 +33,7 @@ import type { Theme } from "@/styles/theme";
 import { formatTimeAgo } from "@/utils/time";
 import { HostUsageSection, useHostReportsUsage } from "@/usage";
 import { buildBotSyncRows, type BotSyncRow } from "./bot-sync";
+import { iconStatusUnavailableText, liveActivityRowsShown } from "./live-activity-rows";
 import type { HostLinks, LinkRow, LinkState } from "./model";
 import { formatNetworkReport } from "./report";
 import type { HostTestResult, NetworkTestRun } from "./run-tests";
@@ -393,13 +395,13 @@ function botState(row: BotSyncRow): LinkState {
  * report when it renders, which can be after the page opened. */
 const ICON_STATUS_REFRESH_MS = 10_000;
 
-/** Bot icons the Live Activity widget can read (iOS); null elsewhere or until known. */
-function useLiveActivityIconStatus(): LiveActivityIconStatus | null {
-  const [status, setStatus] = useState<LiveActivityIconStatus | null>(null);
+/** Bot icons the Live Activity widget can read (iOS), or why this build cannot tell; null until known. */
+function useLiveActivityIconStatus(): IconStatusResult | null {
+  const [status, setStatus] = useState<IconStatusResult | null>(null);
   useEffect(() => {
     let live = true;
     const load = async () => {
-      const value = await getLiveActivityIconStatus();
+      const value = await readLiveActivityIconStatus();
       if (live) setStatus(value);
     };
     void load();
@@ -623,19 +625,27 @@ function DinoDebugPickers() {
   );
 }
 
-function liveActivityEntries(t: TFunction, icons: LiveActivityIconStatus): Array<[string, string]> {
-  // Widget internals (icon store, memory, App Group, dino layers): the owner's build only.
-  if (isPublicFlavour) return [];
+function liveActivityEntries(t: TFunction, result: IconStatusResult): Array<[string, string]> {
+  const shown = liveActivityRowsShown({ os: Platform.OS, publicFlavour: isPublicFlavour });
+  if (!shown.section) return [];
+  // No status: say why rather than drop the rows (DinoBot 0.1.3 (4) showed none at all).
+  if (result.status === null) {
+    return [[t("network.phone.liveActivityIcons"), iconStatusUnavailableText(t, result)]];
+  }
+  const icons = result.status;
+  // Every build: what the app stored, what the widget found, the App Group.
   const entries: Array<[string, string]> = [
     [t("network.phone.liveActivityIcons"), iconStatusText(t, icons)],
     [t("network.phone.liveActivityWidgetLabel"), widgetReportText(t, icons)],
   ];
+  const appGroup = appGroupText(t, icons);
+  if (appGroup) entries.push([t("network.phone.liveActivityAppGroupLabel"), appGroup]);
+  // Widget internals (memory, dino layers, appearance): the owner's build only.
+  if (!shown.internals) return entries;
   const memory = icons.widget?.memory;
   if (memory) {
     entries.push([t("network.phone.liveActivityWidgetMemoryLabel"), widgetMemoryText(t, memory)]);
   }
-  const appGroup = appGroupText(t, icons);
-  if (appGroup) entries.push([t("network.phone.liveActivityAppGroupLabel"), appGroup]);
   const dino = dinoText(t, icons);
   if (dino) entries.push([t("network.phone.liveActivityDinoLabel"), dino]);
   const appearance = appearanceText(t, icons);

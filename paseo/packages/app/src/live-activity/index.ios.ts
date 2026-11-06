@@ -6,7 +6,12 @@ import { AppState } from "react-native";
 import { Skia } from "@shopify/react-native-skia";
 import * as LucideIcons from "lucide-react-native";
 import { ICON_INDEX_KEY, loadIconNames, syncBotIcons, type IconNative } from "./icons";
-import { iconStatusFromNative, type LiveActivityIconStatus, type NativeIconStatus } from "./status";
+import {
+  readIconStatus,
+  type IconStatusResult,
+  type LiveActivityIconStatus,
+  type NativeIconStatus,
+} from "./status";
 import { startLiveActivitySync, type LiveActivityNative } from "./sync";
 import { tileSvg, type LucideNode } from "./tile";
 import { pluginAvailable } from "@/plugins/plugin-available";
@@ -102,7 +107,13 @@ export function startLiveActivity(input: { client: DaemonClient; serverId: strin
   });
 }
 
-export type { LiveActivityIconStatus, WidgetIconReport, WidgetMemory } from "./status";
+export type {
+  IconStatusResult,
+  IconStatusUnavailable,
+  LiveActivityIconStatus,
+  WidgetIconReport,
+  WidgetMemory,
+} from "./status";
 
 /** Timer layers of the Lock Screen dino walk: 3 (3 fps, default) or 6 (6 fps). */
 export type DinoLayers = 3 | 6;
@@ -159,14 +170,16 @@ export async function setDinoFix(fix: DinoFix): Promise<boolean> {
   return native.setDinoFix(fix).catch(() => false);
 }
 
-/** For the Network page: the bot icons stored for the widget, and what the widget last found. */
-export async function getLiveActivityIconStatus(): Promise<LiveActivityIconStatus | null> {
+/** For the Network page: the bot icons stored for the widget, and what the widget last found; or
+ * why this build cannot tell (the page shows that instead of hiding the rows). */
+export async function readLiveActivityIconStatus(): Promise<IconStatusResult> {
   const native = requireOptionalNativeModule<{
     iconStatus?: () => Promise<NativeIconStatus>;
   }>("PaseoLiveActivity");
-  if (!native?.iconStatus) return null;
-  const answer = await native.iconStatus().catch(() => null);
-  if (!answer) return null;
-  const index = await AsyncStorage.getItem(ICON_INDEX_KEY).catch(() => null);
-  return iconStatusFromNative(answer, index);
+  return readIconStatus(native, () => AsyncStorage.getItem(ICON_INDEX_KEY));
+}
+
+/** The icon status, or null when this build cannot give one (readLiveActivityIconStatus says why). */
+export async function getLiveActivityIconStatus(): Promise<LiveActivityIconStatus | null> {
+  return (await readLiveActivityIconStatus()).status;
 }

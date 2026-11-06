@@ -3076,6 +3076,13 @@ export const en = {
       liveActivityDinoLabel: "Live Activity dino",
       liveActivityDino: "app {{app}}, card {{card}}, group {{group}}",
       liveActivityAppGroupOff: "Not in this build (keychain only)",
+      liveActivityUnavailable: {
+        noModule: "Unavailable: this build has no Live Activity module",
+        noIconStatus: "Unavailable: this build's Live Activity module cannot report icons",
+        failed: "Unavailable: the Live Activity module failed",
+        empty: "Unavailable: the Live Activity module gave no answer",
+      },
+      liveActivityUnavailableError: "{{reason}} ({{error}})",
       liveActivityWidgetMemoryLabel: "Live Activity widget memory",
       liveActivityWidgetMemory: "{{peak}} MB peak of {{limit}} MB allowed, {{now}} MB now",
       liveActivityWidgetMemoryNoLimit: "{{peak}} MB peak, {{now}} MB now",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ICON_INDEX_KEY } from "./icons";
-import { iconStatusFromNative, parseWidgetReport } from "./status";
+import { iconStatusFromNative, parseWidgetReport, readIconStatus } from "./status";
 
 const index = JSON.stringify({
   emmet: { source: "avatar:avatar.png", savedAt: 1 },
@@ -233,5 +233,50 @@ describe("iconStatusFromNative", () => {
 
   it("uses the index key the icon sync writes", () => {
     expect(ICON_INDEX_KEY).toBe("@paseo:live-activity-icons:v1");
+  });
+});
+
+describe("readIconStatus (la-avatars: the Network page says why instead of hiding the rows)", () => {
+  const noIndex = async () => null;
+  it("no native module", async () => {
+    expect(await readIconStatus(null, noIndex)).toEqual({
+      status: null,
+      unavailable: "noModule",
+      error: null,
+    });
+  });
+  it("a native module without iconStatus (older native build)", async () => {
+    expect((await readIconStatus({}, noIndex)).unavailable).toBe("noIconStatus");
+  });
+  it("iconStatus rejects: the native error is kept", async () => {
+    const result = await readIconStatus(
+      { iconStatus: () => Promise.reject(new Error("keychain status -34018")) },
+      noIndex,
+    );
+    expect(result).toEqual({
+      status: null,
+      unavailable: "failed",
+      error: "keychain status -34018",
+    });
+  });
+  it("iconStatus answers nothing usable", async () => {
+    const empty = { iconStatus: () => Promise.resolve(null as never) };
+    expect((await readIconStatus(empty, noIndex)).unavailable).toBe("empty");
+  });
+  it("an answer: the status, with avatars counted from the icon index", async () => {
+    const result = await readIconStatus(
+      {
+        iconStatus: async () => ({
+          stored: 2,
+          ids: ["emmet", "wallace"],
+          readable: 2,
+          group: "T.com.dinobot.test.shared",
+          lastError: null,
+        }),
+      },
+      async () => index,
+    );
+    expect(result.unavailable).toBeNull();
+    expect(result.status).toMatchObject({ stored: 2, avatars: 1, readable: 2 });
   });
 });
