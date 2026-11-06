@@ -3,9 +3,14 @@ import { RELEASE_POLICIES, installCommand, resolveAppFlavour } from "./flavour";
 import {
   flavourSourcesEnv,
   planFlavour,
+  readBundledAvatars,
+  withBundledAvatars,
   withKeychainGroup,
   withoutBundledAvatars,
 } from "../../scripts/apply-flavour.mjs";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { resolveFlavour, resolveEas } = require("../../release-flavour.js");
 
@@ -201,8 +206,49 @@ describe("apply-flavour (widget sources)", () => {
       "BundledAvatars.swift": swift,
       "Info.plist": plist,
     });
-    expect(plan["Info.plist"]).toContain("<string>$(AppIdentifierPrefix)com.dinobot.test.shared</string>");
+    expect(plan["Info.plist"]).toContain(
+      "<string>$(AppIdentifierPrefix)com.dinobot.test.shared</string>",
+    );
     expect(plan["Info.plist"]).not.toContain("com.example");
+  });
+  it("public with bundled avatars (PASEO_BUNDLED_AVATARS_DIR): the table holds them, sorted", () => {
+    const out = withBundledAvatars(swift, { scrat: "QUJD", flint: "REVG" });
+    expect(out).toBe(
+      'enum BundledAvatars {\n  static let table: [String: String] = [\n    "flint": "REVG",\n    "scrat": "QUJD",\n  ]\n}\n',
+    );
+    expect(withBundledAvatars(swift, {})).toBe(withoutBundledAvatars(swift));
+    const plan = planFlavour(
+      resolveFlavour({ PASEO_FLAVOUR: "public" }),
+      { "BundledAvatars.swift": swift, "Info.plist": plist },
+      { emmet: "RU1N" },
+    );
+    expect(plan["BundledAvatars.swift"]).toContain('"emmet": "RU1N"');
+    expect(plan["BundledAvatars.swift"]).not.toContain("flint");
+  });
+  it("readBundledAvatars: <bot-id>.png files of at most 128 px, base64; anything else fails the build", () => {
+    const png = (w: number, h: number) => {
+      const b = Buffer.alloc(33);
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
+      b.write("IHDR", 12, "ascii");
+      b.writeUInt32BE(w, 16);
+      b.writeUInt32BE(h, 20);
+      return b;
+    };
+    const dir = mkdtempSync(join(tmpdir(), "bundled-"));
+    writeFileSync(join(dir, "emmet-brickowski.png"), png(96, 96));
+    writeFileSync(join(dir, "notes.txt"), "ignored");
+    const read = readBundledAvatars(dir);
+    expect(Object.keys(read)).toEqual(["emmet-brickowski"]);
+    expect(Buffer.from(read["emmet-brickowski"], "base64").subarray(1, 4).toString()).toBe("PNG");
+
+    writeFileSync(join(dir, "big.png"), png(1024, 1024));
+    expect(() => readBundledAvatars(dir)).toThrow(/big.png.*1024/);
+    const bad = mkdtempSync(join(tmpdir(), "bundled-"));
+    writeFileSync(join(bad, "fake.png"), "not a png");
+    expect(() => readBundledAvatars(bad)).toThrow(/fake.png/);
+    const badId = mkdtempSync(join(tmpdir(), "bundled-"));
+    writeFileSync(join(badId, "a b.png"), png(96, 96));
+    expect(() => readBundledAvatars(badId)).toThrow(/a b.png/);
   });
   it("own: changes nothing", () => {
     expect(

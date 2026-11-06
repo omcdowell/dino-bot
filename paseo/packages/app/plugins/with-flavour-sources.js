@@ -3,7 +3,8 @@ const { pathToFileURL } = require("node:url");
 const { withDangerousMod } = require("expo/config-plugins");
 
 // Public flavour only: runs scripts/apply-flavour.mjs during `expo prebuild` (ios), so the Live
-// Activity widget sources (empty bundled-avatar table, the flavour's keychain group) can never be
+// Activity widget sources (bundled-avatar table: empty, or PASEO_BUNDLED_AVATARS_DIR's; the
+// flavour's keychain group) can never be
 // forgotten by a build script (ship.sh / paseo-build call prebuild; the own build is untouched).
 // It edits targets/live-activity in place (@bacons/apple-targets links that folder, it does not
 // copy it); undo with `git checkout -- targets/live-activity`.
