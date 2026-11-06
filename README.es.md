@@ -15,15 +15,15 @@ Muchas gracias al proyecto Paseo.</p>
   <a href="SECURITY.md">Seguridad</a>
 </p>
 
-- 📱 **Pensado para el móvil.** Una app de iPhone de verdad: chatea con tus bots, sigue a sus workers y (con
+- 📱 **Pensado para el teléfono.** Una app de iPhone de verdad: chatea con tus bots, sigue a sus workers y (con
   una app que compiles tú mismo, ver más abajo) recibe notificaciones push y una Actividad en vivo en la pantalla bloqueada.
-- 🎙️ **Dictado privado.** La conversión de voz a texto se ejecuta en tu propio ordenador (usa una GPU NVIDIA si
+- 🎙️ **Dictado privado.** La conversión de voz a texto se ejecuta en tu propia computadora (usa una GPU NVIDIA si
   tienes una; si no, la CPU).
 - 🤝 **Bots que trabajan en equipo.** Gestionan sus propios subagentes, se envían mensajes entre sí y trabajan
   contigo en chats grupales.
 - 🧠 **Cualquier modelo.** Construido sobre [pi](https://github.com/earendil-works/pi): Claude, ChatGPT, OpenRouter
   y más.
-- 🔒 **Tuyo.** Se ejecuta en tu propio ordenador o VPS, accesible a través de Tailscale. Sin cuenta, sin relay en la nube.
+- 🔒 **Tuyo.** Se ejecuta en tu propia computadora o VPS, accesible a través de Tailscale. Sin cuenta, sin relay en la nube.
 
 <p align="center">
   <img src="docs/screenshots.png" width="100%" alt="DinoBot en iPhone en modo oscuro: inicio de bots con The Fat Controller fijado, un chat grupal, una tabla de investigación y la Actividad en vivo en la pantalla bloqueada mostrando un bot y sus workers">
@@ -39,22 +39,22 @@ Muchas gracias al proyecto Paseo.</p>
 
 ## Inicio rápido
 
-En tu Mac u ordenador con Linux:
+En tu Mac o computadora con Linux:
 
 ```sh
 curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
 ```
 
-1. Instala [Tailscale](https://tailscale.com/download) en el ordenador y en tu móvil, con la sesión iniciada
+1. Instala [Tailscale](https://tailscale.com/download) en la computadora y en tu teléfono, con la sesión iniciada
    en la misma cuenta. Si falta, la instalación te guía paso a paso.
 2. Instala la app DinoBot en tu iPhone. <!-- TODO: TestFlight / App Store link -->
 3. Escanea el código QR que muestra el instalador. Inicia sesión con tu proveedor de IA en la app y empieza a chatear.
 
 ## App de escritorio (básica)
 
-También hay una app de escritorio básica para Mac y Linux. Se empareja con tu ordenador DinoBot, muestra
-tus bots y te permite chatear con ellos, igual que la app del móvil. No ejecuta bots por sí misma: necesita
-un host de DinoBot (la instalación de arriba), en el mismo ordenador o en otro de tu tailnet.
+También hay una app de escritorio básica para Mac y Linux. Se empareja con tu computadora DinoBot, muestra
+tus bots y te permite chatear con ellos, igual que la app del teléfono. No ejecuta bots por sí misma: necesita
+un host de DinoBot (la instalación de arriba), en la misma computadora o en otra de tu tailnet.
 
 - **Mac** (Apple Silicon): `DinoBot-<version>-arm64.dmg` desde la
   [última release](https://github.com/omcdowell/dino-bot/releases/latest). Todavía no está firmada por
@@ -63,7 +63,7 @@ un host de DinoBot (la instalación de arriba), en el mismo ordenador o en otro 
 - **Linux** (x64): `DinoBot-x86_64.AppImage` desde la misma release. Hazlo ejecutable
   (`chmod +x`) y ejecútalo; consulta [Linux](docs/linux.md#desktop-app) si no arranca.
 
-Para conectarte, ejecuta `~/.dinobot/bin/dinobot pair --link` en el ordenador DinoBot y pega el enlace
+Para conectarte, ejecuta `~/.dinobot/bin/dinobot pair --link` en la computadora DinoBot y pega el enlace
 en la app (**Paste pairing link**). La app no se actualiza sola: descarga la nueva versión
 desde la página de releases.
 
@@ -71,7 +71,7 @@ desde la página de releases.
 
 - macOS (Apple Silicon) o Linux (x64 o arm64, glibc), con `curl`, `tar` y `git`
 - Windows 10/11: dentro de WSL 2, **sin probar** por ahora; consulta [Windows](docs/windows.md)
-- [Tailscale](https://tailscale.com) en el ordenador y en el móvil
+- [Tailscale](https://tailscale.com) en la computadora y en el teléfono
 - Una suscripción de IA o una clave de API (Claude, ChatGPT, OpenRouter, …)
 - Sin root: el instalador nunca usa sudo
 
