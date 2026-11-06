@@ -15,7 +15,8 @@ Many thanks to the Paseo project.</p>
 
 - 📱 **Phone-first.** A real iPhone app: chat with your bots, follow their workers, and (with an
   app you build yourself, see below) push notifications and a Live Activity on the lock screen.
-- 🎙️ **Private dictation.** Speech-to-text runs locally on your own GPU.
+- 🎙️ **Private dictation.** Speech-to-text runs on your own computer (it uses an NVIDIA GPU if you
+  have one, otherwise the CPU).
 - 🤝 **Bots that work together.** They manage their own subagents, message each other and work
   in group chats with you.
 - 🧠 **Any model.** Built on [pi](https://github.com/earendil-works/pi): Claude, ChatGPT, OpenRouter
