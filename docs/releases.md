@@ -81,7 +81,9 @@ Every release also carries the desktop app, built by the `desktop` job with
 - `DinoBot-x86_64.AppImage` (Linux x64). The name has no version on purpose (a stable path for
   shortcuts); the version is in the app's About page.
 
-`<version>` comes from the app's own `packages/desktop/package.json`. Each file has a `.sha256`,
+`<version>` is the release, `lib/product.json` (the same as the tag), also shown in the app's About
+panel. The iPhone app's version is separate (`paseo/packages/app/dinobot-version.js`): TestFlight
+raises its build number, not its version. Each file has a `.sha256`,
 is listed in `SHA256SUMS` and has a `.sigstore.json` like the tarballs. `install.sh` and
 `dinobot update` do not touch them; updating the app means downloading it again.
 

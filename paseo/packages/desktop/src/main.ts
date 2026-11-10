@@ -139,7 +139,7 @@ const bootstrapComplete = new Promise<void>((resolve) => {
 let bootstrapIsComplete = false;
 
 app.setName(APP_NAME);
-// Public build: the About panel shows DinoBot's version (app/dinobot-version.js). app.getVersion()
+// Public build: the About panel shows the DinoBot release (lib/product.json). app.getVersion()
 // stays package.json's engine version (daemon version checks).
 if (FLAVOUR.displayVersion) {
   app.setAboutPanelOptions({

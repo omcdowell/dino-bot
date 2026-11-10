@@ -27,8 +27,8 @@ export interface DesktopFlavour {
   appUpdates: boolean;
   cliInstall: boolean;
   /**
-   * Version shown to people (About panel): DinoBot's (packages/app/dinobot-version.js) in the public
-   * build, null = app.getVersion(). Display only: app.getVersion() stays package.json's (engine)
+   * Version shown to people (About panel): the DinoBot release (lib/product.json, stamped by
+   * scripts/stamp-flavour.mjs) in the public build, null = app.getVersion(). Display only: app.getVersion() stays package.json's (engine)
    * version for the daemon checks.
    */
   displayVersion: string | null;

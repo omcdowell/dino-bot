@@ -6,8 +6,8 @@
 #     TARGET   linux-x64 (AppImage) | darwin-arm64 (dmg); must be this runner's platform
 #     SRC_DIR  the monorepo checkout (default: this repo); paseo/ must be unchanged from HEAD
 #
-# Output in dist/: DinoBot-<version>-<arch>.AppImage or .dmg, plus .sha256. <version> is
-# packages/desktop/package.json's, so nothing here names a version.
+# Output in dist/: DinoBot-x86_64.AppImage or DinoBot-<version>-arm64.dmg, plus .sha256. <version> is
+# lib/product.json's (electron-builder.dinobot.cjs), so nothing here names a version.
 # The app is the public flavour (DinoBot name, com.dinobot.desktop, dinobot:// links, no built-in
 # daemon, no update feed): it connects to a DinoBot host made by install.sh.
 # macOS: NOT signed with a Developer ID and not notarised (none exists yet); electron-builder signs

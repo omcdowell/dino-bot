@@ -6,7 +6,7 @@ import { formatHostVersionLabel, pickDisplayVersion } from "./display-version";
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { DINOBOT_VERSION, DINOBOT_IOS_BUILD } = require("../../dinobot-version.js");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { resolveFlavour } = require("../../release-flavour.js");
+const { resolveFlavour, resolveShownVersion } = require("../../release-flavour.js");
 
 // Option A (Emmet, 4 Nov): DinoBot shows its own version (dinobot-version.js); package.json keeps
 // the engine version that the daemon and plugin compatibility use (report-version-bump.md).
@@ -22,7 +22,15 @@ describe("DinoBot display version", () => {
     expect(formatAppVersionLabel(shown, null)).toBe("v0.1.3");
   });
 
-  it("the own build keeps showing the engine version", () => {
+  it("the desktop app's web UI shows the release (lib/product.json), the iPhone its own version", () => {
+    const pub = resolveFlavour({ PASEO_FLAVOUR: "public" });
+    expect(pub.desktopVersion).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(resolveShownVersion(pub, { PASEO_WEB_PLATFORM: "electron" })).toBe(pub.desktopVersion);
+    expect(resolveShownVersion(pub, {})).toBe(DINOBOT_VERSION);
+    expect(resolveShownVersion(resolveFlavour({}), { PASEO_WEB_PLATFORM: "electron" })).toBeNull();
+  });
+
+    it("the own build keeps showing the engine version", () => {
     const own = resolveFlavour({});
     expect(own.displayVersion).toBeNull();
     expect(own.iosBuildNumber).toBeNull();

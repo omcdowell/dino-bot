@@ -24,7 +24,9 @@
  */
 
 /** DinoBot's display version and iOS build: dinobot-version.js (the one place they live). */
-const { DINOBOT_VERSION, DINOBOT_IOS_BUILD } = require("./dinobot-version.js");
+const { DINOBOT_VERSION, DINOBOT_IOS_BUILD, dinobotReleaseVersion } = require("./dinobot-version.js");
+/** The DinoBot release (lib/product.json): the desktop app's version. Null outside the DinoBot repo. */
+const DINOBOT_RELEASE_VERSION = dinobotReleaseVersion();
 
 /** Working name (27 Oct: "DinoBot"). The ONE place the public name lives. */
 const PUBLIC_APP_NAME = "DinoBot";
@@ -56,6 +58,8 @@ const FLAVOURS = {
     iosBundleId: "com.example.paseo",
     /** Display version: null = package.json's (upstream line), as today. */
     displayVersion: null,
+    /** Desktop app version: null = package.json's, as today. */
+    desktopVersion: null,
     /** iOS build number: null = ship.sh's CURRENT_PROJECT_VERSION, as today. */
     iosBuildNumber: null,
     /** Apple developer team: PASEO_APPLE_TEAM_ID (not kept in the source). */
@@ -86,6 +90,11 @@ const FLAVOURS = {
     /** Shown to people (dinobot-version.js); package.json stays the engine/plugin version. */
     displayVersion: DINOBOT_VERSION,
     iosBuildNumber: DINOBOT_IOS_BUILD,
+    /**
+     * The desktop app (dmg/AppImage, About panel, its web UI) shows the release it ships with
+     * (lib/product.json), not the iPhone's marketing version (dinobot-version.js).
+     */
+    desktopVersion: DINOBOT_RELEASE_VERSION,
     /** Apple developer team: PASEO_APPLE_TEAM_ID (not kept in the source). */
     appleTeamId: null,
     // Distribution signing is set up with the App Store profile at upload time, not here.
@@ -167,8 +176,19 @@ function resolveEas(flavour, pushTransport, env = process.env) {
   return { slug: flavour.expoSlug, owner, projectId };
 }
 
+/**
+ * The version the app's UI shows (app.config.js `extra.displayVersion`): the release
+ * (desktopVersion, lib/product.json) in the desktop app's web UI (PASEO_WEB_PLATFORM=electron),
+ * else the flavour's display version (the iPhone's, dinobot-version.js). null = package.json's.
+ */
+function resolveShownVersion(flavour, env = process.env) {
+  if (env.PASEO_WEB_PLATFORM === "electron" && flavour.desktopVersion) return flavour.desktopVersion;
+  return flavour.displayVersion;
+}
+
 module.exports = {
   resolveFlavour,
+  resolveShownVersion,
   resolveEas,
   FLAVOURS,
   PUBLIC_APP_NAME,
@@ -180,4 +200,5 @@ module.exports = {
   PUBLIC_EXPO_SLUG,
   DINOBOT_VERSION,
   DINOBOT_IOS_BUILD,
+  DINOBOT_RELEASE_VERSION,
 };

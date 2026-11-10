@@ -9,7 +9,7 @@ const withAndroidScroll = require("./modules/paseo-scroll/app.plugin");
 const withIosDevSigning = require("./plugins/with-ios-dev-signing");
 const withFlavourSources = require("./plugins/with-flavour-sources");
 const { getNativeReleaseVersion } = require("./native-release-version");
-const { resolveFlavour, resolveEas } = require("./release-flavour");
+const { resolveFlavour, resolveEas, resolveShownVersion } = require("./release-flavour");
 // Build flavour (release-flavour.js): "own" (the owner's build, default) or "public" (TestFlight).
 const flavour = resolveFlavour();
 const appVariant = process.env.APP_VARIANT ?? "production";
@@ -358,7 +358,9 @@ export default {
       linkScheme: flavour.linkScheme,
       installUrl: flavour.installUrl,
       // Version shown to people (src/utils/app-version.ts resolveDisplayVersion); null = package.json.
-      displayVersion: flavour.displayVersion,
+      // The desktop app's web UI (PASEO_WEB_PLATFORM=electron) shows the release (lib/product.json);
+      // the iPhone app its marketing version (dinobot-version.js).
+      displayVersion: resolveShownVersion(flavour, process.env),
       fdroidBuild: isFdroidBuild,
       profileBuild: isProfileBuild,
       push: variant.iosBundleId ? ownIosBuild.push : pushConfig,

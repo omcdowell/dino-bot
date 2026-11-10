@@ -17,10 +17,14 @@ const base = yaml.load(readFileSync(path.join(__dirname, "electron-builder.yml")
 const flavour = resolveFlavour({ PASEO_FLAVOUR: "public" });
 const NAME = flavour.appName; // "DinoBot" (release-flavour.js is the one place it lives)
 const SCHEME = flavour.linkScheme; // "dinobot"
-// DinoBot's display version (app/dinobot-version.js): the bundle's CFBundleShortVersionString and
-// CFBundleVersion and the file names. The packaged package.json keeps the engine version (0.11.x),
-// which app.getVersion() returns for the daemon checks.
-const VERSION = flavour.displayVersion;
+// The DinoBot release this app ships with (lib/product.json via release-flavour.js desktopVersion),
+// not the iPhone's marketing version (app/dinobot-version.js): the bundle's
+// CFBundleShortVersionString and CFBundleVersion and the file names. The packaged package.json keeps
+// the engine version (0.11.x), which app.getVersion() returns for the daemon checks.
+const VERSION = flavour.desktopVersion;
+if (!VERSION) {
+  throw new Error("no DinoBot release version: lib/product.json (beside paseo/) is missing or has no x.y.z version");
+}
 
 // Windows is not in v1 (27 Oct): no win/nsis section.
 const { win: _win, nsis: _nsis, ...shared } = base;

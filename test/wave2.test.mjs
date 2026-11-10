@@ -7,6 +7,7 @@ import http from "node:http";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import net from "node:net";
+import { createRequire } from "node:module";
 import { gitGuardWrapper, listenHost, listenPlan, probeHostFor, stickyEnv as stickyEnvOf } from "../lib/config.mjs";
 import { detectTailscale, foreignTailscale, freePort } from "../lib/detect.mjs";
 import { foreignTailscaleMessage } from "../lib/cli.mjs";
@@ -53,6 +54,39 @@ describe("product names (one place)", () => {
     // Comments do not reach users; code and strings must take the name from product.json.
     const bad = out.filter((l) => !l.startsWith("lib/product.json") && !/^install\.sh:\d+:PRODUCT_NAME=/.test(l) && !/^[^:]+:\d+:\s*(\/\/|\*|\/\*\*|#)/.test(l));
     assert.deepEqual(bad, []);
+  });
+});
+
+describe("desktop app version: the release (lib/product.json); the iPhone app keeps its own", () => {
+  const require = createRequire(import.meta.url);
+  const app = join(HERE, "paseo", "packages", "app");
+  const { resolveFlavour, resolveShownVersion } = require(join(app, "release-flavour.js"));
+  const { DINOBOT_VERSION, dinobotReleaseVersion } = require(join(app, "dinobot-version.js"));
+  it("public desktop flavour, its About panel and its web UI show product.json's version", async () => {
+    const pub = resolveFlavour({ PASEO_FLAVOUR: "public" });
+    assert.equal(pub.desktopVersion, VERSION);
+    const { desktopFlavourJson } = await import(join(HERE, "paseo", "packages", "desktop", "scripts", "stamp-flavour.mjs"));
+    assert.equal(desktopFlavourJson({ PASEO_FLAVOUR: "public" }).displayVersion, VERSION);
+    assert.equal(resolveShownVersion(pub, { PASEO_WEB_PLATFORM: "electron" }), VERSION);
+    // electron-builder takes the file names and bundle version from the same field.
+    assert.match(readFileSync(join(HERE, "paseo", "packages", "desktop", "electron-builder.dinobot.cjs"), "utf8"), /const VERSION = flavour\.desktopVersion;/);
+  });
+  it("the iPhone app keeps its marketing version (TestFlight raises the build, not the version)", () => {
+    const pub = resolveFlavour({ PASEO_FLAVOUR: "public" });
+    assert.equal(pub.displayVersion, DINOBOT_VERSION);
+    assert.equal(resolveShownVersion(pub, {}), DINOBOT_VERSION);
+    const own = resolveFlavour({});
+    assert.equal(own.desktopVersion, null);
+    assert.equal(resolveShownVersion(own, { PASEO_WEB_PLATFORM: "electron" }), null);
+  });
+  it("no lib/product.json or no x.y.z version: null (the desktop build then refuses)", () => {
+    const d = tmp();
+    assert.equal(dinobotReleaseVersion(d), null);
+    mkdirSync(join(d, "lib"));
+    writeFileSync(join(d, "lib", "product.json"), JSON.stringify({ version: "next" }));
+    assert.equal(dinobotReleaseVersion(d), null);
+    writeFileSync(join(d, "lib", "product.json"), JSON.stringify({ version: "9.8.7" }));
+    assert.equal(dinobotReleaseVersion(d), "9.8.7");
   });
 });
 

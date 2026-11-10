@@ -1,10 +1,16 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { loadDesktopFlavour, OWN_DESKTOP_FLAVOUR, resolveDesktopFlavour } from "./flavour.js";
 // @ts-expect-error -- plain .mjs build script, no types
 import { desktopFlavourJson } from "../scripts/stamp-flavour.mjs";
+
+// The DinoBot release (repo root lib/product.json), which the public desktop build shows.
+const releaseVersion: string = JSON.parse(
+  readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "lib", "product.json"), "utf8"),
+).version;
 
 describe("desktop flavour", () => {
   it("is the own Paseo app unless flavour.json says public", () => {
@@ -90,7 +96,8 @@ describe("desktop flavour", () => {
       id: "public",
       appName: "DinoBot",
       linkScheme: "dinobot",
-      displayVersion: "0.1.3",
+      // The DinoBot release (lib/product.json), not the iPhone's marketing version.
+      displayVersion: releaseVersion,
     });
   });
 });

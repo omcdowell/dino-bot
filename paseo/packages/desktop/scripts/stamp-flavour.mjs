@@ -17,8 +17,9 @@ export function desktopFlavourJson(env = process.env) {
     id: flavour.id,
     appName: flavour.appName,
     linkScheme: flavour.linkScheme,
-    // DinoBot's display version (app/dinobot-version.js); null for the own build.
-    displayVersion: flavour.displayVersion,
+    // The DinoBot release (lib/product.json, release-flavour.js desktopVersion) for the About panel;
+    // null for the own build. Not the iPhone's marketing version (app/dinobot-version.js).
+    displayVersion: flavour.desktopVersion,
   };
 }
 
