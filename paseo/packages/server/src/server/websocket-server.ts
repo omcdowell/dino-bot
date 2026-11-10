@@ -152,6 +152,15 @@ const WS_CLOSE_DAEMON_AUTH_FAILED = 4401;
 const WS_CLOSE_DIRECT_E2EE_REQUIRED = 4426;
 const DIRECT_E2EE_REQUIRED_REASON = DIRECT_E2EE_REQUIRED_MESSAGE;
 
+/** The upgrade carries a password (Authorization or paseo.bearer.* subprotocol): an old app's way. */
+function hasUpgradeCredential(request: IncomingMessage): boolean {
+  const protocol = extractWsBearerProtocol(request.headers["sec-websocket-protocol"]);
+  return (
+    extractHttpBearerToken(request.headers.authorization) !== null ||
+    extractWsBearerToken(protocol) !== null
+  );
+}
+
 export interface ExternalSocketMetadata {
   transport: "relay" | "hub";
   externalSessionKey?: string;
@@ -209,6 +218,12 @@ interface WebSocketServerConfig {
   daemonKeyPair?: KeyPair;
   /** "required": refuse plaintext WebSocket clients that are not on this machine. */
   directE2ee?: DirectE2eePolicy;
+  /**
+   * false (PASEO_TRUST_LOOPBACK=false): with "required", a plaintext TCP client from this machine
+   * must prove it with the local credential in its hello (behind a userspace tailscaled, the
+   * phone also connects from 127.0.0.1). Default true.
+   */
+  trustLoopback?: boolean;
 }
 
 type WebSocketRuntimeMetrics = SessionRuntimeMetrics & CheckoutDiffMetrics;
@@ -618,6 +633,11 @@ export class VoiceAssistantWebSocketServer {
   });
   /** Sockets admitted by a password in the upgrade headers (COMPAT(headerAuth)). */
   private readonly passwordHeaderSockets = new WeakSet<WebSocketLike>();
+  /**
+   * Plaintext loopback sockets under PASEO_TRUST_LOOPBACK=false: admitted only by a hello with
+   * the local credential, anything else is refused with 4426.
+   */
+  private readonly localCredentialOnlySockets = new WeakSet<WebSocketLike>();
   /** Direct sockets that run the encrypted channel, with the mode they negotiated. */
   private readonly directSocketSecurityModes = new WeakMap<WebSocketLike, SecurityMode>();
   private readonly credentialSource: DaemonAuthConfig | undefined;
@@ -1061,7 +1081,15 @@ export class VoiceAssistantWebSocketServer {
         void this.attachDirectE2eeSocket(ws, request, wsConfig.daemonKeyPair);
         return;
       }
-      if (wsConfig.directE2ee === "required" && !isSameMachineRequest(request)) {
+      const trustLoopback = wsConfig.trustLoopback;
+      if (wsConfig.directE2ee === "required" && !isSameMachineRequest(request, { trustLoopback })) {
+        // PASEO_TRUST_LOOPBACK=false: a client from this machine may still prove itself with the
+        // local credential in its hello (it never sends a bearer header). Checked at the hello.
+        if (isSameMachineRequest(request) && !hasUpgradeCredential(request)) {
+          this.localCredentialOnlySockets.add(ws);
+          void this.attachAuthenticatedSocket(ws, request, password);
+          return;
+        }
         this.logger.warn(
           extractSocketRequestMetadata(request),
           "Rejected plaintext WebSocket from another machine (direct E2EE required)",
@@ -1999,6 +2027,7 @@ export class VoiceAssistantWebSocketServer {
     pending: PendingConnection,
   ): Promise<boolean> {
     if (pending.admission) return true;
+    if (this.refuseLoopbackWithoutLocalCredential(ws, message, pending)) return false;
     try {
       const binding = this.sessionTokenBinding(message, pending);
       const resolved = await resolveSessionAdmission({
@@ -2032,6 +2061,30 @@ export class VoiceAssistantWebSocketServer {
       }
       return false;
     }
+  }
+
+  /**
+   * PASEO_TRUST_LOOPBACK=false: a plaintext loopback socket must say hello with the local
+   * credential; a password or session token here may be a phone behind a userspace tailscaled.
+   */
+  private refuseLoopbackWithoutLocalCredential(
+    ws: WebSocketLike,
+    message: WSHelloMessage,
+    pending: PendingConnection,
+  ): boolean {
+    if (!this.localCredentialOnlySockets.has(ws)) return false;
+    if (message.auth?.kind === "localCredential") return false;
+    this.clearPendingConnection(ws);
+    pending.connectionLogger.warn(
+      { credential: message.auth?.kind ?? "none" },
+      "Rejected plaintext loopback WebSocket without the local credential",
+    );
+    try {
+      ws.close(WS_CLOSE_DIRECT_E2EE_REQUIRED, DIRECT_E2EE_REQUIRED_REASON);
+    } catch {
+      // The transport may already be closed.
+    }
+    return true;
   }
 
   private sessionTokenBinding(

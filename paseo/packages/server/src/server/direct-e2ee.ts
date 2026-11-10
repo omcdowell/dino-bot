@@ -12,6 +12,14 @@
  *
  * An old app that still sends the password in clear has already sent it by the time the daemon
  * refuses it; "required" makes that app fail visibly instead of working insecurely.
+ *
+ * PASEO_TRUST_LOOPBACK=false (with "required") drops the exemption for TCP: behind a userspace
+ * tailscaled (`--tun=userspace-networking`) the phone's connections reach the daemon from
+ * 127.0.0.1, so a loopback peer may be another machine. Then a plaintext TCP client is admitted
+ * only if it proves it runs as this user on this machine with the daemon's local credential
+ * (PASEO_HOME/local-credential, mode 600, rewritten at every start; the CLI, bot-dm and bot-room
+ * send it). Anything else gets 4426 like a client from another machine: a bearer header at once,
+ * a hello with a password or session token when it arrives. A local socket/pipe stays exempt.
  */
 export type DirectE2eePolicy = "optional" | "required";
 
@@ -27,9 +35,13 @@ interface RequestSocketLike {
  * one of this machine's own addresses (the installer listens on the tailnet IP only, so the local
  * CLI and bots connect from that IP to that IP). None of these bytes leave the machine.
  */
-export function isSameMachineRequest(request: RequestSocketLike): boolean {
+export function isSameMachineRequest(
+  request: RequestSocketLike,
+  options: { trustLoopback?: boolean } = {},
+): boolean {
   const remoteAddress = request.socket?.remoteAddress;
   if (!remoteAddress) return true;
+  if (options.trustLoopback === false) return false;
   return isLoopbackAddress(remoteAddress) || remoteAddress === request.socket?.localAddress;
 }
 
@@ -44,4 +56,14 @@ export function directE2eePolicyFromEnv(env: NodeJS.ProcessEnv = process.env): D
   return (env.PASEO_DIRECT_E2EE ?? "").trim().toLowerCase() === "required"
     ? "required"
     : "optional";
+}
+
+/**
+ * PASEO_TRUST_LOOPBACK: whether TCP from this machine (loopback, or this machine's own address)
+ * counts as "same machine" for PASEO_DIRECT_E2EE=required. Default true (unchanged behaviour);
+ * "false", "0", "no" or "off" turn it off.
+ */
+export function trustLoopbackFromEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  const value = (env.PASEO_TRUST_LOOPBACK ?? "").trim().toLowerCase();
+  return !["false", "0", "no", "off"].includes(value);
 }

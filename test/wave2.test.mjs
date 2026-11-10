@@ -118,6 +118,35 @@ describe("second person on one Mac: own tailscaled (R4)", () => {
     assert.equal(listenHost({ tailscale: { ...USERSPACE, windows: true }, nets: MAC_NETS }), "100.64.0.21");
     assert.equal(listenPlan({ tailscale: { running: false }, port: 1, nets: MAC_NETS }), null);
   });
+  it("daemon env: PASEO_TRUST_LOOPBACK=false only in userspace mode (loopback is the phone there)", async () => {
+    const { layout } = await import("../lib/util.mjs");
+    const { writeDaemonEnv, readEnvFile } = await import("../lib/config.mjs");
+    const L = layout({ HOME: tmp() });
+    const us = writeDaemonEnv(L, { port: 6747, listen: "127.0.0.1:6747", directEndpoints: [], userspace: true });
+    assert.equal(us.PASEO_TRUST_LOOPBACK, "false");
+    assert.equal(us.PASEO_DIRECT_E2EE, "required");
+    assert.equal(readEnvFile(L.envFile).PASEO_TRUST_LOOPBACK, "false");
+    // Setup again with a system Tailscale (or any normal install): not written, as before.
+    const sys = writeDaemonEnv(L, { port: 6747, listen: "100.64.0.9:6747", directEndpoints: [] });
+    assert.equal("PASEO_TRUST_LOOPBACK" in sys, false);
+    assert.equal(readEnvFile(L.envFile).PASEO_TRUST_LOOPBACK, undefined);
+    assert.equal(sys.PASEO_PASSWORD, us.PASEO_PASSWORD);
+  });
+  it("setup's CLI round trip gets PASEO_TRUST_LOOPBACK in userspace mode (so it uses the local credential)", async () => {
+    const { waitForAnswers } = await import("../lib/ready.mjs");
+    const seen = [];
+    const runCmd = async (_bin, _args, opts) => (seen.push(opts.env), { code: 0, stdout: "", stderr: "" });
+    await waitForAnswers({ paseoBin: "paseo", endpoint: "127.0.0.1:6747", password: "pw", paseoHome: "/p", home: "/h", trustLoopback: "false", runCmd });
+    await waitForAnswers({ paseoBin: "paseo", endpoint: "100.64.0.9:6747", password: "pw", paseoHome: "/p", home: "/h", runCmd });
+    assert.equal(seen[0].PASEO_TRUST_LOOPBACK, "false");
+    assert.equal("PASEO_TRUST_LOOPBACK" in seen[1], false);
+    assert.equal(seen[1].PASEO_PASSWORD, "pw");
+  });
+  it("setup passes listenPlan's userspace flag to the daemon env and the round trip", () => {
+    const src = readFileSync(join(HERE, "lib", "cli.mjs"), "utf8");
+    assert.match(src, /writeDaemonEnv\(L, \{[^}]*userspace: Boolean\(plan\.userspace\) \}\)/);
+    assert.match(src, /waitForAnswers\(\{[^}]*trustLoopback: daemonEnv\.PASEO_TRUST_LOOPBACK \}\)/);
+  });
   it("doctor accepts 127.0.0.1 for a userspace tailscaled, not for a system one", () => {
     assert.equal(checkListenScope({ listen: "127.0.0.1:6747", tailscale: USERSPACE, nets: MAC_NETS }).status, "ok");
     assert.equal(checkListenScope({ listen: "0.0.0.0:6747", tailscale: USERSPACE, nets: MAC_NETS }).status, "FAIL");

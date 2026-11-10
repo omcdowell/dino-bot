@@ -179,10 +179,26 @@ export function resolveDaemonPassword(host: string): string | undefined {
   return fromEnv && fromEnv.length > 0 ? fromEnv : undefined;
 }
 
+/**
+ * PASEO_TRUST_LOOPBACK=false is set for a daemon behind a userspace tailscaled (DinoBot's
+ * installer writes it to the daemon env, so the daemon's agents and bots inherit it). That
+ * daemon admits a plaintext client from this machine only with the local credential, so a
+ * matching local credential goes first, before PASEO_PASSWORD.
+ */
+function loopbackUntrusted(env: Readonly<Record<string, string | undefined>>): boolean {
+  const value = (env.PASEO_TRUST_LOOPBACK ?? "").trim().toLowerCase();
+  return ["false", "0", "no", "off"].includes(value);
+}
+
 export function resolveDaemonCredential(
   host: string,
   home: string,
+  env: Readonly<Record<string, string | undefined>> = process.env,
 ): { kind: "password"; password: string } | { kind: "localCredential"; token: string } | null {
+  if (loopbackUntrusted(env)) {
+    const token = readLocalCredentialForTarget(home, host);
+    if (token) return { kind: "localCredential", token };
+  }
   const password = resolveDaemonPassword(host);
   if (password) return { kind: "password", password };
   const token = readLocalCredentialForTarget(home, host);

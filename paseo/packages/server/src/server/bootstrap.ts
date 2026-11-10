@@ -174,6 +174,7 @@ import {
   DIRECT_E2EE_REQUIRED_MESSAGE,
   directE2eePolicyFromEnv,
   isSameMachineRequest,
+  trustLoopbackFromEnv,
 } from "./direct-e2ee.js";
 import { createRelayRuntime, type RelayRuntime } from "./relay-runtime.js";
 import { admitSecuredRelaySocket } from "./websocket/secure-relay-ingress.js";
@@ -830,7 +831,10 @@ export async function createPaseoDaemon(
   const handleFileDownload = async (req: express.Request, res: express.Response): Promise<void> => {
     // PASEO_DIRECT_E2EE=required: file contents never cross the network in clear. Apps read
     // files over the encrypted socket; a plain-HTTP download from another machine is refused.
-    if (directE2eePolicyFromEnv() === "required" && !isSameMachineRequest(req)) {
+    if (
+      directE2eePolicyFromEnv() === "required" &&
+      !isSameMachineRequest(req, { trustLoopback: trustLoopbackFromEnv() })
+    ) {
       res.status(426).json({ error: DIRECT_E2EE_REQUIRED_MESSAGE });
       return;
     }
@@ -1715,6 +1719,7 @@ export async function createPaseoDaemon(
                 startPaused: true,
                 daemonKeyPair: daemonKeyPair.keyPair,
                 directE2ee: directE2eePolicyFromEnv(),
+                trustLoopback: trustLoopbackFromEnv(),
               },
               workspaceAutoName,
               daemonAuth,

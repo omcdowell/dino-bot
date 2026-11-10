@@ -91,8 +91,12 @@ curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
   socket (passed as `--socket`). Later `dinobot` commands remember both.
 - `DINOBOT_PORT`: a port the other person's DinoBot does not use.
 - A userspace tailscaled has no network interface, so DinoBot listens on `127.0.0.1:<port>` and
-  your tailscaled hands it your phone's connections. Note that it forwards your tailnet to
-  **every** `127.0.0.1` port on the Mac, other users' included.
+  your tailscaled hands it your phone's connections. Because they arrive from `127.0.0.1`, setup
+  turns off DinoBot's "same computer" exemption (`PASEO_TRUST_LOOPBACK=false` in
+  `~/.dinobot/daemon.env`): a connection from `127.0.0.1` is treated like one from the network. The
+  app must use its end-to-end encrypted connection (an outdated app is refused with "update the
+  app"), and the only clients let in without it are your own DinoBot tools (`paseo`, your bots),
+  which prove themselves with the daemon's local credential, a file only your account can read.
 - Close your home folder to other users first (`chmod 700 ~`; macOS makes it readable to every
   standard user). DinoBot runs only while your account is logged in (fast user switching keeps it
   running).

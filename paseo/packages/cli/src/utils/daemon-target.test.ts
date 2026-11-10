@@ -67,3 +67,33 @@ test("CLI selects an explicit password before a matching local credential and ne
     await rm(home, { recursive: true, force: true });
   }
 });
+
+test("PASEO_TRUST_LOOPBACK=false: a matching local credential goes before PASEO_PASSWORD", async () => {
+  const home = await mkdtemp(join(tmpdir(), "paseo-cli-loopback-"));
+  const previousPassword = process.env.PASEO_PASSWORD;
+  process.env.PASEO_PASSWORD = "from-env";
+  try {
+    const token = "b".repeat(43);
+    await writeFile(join(home, "paseo.pid"), JSON.stringify({ listen: "127.0.0.1:6767" }));
+    await writeFile(join(home, "local-credential"), token);
+    const untrusted = { PASEO_TRUST_LOOPBACK: "false" };
+    expect(resolveDaemonCredential("127.0.0.1:6767", home, untrusted)).toEqual({
+      kind: "localCredential",
+      token,
+    });
+    // Another daemon: no local credential, the password as before.
+    expect(resolveDaemonCredential("127.0.0.1:7777", home, untrusted)).toEqual({
+      kind: "password",
+      password: "from-env",
+    });
+    // Default: the password first, unchanged.
+    expect(resolveDaemonCredential("127.0.0.1:6767", home, {})).toEqual({
+      kind: "password",
+      password: "from-env",
+    });
+  } finally {
+    if (previousPassword === undefined) delete process.env.PASEO_PASSWORD;
+    else process.env.PASEO_PASSWORD = previousPassword;
+    await rm(home, { recursive: true, force: true });
+  }
+});

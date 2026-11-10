@@ -57,8 +57,9 @@ Push notifications and Live Activities are off unless you turn them on with
 Flags: `--yes` (defaults, no questions), `--answers '{"extras":"coordinator"}'`,
 `--service systemd|launchd|none`, `--port`, `--no-herdr`. `DINOBOT_PORT` picks the port.
 `DINOBOT_TAILSCALE_BIN` / `DINOBOT_TAILSCALE_SOCKET` pick the Tailscale CLI and its daemon's socket (a
-userspace tailscaled of your own: the daemon then listens on `127.0.0.1`; see the README, "Second
-person on the same Mac").
+userspace tailscaled of your own: the daemon then listens on `127.0.0.1` with
+`PASEO_TRUST_LOOPBACK=false`, so connections from `127.0.0.1` must also be end-to-end encrypted unless
+they carry the daemon's local credential; see the README, "Second person on the same Mac").
 
 ## pi
 

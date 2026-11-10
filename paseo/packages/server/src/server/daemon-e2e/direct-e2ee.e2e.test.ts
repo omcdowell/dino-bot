@@ -22,6 +22,7 @@ import { DaemonClient } from "../test-utils/index.js";
 import { createTestPaseoDaemon, type TestPaseoDaemon } from "../test-utils/paseo-daemon.js";
 import { hashDaemonPassword } from "../auth.js";
 import { loadOrCreateDaemonKeyPair } from "../daemon-keypair.js";
+import { readLocalCredential } from "../local-credential.js";
 import { generateKeyPair, exportPublicKey } from "@getpaseo/relay/e2ee";
 
 const PASSWORD = "dinobot-e2ee-test-password-0123456789";
@@ -131,7 +132,33 @@ const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   while (cleanups.length > 0) await cleanups.pop()!().catch(() => undefined);
   delete process.env.PASEO_DIRECT_E2EE;
+  delete process.env.PASEO_TRUST_LOOPBACK;
 });
+
+/** A raw plaintext socket that sends a hello (no upgrade headers) and reports how it was closed. */
+async function rawHelloClose(
+  port: number,
+  auth: Record<string, string>,
+): Promise<{ code: number; reason: string }> {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const closed = new Promise<{ code: number; reason: string }>((resolve) =>
+    ws.once("close", (code, reason) => resolve({ code, reason: reason.toString() })),
+  );
+  await new Promise<void>((resolve, reject) => {
+    ws.once("open", () => resolve());
+    ws.once("error", reject);
+  });
+  ws.send(
+    JSON.stringify({
+      type: "hello",
+      clientId: "clsk_raw_hello",
+      clientType: "cli",
+      protocolVersion: 1,
+      auth,
+    }),
+  );
+  return closed;
+}
 
 async function startDaemon(options: { listen?: string } = {}): Promise<{
   daemon: TestPaseoDaemon;
@@ -343,6 +370,117 @@ describe("direct E2EE", () => {
     // This machine (CLI, desktop on the same box) still downloads over HTTP.
     const local = await httpDownload(download, daemonIp);
     expect(local).toEqual({ status: 200, body: secret });
+  });
+
+  test("PASEO_TRUST_LOOPBACK=false: a plaintext loopback client with the password is refused with 4426", async () => {
+    // Behind a userspace tailscaled the phone connects from 127.0.0.1, like an old app here.
+    process.env.PASEO_DIRECT_E2EE = "required";
+    process.env.PASEO_TRUST_LOOPBACK = "false";
+    const { daemon } = await startDaemon();
+    const plain = track(
+      new SharedDaemonClient({
+        url: `ws://127.0.0.1:${daemon.port}/ws`,
+        clientId: "clsk_old_app_loopback",
+        password: PASSWORD,
+        reconnect: { enabled: false },
+      }),
+    );
+    await expect(plain.connect()).rejects.toThrow();
+    expect(plain.lastError).toBe("Encrypted connection required: update the app");
+    // Password or session token only in the hello (no bearer header): refused at the hello.
+    expect(await rawHelloClose(daemon.port, { kind: "password", password: PASSWORD })).toEqual({
+      code: 4426,
+      reason: "Encrypted connection required: update the app",
+    });
+    expect((await rawHelloClose(daemon.port, { kind: "sessionToken", token: "x" })).code).toBe(
+      4426,
+    );
+  });
+
+  test("PASEO_TRUST_LOOPBACK=false: an E2EE loopback client is admitted", async () => {
+    process.env.PASEO_DIRECT_E2EE = "required";
+    process.env.PASEO_TRUST_LOOPBACK = "false";
+    const { daemon, publicKeyB64 } = await startDaemon();
+    const encrypted = track(
+      new SharedDaemonClient({
+        url: `ws://127.0.0.1:${daemon.port}/ws`,
+        clientId: "clsk_new_app_loopback",
+        password: PASSWORD,
+        reconnect: { enabled: false },
+        e2ee: { enabled: true, daemonPublicKeyB64: publicKeyB64 },
+      }),
+    );
+    await encrypted.connect();
+    expect((await encrypted.fetchAgents()).entries).toEqual([]);
+  });
+
+  test("PASEO_TRUST_LOOPBACK=false: this user's CLI (local credential) still works over loopback; a wrong one does not", async () => {
+    process.env.PASEO_DIRECT_E2EE = "required";
+    process.env.PASEO_TRUST_LOOPBACK = "false";
+    const { daemon } = await startDaemon();
+    const token = readLocalCredential(daemon.paseoHome);
+    expect(token).toBeTruthy();
+    const cli = track(
+      new SharedDaemonClient({
+        url: `ws://127.0.0.1:${daemon.port}/ws`,
+        clientId: "clsk_local_cli_credential",
+        localCredential: () => token ?? undefined,
+        reconnect: { enabled: false },
+      }),
+    );
+    await cli.connect();
+    expect((await cli.fetchAgents()).entries).toEqual([]);
+
+    const wrong = track(
+      new SharedDaemonClient({
+        url: `ws://127.0.0.1:${daemon.port}/ws`,
+        clientId: "clsk_wrong_local_credential",
+        localCredential: () => "A".repeat(43),
+        reconnect: { enabled: false },
+      }),
+    );
+    await expect(wrong.connect()).rejects.toThrow();
+    expect(wrong.lastError).not.toBeNull();
+  });
+
+  test("PASEO_TRUST_LOOPBACK=false: a plain-HTTP download from loopback gets 426", async () => {
+    process.env.PASEO_DIRECT_E2EE = "required";
+    process.env.PASEO_TRUST_LOOPBACK = "false";
+    const { daemon, publicKeyB64 } = await startDaemon();
+    const workspace = await mkdtemp(path.join(tmpdir(), "paseo-direct-e2ee-loopback-"));
+    cleanups.push(() => rm(workspace, { recursive: true, force: true }));
+    await writeFile(path.join(workspace, "notes.txt"), "secret\n");
+    const encrypted = track(
+      new SharedDaemonClient({
+        url: `ws://127.0.0.1:${daemon.port}/ws`,
+        clientId: "clsk_new_app_loopback_files",
+        password: PASSWORD,
+        reconnect: { enabled: false },
+        e2ee: { enabled: true, daemonPublicKeyB64: publicKeyB64 },
+      }),
+    );
+    await encrypted.connect();
+    const token = await encrypted.requestDownloadToken(workspace, "notes.txt");
+    const refused = await httpDownload(
+      { host: "127.0.0.1", port: daemon.port, token: token.token! },
+      "127.0.0.1",
+    );
+    expect(refused.status).toBe(426);
+  });
+
+  test("default (PASEO_TRUST_LOOPBACK unset): a plaintext loopback client is still admitted under required", async () => {
+    process.env.PASEO_DIRECT_E2EE = "required";
+    const { daemon } = await startDaemon();
+    const local = track(
+      new SharedDaemonClient({
+        url: `ws://127.0.0.1:${daemon.port}/ws`,
+        clientId: "clsk_loopback_default",
+        password: PASSWORD,
+        reconnect: { enabled: false },
+      }),
+    );
+    await local.connect();
+    expect((await local.fetchAgents()).entries).toEqual([]);
   });
 
   test("the encrypted channel still checks the password", async () => {
