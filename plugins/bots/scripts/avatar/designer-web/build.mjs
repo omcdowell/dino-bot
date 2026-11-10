@@ -13,6 +13,7 @@ const out = resolve(process.argv[2] ?? join(here, "dist"));
 const req = createRequire(join(paseo, "package.json"));
 const esbuild = req("esbuild");
 const nm = join(paseo, "node_modules");
+const client = resolve(here, "../../../client") + "/";
 
 mkdirSync(out, { recursive: true });
 await esbuild.build({
@@ -25,6 +26,17 @@ await esbuild.build({
   nodePaths: [nm, join(paseo, "packages/app/node_modules")],
   mainFields: ["browser", "module", "main"],
   resolveExtensions: [".web.tsx", ".web.ts", ".web.js", ".tsx", ".ts", ".mjs", ".js", ".json"],
+  plugins: [
+    {
+      // Plugin client code gets the host's `react-native` (inset-aware ScrollView, see host-rn.tsx).
+      name: "host-react-native",
+      setup(b) {
+        b.onResolve({ filter: /^react-native$/ }, (args) =>
+          args.importer.startsWith(client) ? { path: join(here, "host-rn.tsx") } : undefined,
+        );
+      },
+    },
+  ],
   alias: {
     react: join(nm, "react"),
     "react-dom": join(nm, "react-dom"),

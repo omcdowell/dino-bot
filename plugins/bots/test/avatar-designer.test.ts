@@ -276,3 +276,19 @@ test("the designer is bundled-pack only: no fetch / network in the designer file
     assert.doesNotMatch(src, /\bfetch\(|useRpc|XMLHttpRequest/, f);
   }
 });
+
+test("AH1 header and outline: no title, no host top inset on the main scroll, one selected ring width", () => {
+  const src = readFileSync(join(import.meta.dirname, "..", "client", "avatar-designer.tsx"), "utf8");
+  // No "Avatar" title between X and Save.
+  assert.doesNotMatch(src, />Avatar</);
+  // The vertical scroll is React Native's own ScrollView, not the host's inset-aware one (the gap under the header).
+  assert.match(src, /const PlainScrollView = Animated\.ScrollView;/);
+  assert.match(src, /<PlainScrollView scrollEnabled=\{!dragging\}/);
+  assert.doesNotMatch(src, /<ScrollView scrollEnabled=\{!dragging\}/);
+  // One ring: no inner overlay border on a selected tile, and tiles, None and the colour circles share one width.
+  assert.doesNotMatch(src, /borderWidth: 1, borderColor: DINO_GREEN/);
+  assert.match(src, /export const SELECTED_RING_WIDTH = 2\.5;/);
+  const widths = [...src.matchAll(/borderWidth: ([\w.]+)/g)].map((m) => m[1]);
+  assert.equal(widths.filter((w) => w === "SELECTED_RING_WIDTH").length, 3, "tile, None tile and colour ring");
+  assert.ok(!widths.includes("2.5"), "no literal 2.5 left");
+});

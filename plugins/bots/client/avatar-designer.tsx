@@ -20,6 +20,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  Animated,
   Modal as NativeModal,
   PanResponder,
   Platform,
@@ -71,6 +72,18 @@ type Colors = PluginTheme["colors"];
 const DANGER = "#E5484D";
 const NOOP = () => {};
 const NO_SELECT = (Platform.OS === "web" ? { userSelect: "none" } : {}) as ViewStyle;
+/**
+ * The selected outline: one green ring, the same width on the square tiles (Character, Eyes, Accessories,
+ * None) and the Colour circles. Unselected tiles keep the same width in their border colour (no layout jump).
+ */
+export const SELECTED_RING_WIDTH = 2.5;
+/**
+ * The designer's vertical scroll. Not the `react-native` ScrollView plugins get: the host's one adds the
+ * phone home's top-bar room (its PluginScrollTopInset context, which reaches this full-screen Modal through
+ * React context because the designer opens from a sheet on the home). The designer draws its own header, so
+ * that room was a large empty gap under X / Save. Animated.ScrollView is React Native's own ScrollView.
+ */
+const PlainScrollView = Animated.ScrollView;
 
 /* ---------- static art ---------- */
 
@@ -157,7 +170,7 @@ const TileView = memo(function TileView({
         height: size,
         borderRadius: size * 0.24,
         // One ring width in every state (designer-b r8): only its colour changes.
-        borderWidth: 2,
+        borderWidth: SELECTED_RING_WIDTH,
         borderColor: ring,
         backgroundColor: c.surface1,
         overflow: "hidden",
@@ -172,7 +185,6 @@ const TileView = memo(function TileView({
       <View pointerEvents="none" style={{ position: "absolute", left: pad, top: pad, right: pad, bottom: pad }}>
         <Svg xml={tile.xml} width="100%" height="100%" />
       </View>
-      {on ? <View pointerEvents="none" style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0, borderRadius: size * 0.24, borderWidth: 1, borderColor: DINO_GREEN }} /> : null}
       {badge ? (
         <View pointerEvents="none" style={{ position: "absolute", right: 3, top: 3, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: DINO_GREEN, paddingHorizontal: 4, alignItems: "center", justifyContent: "center" }}>
           <Text style={{ fontSize: 10.5, fontWeight: "700", color: "#2B3318" }}>{badge}</Text>
@@ -566,7 +578,7 @@ export function DesignerBody({ botName, initial, pack, theme, Svg, onCancel, onS
         onPick={onAcc}
         label={noneTile.name}
         testID={`${prefix}-none`}
-        style={{ width: size, height: size, borderRadius: size * 0.24, borderWidth: 2, borderColor: look.accessories.length ? c.border : DINO_GREEN, backgroundColor: c.surface1, alignItems: "center", justifyContent: "center" }}
+        style={{ width: size, height: size, borderRadius: size * 0.24, borderWidth: SELECTED_RING_WIDTH, borderColor: look.accessories.length ? c.border : DINO_GREEN, backgroundColor: c.surface1, alignItems: "center", justifyContent: "center" }}
       >
         <Icon name="Ban" size={Math.round(size * 0.45)} color={c.foregroundMuted} />
       </Tap>
@@ -675,12 +687,11 @@ export function DesignerBody({ botName, initial, pack, theme, Svg, onCancel, onS
           <View style={{ flex: 1, alignItems: "flex-start" }}>
             <RoundButton icon="X" label="Cancel" onPress={onCancel} c={c} testID="avatar-cancel" />
           </View>
-          <Text style={{ fontSize: 17, fontWeight: "700", color: c.foreground }}>Avatar</Text>
           <View style={{ flex: 1, alignItems: "flex-end" }}>
             <Pill label="Save" primary c={c} onPress={() => onSave(designer.state.look)} testID="avatar-save" />
           </View>
         </View>
-        <ScrollView scrollEnabled={!dragging} contentContainerStyle={{ paddingBottom: 32 }}>
+        <PlainScrollView scrollEnabled={!dragging} contentInsetAdjustmentBehavior="never" contentContainerStyle={{ paddingBottom: 32 }} testID="avatar-scroll">
           <View style={{ flexDirection: "row", paddingHorizontal: 16, paddingTop: 12, gap: 14 }}>
             <Stage
               size={small}
@@ -727,7 +738,7 @@ export function DesignerBody({ botName, initial, pack, theme, Svg, onCancel, onS
                   onPick={onColour}
                   label={name}
                   testID={`avatar-colour-${hex === "original" ? "original" : hex.slice(1)}`}
-                  style={{ width: 46, height: 46, borderRadius: 23, borderWidth: 2.5, borderColor: on ? DINO_GREEN : "transparent", alignItems: "center", justifyContent: "center" }}
+                  style={{ width: 46, height: 46, borderRadius: 23, borderWidth: SELECTED_RING_WIDTH, borderColor: on ? DINO_GREEN : "transparent", alignItems: "center", justifyContent: "center" }}
                 >
                   {hex === "original" ? (
                     <View pointerEvents="none" style={{ width: 36, height: 36 }}>
@@ -748,7 +759,7 @@ export function DesignerBody({ botName, initial, pack, theme, Svg, onCancel, onS
           <Row label="Accessories" count={count.accessories} c={c} onTouchStart={exempt} testID="avatar-row-acc">
             {accRow(66, "avatar-acc")}
           </Row>
-        </ScrollView>
+        </PlainScrollView>
       </View>
     </SafeAreaView>
   );
