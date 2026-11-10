@@ -47,7 +47,7 @@ curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
 
 1. Installez [Tailscale](https://tailscale.com/download) sur l'ordinateur et sur votre téléphone, connectés
    au même compte. S'il manque, l'installation vous guide.
-2. Installez l'app DinoBot sur votre iPhone. <!-- TODO: TestFlight / App Store link -->
+2. Installez l'app DinoBot sur votre iPhone. Rejoignez la bêta TestFlight : https://testflight.apple.com/join/QZm1NqTF
 3. Scannez le QR code affiché par l'installeur. Connectez-vous à votre fournisseur d'IA dans l'app, et c'est parti.
 
 ## App de bureau (version de base)

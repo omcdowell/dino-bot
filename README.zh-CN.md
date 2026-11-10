@@ -46,7 +46,7 @@ curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
 
 1. 在电脑和手机上安装 [Tailscale](https://tailscale.com/download)，并登录同一个账号。
    如果尚未安装，设置程序会一步步引导你完成。
-2. 在 iPhone 上安装 DinoBot 应用。 <!-- TODO: TestFlight / App Store link -->
+2. 在 iPhone 上安装 DinoBot 应用。 加入 TestFlight 测试版：https://testflight.apple.com/join/QZm1NqTF
 3. 扫描安装程序显示的二维码。在应用中登录你的 AI 服务商，即可开始聊天。
 
 ## 桌面应用（基础版）
