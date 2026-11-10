@@ -75,6 +75,28 @@ from the release page.
 - An AI subscription or API key (Claude, ChatGPT, OpenRouter, …)
 - No root: the installer never uses sudo
 
+## Second person on the same Mac
+
+Each person needs their own macOS account and their own tailnet. The Mac's Tailscale app belongs
+to whoever signed it in; setup stops if it belongs to another macOS user rather than put your bots
+on their tailnet. Run your own userspace `tailscaled` in your home folder instead
+(`--tun=userspace-networking --socket=<path>`), sign it in to your tailnet, and point setup at it:
+
+```sh
+export DINOBOT_TAILSCALE_BIN=<your tailscale CLI> DINOBOT_TAILSCALE_SOCKET=<your tailscaled socket> DINOBOT_PORT=6747
+curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
+```
+
+- `DINOBOT_TAILSCALE_BIN`: the Tailscale CLI to use. `DINOBOT_TAILSCALE_SOCKET`: its daemon's
+  socket (passed as `--socket`). Later `dinobot` commands remember both.
+- `DINOBOT_PORT`: a port the other person's DinoBot does not use.
+- A userspace tailscaled has no network interface, so DinoBot listens on `127.0.0.1:<port>` and
+  your tailscaled hands it your phone's connections. Note that it forwards your tailnet to
+  **every** `127.0.0.1` port on the Mac, other users' included.
+- Close your home folder to other users first (`chmod 700 ~`; macOS makes it readable to every
+  standard user). DinoBot runs only while your account is logged in (fast user switching keeps it
+  running).
+
 ## Learn more
 
 - [How the installer works](docs/how-it-works.md): steps, commands, flags

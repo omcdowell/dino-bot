@@ -6,8 +6,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync 
 import http from "node:http";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
-import { gitGuardWrapper, listenPlan, probeHostFor } from "../lib/config.mjs";
-import { detectTailscale } from "../lib/detect.mjs";
+import net from "node:net";
+import { gitGuardWrapper, listenHost, listenPlan, probeHostFor, stickyEnv as stickyEnvOf } from "../lib/config.mjs";
+import { detectTailscale, foreignTailscale, freePort } from "../lib/detect.mjs";
+import { foreignTailscaleMessage } from "../lib/cli.mjs";
 import { DIRECT_OFFER_BASE_URL } from "../lib/offer.mjs";
 import { phoneSafeMethod } from "../lib/signin.mjs";
 import { tailscaleSteps } from "../lib/tailscale.mjs";
@@ -26,6 +28,8 @@ mkdirSync(TMP, { recursive: true });
 const tmp = () => mkdtempSync(join(TMP, "t-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 const TS = { running: true, dnsName: "box.tail1.ts.net", ip: "100.64.0.7" };
+// This computer's interfaces with the tailnet address on one (system Tailscale: utun / tailscale0).
+const LOCAL_TS = { lo: [{ address: "127.0.0.1" }], utun4: [{ address: "100.64.0.7" }] };
 
 describe("product names (one place)", () => {
   const p = JSON.parse(readFileSync(join(HERE, "lib", "product.json"), "utf8"));
@@ -54,7 +58,7 @@ describe("product names (one place)", () => {
 
 describe("Tailscale only (owner decision, 27 Oct)", () => {
   it("listens on the tailnet address; no plan at all without Tailscale (no 0.0.0.0 fallback)", () => {
-    assert.deepEqual(listenPlan({ tailscale: TS, port: 6767 }), { listen: "100.64.0.7:6767", probeHost: "100.64.0.7" });
+    assert.deepEqual(listenPlan({ tailscale: TS, port: 6767, nets: LOCAL_TS }), { listen: "100.64.0.7:6767", probeHost: "100.64.0.7" });
     assert.equal(listenPlan({ tailscale: { running: false }, port: 6767 }), null);
     assert.equal(listenPlan({ tailscale: { running: true, ip: null }, port: 6767 }), null);
   });
@@ -81,7 +85,8 @@ describe("Tailscale only (owner decision, 27 Oct)", () => {
     assert.equal(checkListenScope({ listen: "0.0.0.0:6767", tailscale: TS }).status, "FAIL");
     assert.equal(checkListenScope({ listen: "100.64.0.7:6767", tailscale: { running: false } }).status, "FAIL");
     assert.equal(checkListenScope({ listen: "100.64.0.7:6767", tailscale: { ...TS, ip: "100.64.0.9" } }).status, "FAIL");
-    assert.equal(checkListenScope({ listen: "100.64.0.7:6767", tailscale: TS }).status, "ok");
+    assert.equal(checkListenScope({ listen: "100.64.0.7:6767", tailscale: TS, nets: LOCAL_TS }).status, "ok");
+    assert.equal(checkListenScope({ listen: "127.0.0.1:6767", tailscale: TS, nets: LOCAL_TS }).status, "FAIL", "loopback with a system Tailscale: still an old install");
   });
   it("detects a stopped Tailscale from a fake CLI, and a missing one", async () => {
     const dir = tmp();
@@ -94,6 +99,81 @@ describe("Tailscale only (owner decision, 27 Oct)", () => {
     assert.equal(off.running, false);
     const none = await detectTailscale({ env: { DINOBOT_TAILSCALE_BIN: join(dir, "nope") } });
     assert.equal(none.installed, false);
+  });
+});
+
+describe("second person on one Mac: own tailscaled (R4)", () => {
+  // Status of a userspace tailscaled on its own tailnet: an address that is on no local interface.
+  const USERSPACE = { running: true, dnsName: "second-mac.tail9.ts.net", ip: "100.64.0.21" };
+  const MAC_NETS = { lo0: [{ address: "127.0.0.1" }], en0: [{ address: "192.168.1.20" }], utun4: [{ address: "100.64.0.9" }] };
+  it("tailnet address not on this computer: listen and probe on 127.0.0.1, QR keeps the tailnet name and IP", () => {
+    assert.deepEqual(listenPlan({ tailscale: USERSPACE, port: 6747, nets: MAC_NETS }), { listen: "127.0.0.1:6747", probeHost: "127.0.0.1", userspace: true });
+    assert.equal(listenHost({ tailscale: USERSPACE, nets: MAC_NETS }), "127.0.0.1");
+    assert.deepEqual(offerEndpoints({ port: 6747, tailscale: USERSPACE }), ["second-mac.tail9.ts.net:6747", "100.64.0.21:6747"]);
+  });
+  it("default install unchanged: a local tailnet address (system Tailscale) is listened on directly", () => {
+    const sys = { ...USERSPACE, ip: "100.64.0.9" };
+    assert.deepEqual(listenPlan({ tailscale: sys, port: 6767, nets: MAC_NETS }), { listen: "100.64.0.9:6767", probeHost: "100.64.0.9" });
+    // WSL with the Windows Tailscale keeps its own rule (usable only when local; never loopback).
+    assert.equal(listenHost({ tailscale: { ...USERSPACE, windows: true }, nets: MAC_NETS }), "100.64.0.21");
+    assert.equal(listenPlan({ tailscale: { running: false }, port: 1, nets: MAC_NETS }), null);
+  });
+  it("doctor accepts 127.0.0.1 for a userspace tailscaled, not for a system one", () => {
+    assert.equal(checkListenScope({ listen: "127.0.0.1:6747", tailscale: USERSPACE, nets: MAC_NETS }).status, "ok");
+    assert.equal(checkListenScope({ listen: "0.0.0.0:6747", tailscale: USERSPACE, nets: MAC_NETS }).status, "FAIL");
+  });
+  it("DINOBOT_TAILSCALE_SOCKET is passed to the CLI as --socket (and sticks for later commands)", async () => {
+    const dir = tmp();
+    const fake = join(dir, "tailscale");
+    const log = join(dir, "args");
+    writeFileSync(fake, `#!/bin/sh\necho "$@" > '${log}'\necho '${JSON.stringify({ BackendState: "Running", Self: { DNSName: "second-mac.tail9.ts.net.", TailscaleIPs: ["100.64.0.21"] } })}'\n`, { mode: 0o755 });
+    const sock = join(dir, "tailscaled.sock");
+    const t = await detectTailscale({ env: { DINOBOT_TAILSCALE_BIN: fake, DINOBOT_TAILSCALE_SOCKET: sock } });
+    assert.equal(readFileSync(log, "utf8").trim(), `--socket ${sock} status --json`);
+    assert.deepEqual([t.running, t.ip, t.dnsName], [true, "100.64.0.21", "second-mac.tail9.ts.net"]);
+    await detectTailscale({ env: { DINOBOT_TAILSCALE_BIN: fake } });
+    assert.equal(readFileSync(log, "utf8").trim(), "status --json", "no socket: CLI default, as before");
+    // Without DINOBOT_TAILSCALE_BIN the socket goes to the usual CLIs.
+    await detectTailscale({ env: { DINOBOT_TAILSCALE_SOCKET: sock }, bins: [fake] });
+    assert.equal(readFileSync(log, "utf8").trim(), `--socket ${sock} status --json`);
+    assert.equal(stickyEnvOf({ DINOBOT_TAILSCALE_BIN: "/b/tailscale", DINOBOT_TAILSCALE_SOCKET: "/s/ts.sock" }), 'export DINOBOT_TAILSCALE_BIN="/b/tailscale"\nexport DINOBOT_TAILSCALE_SOCKET="/s/ts.sock"\n');
+  });
+  describe("refuses a system Tailscale that belongs to another macOS user", () => {
+    const APP = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
+    const SYS = { running: true, dnsName: "owner-mac.tail1.ts.net", ip: "100.64.0.9" };
+    const nameOf = async (u) => ({ 501: "alex", 502: "sam" })[u] ?? "";
+    const ask = (ps, extra = {}) => foreignTailscale({ env: {}, tailscale: SYS, os: "darwin", uid: 502, ps, nameOf, ...extra });
+    it("the menu-bar app runs only for someone else: refuse, naming them", async () => {
+      const ps = `  0 /usr/libexec/something\n501 ${APP}\n502 /bin/zsh\n  0 /Library/SystemExtensions/X/io.tailscale.ipn.macsys.network-extension.systemextension/Contents/MacOS/io.tailscale.ipn.macsys.network-extension\n`;
+      assert.deepEqual(await ask(ps), { owners: ["alex (uid 501)"] });
+      const msg = foreignTailscaleMessage({ owners: ["alex (uid 501)"] }, SYS);
+      assert.match(msg, /belongs to another macOS user \(alex \(uid 501\)\)/);
+      assert.match(msg, /owner-mac\.tail1\.ts\.net/);
+      assert.match(msg, /DINOBOT_TAILSCALE_SOCKET=/);
+      assert.match(msg, /Nothing was started/);
+    });
+    it("no clear evidence: no refusal", async () => {
+      assert.equal(await ask(`501 ${APP}\n502 ${APP}\n`), null, "the app runs for us too");
+      assert.equal(await ask(`502 ${APP}\n`), null, "ours");
+      assert.equal(await ask("  0 /usr/sbin/tailscaled\n501 /bin/zsh\n"), null, "no app process (CLI-only / unattended)");
+      assert.equal(await ask(`501 ${APP} status --json\n`), null, "someone's CLI call is not the app");
+      assert.equal(await ask(`501 ${APP}\n`, { os: "linux" }), null, "macOS only");
+      assert.equal(await ask(`501 ${APP}\n`, { env: { DINOBOT_TAILSCALE_SOCKET: "/s" } }), null, "own tailscaled");
+      assert.equal(await ask(`501 ${APP}\n`, { env: { DINOBOT_TAILSCALE_BIN: "/usr/local/bin/tailscale" } }), null, "explicit choice");
+      assert.equal(await ask(`501 ${APP}\n`, { tailscale: { running: false } }), null);
+    });
+  });
+  it("freePort probes the daemon's own address too (a port held on one address is skipped)", async () => {
+    const base = 47000 + Math.floor(Math.random() * 1000);
+    const srv = net.createServer();
+    await new Promise((r) => srv.listen(base, "127.0.0.1", r));
+    try {
+      assert.equal(await freePort(base, ["127.0.0.1", "0.0.0.0"]), base + 1);
+      assert.equal(await freePort(base, "127.0.0.1"), base + 1);
+      assert.equal(await freePort(base + 1, [null, "0.0.0.0"]), base + 1, "no listen host yet: 0.0.0.0 only, as before");
+    } finally {
+      await new Promise((r) => srv.close(r));
+    }
   });
 });
 
