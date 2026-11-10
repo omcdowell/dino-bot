@@ -15,6 +15,11 @@ Rules (28 Oct, "protections not to continually burn credit"; private repo, Free 
   - no `fail-fast: false`, no `continue-on-error`
   - a job on a macOS runner (10x minutes) `needs` test and every Linux build job
   - build-linux and build-macos run the same steps (one build recipe)
+
+One exemption from the tag-only rule (EXEMPT_TRIGGERS): gitleaks.yml, the secret scan, must run on
+every push and PR to main or it cannot catch a leak before a release. It is a single short Linux job
+(public repo, so no minutes billed); only its exact trigger is exempt and every other rule still
+applies to it, plus: Linux runners only.
 """
 import re
 import sys
@@ -24,6 +29,10 @@ import yaml
 
 LIMITS = {"test": 10, "release": 15}
 DEFAULT_LIMIT = 30
+# file name -> the one trigger that file may have instead of `on: push: tags:` (see docstring).
+EXEMPT_TRIGGERS = {
+    "gitleaks.yml": {"push": {"branches": ["main"]}, "pull_request": {"branches": ["main"]}},
+}
 
 
 def load(path):
@@ -51,7 +60,13 @@ def policy(d):
         w = load(f)
         name = f.name
         on = w.get("on")
-        if not (isinstance(on, dict) and list(on) == ["push"] and isinstance(on["push"], dict)
+        if name in EXEMPT_TRIGGERS:
+            if on != EXEMPT_TRIGGERS[name]:
+                errs.append(f"{name}: trigger must be exactly {EXEMPT_TRIGGERS[name]!r}, got {on!r}")
+            for j, job in (w.get("jobs") or {}).items():
+                if not all(isinstance(r, str) and r.startswith("ubuntu") for r in runners(job)):
+                    errs.append(f"{name}: job {j}: an exempt-trigger workflow runs on Linux only")
+        elif not (isinstance(on, dict) and list(on) == ["push"] and isinstance(on["push"], dict)
                 and list(on["push"]) == ["tags"] and on["push"]["tags"]):
             errs.append(f"{name}: trigger must be only `on: push: tags: [...]`, got {on!r}")
         c = w.get("concurrency")
