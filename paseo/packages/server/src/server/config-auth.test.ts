@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, stat, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -56,5 +56,17 @@ describe("daemon auth config", () => {
     expect(
       await isBearerTokenValidAsync({ password: config.auth?.password, token: "from-env" }),
     ).toBe(true);
+  });
+
+  test("PASEO_PASSWORD keeps the same hash across restarts until it changes (RU1)", async () => {
+    const paseoHome = await createPaseoHome({ version: 1 });
+    const first = loadConfig(paseoHome, { env: { PASEO_PASSWORD: "from-env" } }).auth?.password;
+    const second = loadConfig(paseoHome, { env: { PASEO_PASSWORD: "from-env" } }).auth?.password;
+    expect(second).toBe(first);
+    expect((await stat(path.join(paseoHome, "daemon-password-hash"))).mode & 0o777).toBe(0o600);
+    const changed = loadConfig(paseoHome, { env: { PASEO_PASSWORD: "new-one" } }).auth?.password;
+    expect(changed).not.toBe(first);
+    expect(await isBearerTokenValidAsync({ password: changed, token: "new-one" })).toBe(true);
+    expect(await isBearerTokenValidAsync({ password: changed, token: "from-env" })).toBe(false);
   });
 });

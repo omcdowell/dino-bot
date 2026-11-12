@@ -120,7 +120,11 @@ import {
   normalizeClientRestartRpcReason,
 } from "./lifecycle-reasons.js";
 import { CLIENT_CAPS } from "@getpaseo/protocol/client-capabilities";
-import { SessionTokenStore, type SessionTokenBinding } from "./session-tokens.js";
+import {
+  SESSION_TOKEN_FILE_NAME,
+  SessionTokenStore,
+  type SessionTokenBinding,
+} from "./session-tokens.js";
 
 import type { KeyPair, SecurityMode } from "@getpaseo/relay/e2ee";
 import { DIRECT_E2EE_SUBPROTOCOL } from "@getpaseo/protocol/daemon-endpoints";
@@ -627,10 +631,11 @@ export class VoiceAssistantWebSocketServer {
   private readonly downloadTokenStore: DownloadTokenStore;
   private readonly paseoHome: string;
   private readonly passwordHash: string | undefined;
-  /** Per-device session tokens (in memory: a restart or password change invalidates them all). */
-  private readonly sessionTokens = new SessionTokenStore({
-    getPasswordHash: () => this.passwordHash,
-  });
+  /**
+   * Per-device session tokens. Kept in PASEO_HOME/session-tokens.json so a restart or an update
+   * keeps paired devices signed in (RU1); a password change still invalidates them all.
+   */
+  private readonly sessionTokens: SessionTokenStore;
   /** Sockets admitted by a password in the upgrade headers (COMPAT(headerAuth)). */
   private readonly passwordHeaderSockets = new WeakSet<WebSocketLike>();
   /**
@@ -792,6 +797,12 @@ export class VoiceAssistantWebSocketServer {
     this.downloadTokenStore = downloadTokenStore;
     this.paseoHome = paseoHome;
     this.passwordHash = auth?.password;
+    this.sessionTokens = new SessionTokenStore({
+      getPasswordHash: () => this.passwordHash,
+      persistPath: join(paseoHome, SESSION_TOKEN_FILE_NAME),
+      onPersistError: (err, action) =>
+        this.logger.warn({ err, action }, "session_tokens.persist_failed"),
+    });
     this.worktreesRoot = daemonRuntimeConfig?.worktreesRoot;
     this.daemonConfigStore = daemonConfigStore;
     this.mcpBaseUrl = mcpBaseUrl;

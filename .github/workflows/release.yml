@@ -47,7 +47,7 @@ jobs:
           want="v$(jq -r .version lib/product.json)" # the version the install reports (MANIFEST.json, doctor)
           [ "$GITHUB_REF_NAME" = "$want" ] || { echo "tag $GITHUB_REF_NAME, but lib/product.json says $want"; exit 1; }
       - name: unit tests (incl. fail-closed checksum + signature)
-        run: node --test test/unit.test.mjs test/wave2.test.mjs test/providers.test.mjs test/signing.test.mjs test/public-tree.test.mjs test/push.test.mjs
+        run: node --test test/unit.test.mjs test/wave2.test.mjs test/providers.test.mjs test/signing.test.mjs test/public-tree.test.mjs test/push.test.mjs test/pairing-identity.test.mjs
 
   # Linux first; macOS (10x minutes) only once test and both Linux builds have passed.
   # Private repo runners: 2 CPU / 8 GB (Linux), 3 CPU / 7 GB (macOS arm64), not the 16 GB of public

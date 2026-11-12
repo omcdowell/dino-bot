@@ -1,5 +1,6 @@
-import { compare, hashSync } from "bcryptjs";
+import { compare, compareSync, hashSync } from "bcryptjs";
 import { timingSafeEqual } from "node:crypto";
+import { chmodSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import type { RequestHandler } from "express";
 import { matchesLocalCredential } from "./local-credential.js";
 
@@ -34,6 +35,35 @@ export async function isBearerTokenValidAsync(input: BearerValidationInput): Pro
 
 export function hashDaemonPassword(password: string): string {
   return hashSync(password, DAEMON_PASSWORD_BCRYPT_COST);
+}
+
+/** Where the daemon keeps the bcrypt hash of PASEO_PASSWORD between starts (mode 600). */
+export const DAEMON_PASSWORD_HASH_FILE = "daemon-password-hash";
+
+/**
+ * The bcrypt hash of a PASEO_PASSWORD from the environment, the same one at every start while
+ * the password stays the same (RU1). A fresh salt at every start changed the hash, and session
+ * tokens are bound to the hash, so every restart or update signed paired phones out. One bcrypt
+ * compare against the kept hash costs what hashing anew did. A changed password gets a new hash
+ * (and so ends every session token). If the file cannot be read or written, a fresh hash is used.
+ */
+export function stableDaemonPasswordHash(password: string, hashFile: string): string {
+  try {
+    const kept = readFileSync(hashFile, "utf8").trim();
+    if (kept.startsWith("$2") && compareSync(password, kept)) return kept;
+  } catch {
+    // No kept hash yet (or unreadable): hash anew below.
+  }
+  const hash = hashDaemonPassword(password);
+  const tmp = `${hashFile}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, `${hash}\n`, { mode: 0o600 });
+    chmodSync(tmp, 0o600);
+    renameSync(tmp, hashFile);
+  } catch {
+    rmSync(tmp, { force: true });
+  }
+  return hash;
 }
 
 export function extractHttpBearerToken(value: string | undefined): string | null {

@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, test } from "vitest";
 import { OWNER_PERMISSIONS } from "./authorization/index.js";
 import { resolveSessionAdmission } from "./session-admission-auth.js";
@@ -158,5 +161,105 @@ describe("hello admission with a session token", () => {
         transport: "relay",
       }),
     ).toEqual({ rejection: "session_token_invalid" });
+  });
+});
+
+describe("session tokens across a restart (RU1)", () => {
+  function persisted() {
+    const dir = mkdtempSync(path.join(tmpdir(), "session-tokens-"));
+    const file = path.join(dir, "session-tokens.json");
+    let now = 1_000_000;
+    let passwordHash: string | undefined = HASH_A;
+    const errors: string[] = [];
+    const open = () =>
+      new SessionTokenStore({
+        getPasswordHash: () => passwordHash,
+        now: () => now,
+        persistPath: file,
+        onPersistError: (_error, action) => errors.push(action),
+      });
+    return {
+      dir,
+      file,
+      errors,
+      open,
+      advance: (ms: number) => {
+        now += ms;
+      },
+      setPasswordHash: (hash: string | undefined) => {
+        passwordHash = hash;
+      },
+      cleanup: () => rmSync(dir, { recursive: true, force: true }),
+    };
+  }
+
+  test("a token issued before a restart still admits the device after it", () => {
+    const t = persisted();
+    try {
+      const issued = t.open().issue(OWNER, PHONE);
+      const restarted = t.open();
+      expect(restarted.verify(issued!.token, PHONE)).toEqual({ ...OWNER, renew: false });
+      expect(restarted.verify(issued!.token, { ...PHONE, clientId: "clsk_other" })).toBeNull();
+      expect(t.errors).toEqual([]);
+    } finally {
+      t.cleanup();
+    }
+  });
+
+  test("the file is mode 600 and holds no token secret", () => {
+    const t = persisted();
+    try {
+      const issued = t.open().issue(OWNER, PHONE);
+      const secret = issued!.token.split(".")[2]!;
+      expect(statSync(t.file).mode & 0o777).toBe(0o600);
+      expect(readFileSync(t.file, "utf8")).not.toContain(secret);
+    } finally {
+      t.cleanup();
+    }
+  });
+
+  test("the key is written at the first start, before any token", () => {
+    const t = persisted();
+    try {
+      t.open();
+      const key = JSON.parse(readFileSync(t.file, "utf8")).key;
+      const issued = t.open().issue(OWNER, PHONE);
+      expect(JSON.parse(readFileSync(t.file, "utf8")).key).toBe(key);
+      expect(t.open().verify(issued!.token, PHONE)).not.toBeNull();
+    } finally {
+      t.cleanup();
+    }
+  });
+
+  test("a password change, expiry or revocation still ends a persisted token", () => {
+    const t = persisted();
+    try {
+      const first = t.open().issue(OWNER, PHONE)!;
+      t.setPasswordHash(HASH_B);
+      expect(t.open().verify(first.token, PHONE)).toBeNull();
+      t.setPasswordHash(HASH_A);
+      const second = t.open().issue(OWNER, PHONE)!;
+      const store = t.open();
+      expect(store.revokeClient(PHONE.clientId)).toBe(true);
+      expect(t.open().verify(second.token, PHONE)).toBeNull();
+      const third = t.open().issue(OWNER, PHONE)!;
+      t.advance(25 * HOUR);
+      expect(t.open().verify(third.token, PHONE)).toBeNull();
+    } finally {
+      t.cleanup();
+    }
+  });
+
+  test("a corrupt file is replaced; the password path still works", () => {
+    const t = persisted();
+    try {
+      writeFileSync(t.file, "{not json", { mode: 0o600 });
+      const store = t.open();
+      expect(t.errors).toEqual(["load"]);
+      const issued = store.issue(OWNER, PHONE)!;
+      expect(t.open().verify(issued.token, PHONE)).not.toBeNull();
+    } finally {
+      t.cleanup();
+    }
   });
 });

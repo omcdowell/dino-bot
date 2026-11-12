@@ -20,7 +20,7 @@ import type {
 } from "./agent/provider-launch-config.js";
 import { ProviderOverrideSchema } from "./agent/provider-launch-config.js";
 import { AgentProviderSchema } from "@getpaseo/protocol/provider-manifest";
-import { hashDaemonPassword } from "./auth.js";
+import { DAEMON_PASSWORD_HASH_FILE, stableDaemonPasswordHash } from "./auth.js";
 import { resolveSpeechConfig } from "./speech/speech-config-resolver.js";
 import type { RequestedSpeechProviders } from "./speech/speech-types.js";
 import { mergeHostnames, parseHostnamesEnv, type HostnamesConfig } from "./hostnames.js";
@@ -494,10 +494,17 @@ function resolveListenAddress(
 function resolveAuthConfig(
   env: NodeJS.ProcessEnv,
   persisted: ReturnType<typeof loadPersistedConfig>,
+  paseoHome: string,
 ): PaseoDaemonConfig["auth"] {
   const envPassword = env.PASEO_PASSWORD?.trim();
   if (envPassword) {
-    return { password: hashDaemonPassword(envPassword) };
+    // Same hash at every start while the password is unchanged: session tokens survive (RU1).
+    return {
+      password: stableDaemonPasswordHash(
+        envPassword,
+        path.join(paseoHome, DAEMON_PASSWORD_HASH_FILE),
+      ),
+    };
   }
   return persisted.daemon?.auth?.password
     ? { password: persisted.daemon.auth.password }
@@ -653,7 +660,7 @@ export function resolveConfigFromPersisted(
     serviceProxy,
     webUi,
     appBaseUrl,
-    auth: resolveAuthConfig(env, persisted),
+    auth: resolveAuthConfig(env, persisted, paseoHome),
     openai,
     speech,
     voiceLlmProvider: voiceLlm.provider,
