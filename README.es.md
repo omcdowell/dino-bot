@@ -39,22 +39,24 @@ Muchas gracias al proyecto Paseo.</p>
 
 ## Inicio rápido
 
-En tu Mac o computadora con Linux:
+1. **Consigue Tailscale** (gratis; conecta tu teléfono con tu computadora de forma privada): instálalo
+   desde [tailscale.com/download](https://tailscale.com/download) en la computadora y en el iPhone, e
+   inicia sesión con la misma cuenta en ambos. ¿Te lo saltaste? El instalador te explica cómo.
+2. **Instala DinoBot**: en tu Mac o computadora con Linux, pega esto en la Terminal:
+   ```sh
+   curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
+   ```
+3. **Empareja tu iPhone**: instala la app DinoBot, escanea el código QR que muestra el instalador,
+   inicia sesión con tu proveedor de IA en la app y empieza a chatear. Únete a la beta en TestFlight: https://testflight.apple.com/join/QZm1NqTF
 
-```sh
-curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
-```
-
-1. Instala [Tailscale](https://tailscale.com/download) en la computadora y en tu teléfono, con la sesión iniciada
-   en la misma cuenta. Si falta, la instalación te guía paso a paso.
-2. Instala la app DinoBot en tu iPhone. Únete a la beta en TestFlight: https://testflight.apple.com/join/QZm1NqTF
-3. Escanea el código QR que muestra el instalador. Inicia sesión con tu proveedor de IA en la app y empieza a chatear.
+¿Compartes un Mac con alguien que ya usa DinoBot o Tailscale? Consulta
+[Dos personas en un Mac](docs/shared-mac.md) (avanzado, en inglés).
 
 ## App de escritorio (básica)
 
 También hay una app de escritorio básica para Mac y Linux. Se empareja con tu computadora DinoBot, muestra
 tus bots y te permite chatear con ellos, igual que la app del teléfono. No ejecuta bots por sí misma: necesita
-un host de DinoBot (la instalación de arriba), en la misma computadora o en otra de tu tailnet.
+un host de DinoBot (la instalación de arriba), en la misma computadora o en otra de tu red de Tailscale.
 
 - **Mac** (Apple Silicon): `DinoBot-<version>-arm64.dmg` desde la
   [última release](https://github.com/omcdowell/dino-bot/releases/latest). Todavía no está firmada por
@@ -78,6 +80,7 @@ desde la página de releases.
 ## Más información
 
 - [Cómo funciona el instalador](docs/how-it-works.md): pasos, comandos, flags
+- [Dos personas en un Mac](docs/shared-mac.md): tu propio Tailscale junto al de otra persona
 - [Actividades en vivo y push](docs/live-activities.md): con tu propia compilación de Apple Developer
 - [Linux](docs/linux.md): paquetes, servicios, desinstalación, app de escritorio
 - [Releases y verificación](docs/releases.md): checksums, firmas, cómo se generan las releases

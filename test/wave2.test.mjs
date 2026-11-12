@@ -104,8 +104,13 @@ describe("Tailscale only (owner decision, 27 Oct)", () => {
     const mac = tailscaleSteps({ installed: false, state: "NotInstalled" }, { os: "darwin", rerun: "X setup" });
     assert.match(mac.join("\n"), /apps\.apple\.com\/app\/tailscale/);
     assert.match(mac.join("\n"), /iPhone/);
-    assert.ok(mac.includes("Then finish setup:   X setup"));
-    assert.ok(mac.some((l) => /^3\. On your iPhone/.test(l)));
+    assert.ok(mac.some((l) => l.startsWith("3. Then finish setup:   X setup")), mac.join("\n"));
+    assert.ok(mac.some((l) => /^2\. On your iPhone/.test(l)));
+    assert.ok(mac.filter((l) => /^\d\./.test(l)).length <= 3, "at most 3 steps");
+    assert.doesNotMatch(mac.join("\n"), /userspace|socket|tailnet/i, "no jargon for a new user");
+    const waiting = tailscaleSteps({ installed: false }, { os: "darwin", waiting: true }).join("\n");
+    assert.match(waiting, /^3\. Come back here: setup carries on by itself/m);
+    assert.doesNotMatch(waiting, /Then finish setup/);
     assert.match(tailscaleSteps({ installed: false }, { os: "linux" }).join("\n"), /tailscale\.com\/install\.sh/);
     assert.match(tailscaleSteps({ installed: true, state: "Stopped" }, { os: "darwin" }).join("\n"), /menu bar, then Connect/);
     assert.match(tailscaleSteps({ installed: true, state: "NeedsLogin" }, { os: "linux" }).join("\n"), /tailscale up/);
@@ -118,6 +123,7 @@ describe("Tailscale only (owner decision, 27 Oct)", () => {
   it("doctor: FAIL for an old all-networks bind, no Tailscale, or a changed tailnet IP", () => {
     assert.equal(checkListenScope({ listen: "0.0.0.0:6767", tailscale: TS }).status, "FAIL");
     assert.equal(checkListenScope({ listen: "100.64.0.7:6767", tailscale: { running: false } }).status, "FAIL");
+    assert.match(checkListenScope({ listen: "100.64.0.7:6767", tailscale: { running: false, installed: false } }).fix, /tailscale\.com\/install\.sh/, "the fix carries the command, not just the step");
     assert.equal(checkListenScope({ listen: "100.64.0.7:6767", tailscale: { ...TS, ip: "100.64.0.9" } }).status, "FAIL");
     assert.equal(checkListenScope({ listen: "100.64.0.7:6767", tailscale: TS, nets: LOCAL_TS }).status, "ok");
     assert.equal(checkListenScope({ listen: "127.0.0.1:6767", tailscale: TS, nets: LOCAL_TS }).status, "FAIL", "loopback with a system Tailscale: still an old install");
@@ -210,7 +216,8 @@ describe("second person on one Mac: own tailscaled (R4)", () => {
       const ps = `  0 /usr/libexec/something\n501 ${APP}\n502 /bin/zsh\n  0 /Library/SystemExtensions/X/io.tailscale.ipn.macsys.network-extension.systemextension/Contents/MacOS/io.tailscale.ipn.macsys.network-extension\n`;
       assert.deepEqual(await ask(ps), { owners: ["alex (uid 501)"] });
       const msg = foreignTailscaleMessage({ owners: ["alex (uid 501)"] }, SYS);
-      assert.match(msg, /belongs to another macOS user \(alex \(uid 501\)\)/);
+      assert.match(msg, /signed in by another macOS user \(alex \(uid 501\)\)/);
+      assert.match(msg, /docs\/shared-mac\.md/);
       assert.match(msg, /owner-mac\.tail1\.ts\.net/);
       assert.match(msg, /DINOBOT_TAILSCALE_SOCKET=/);
       assert.match(msg, /Nothing was started/);

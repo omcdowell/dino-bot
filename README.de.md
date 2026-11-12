@@ -39,16 +39,18 @@ Vielen Dank an das Paseo-Projekt.</p>
 
 ## Schnellstart
 
-Auf deinem Mac oder Linux-Computer:
+1. **Tailscale holen** (kostenlos; verbindet dein Smartphone privat mit deinem Computer): installiere es
+   von [tailscale.com/download](https://tailscale.com/download) auf dem Computer und dem iPhone und melde
+   dich auf beiden mit demselben Konto an. Übersprungen? Der Installer zeigt dir, wie es geht.
+2. **DinoBot installieren**: füge auf deinem Mac oder Linux-Computer das hier ins Terminal ein:
+   ```sh
+   curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
+   ```
+3. **iPhone koppeln**: installiere die DinoBot-App, scanne den QR-Code, den der Installer zeigt, melde
+   dich in der App bei deinem KI-Anbieter an und leg los. Tritt der TestFlight-Beta bei: https://testflight.apple.com/join/QZm1NqTF
 
-```sh
-curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
-```
-
-1. Installiere [Tailscale](https://tailscale.com/download) auf dem Computer und auf deinem Smartphone,
-   angemeldet mit demselben Konto. Falls es fehlt, führt dich das Setup durch die Installation.
-2. Installiere die DinoBot-App auf deinem iPhone. Tritt der TestFlight-Beta bei: https://testflight.apple.com/join/QZm1NqTF
-3. Scanne den QR-Code, den der Installer ausgibt. Melde dich in der App bei deinem KI-Anbieter an und leg los.
+Teilst du einen Mac mit jemandem, der DinoBot oder Tailscale schon nutzt? Siehe
+[Zwei Personen an einem Mac](docs/shared-mac.md) (für Fortgeschrittene, Englisch).
 
 ## Desktop-App (Basisversion)
 
@@ -80,6 +82,7 @@ von der Release-Seite herunter.
 ## Mehr erfahren
 
 - [So funktioniert der Installer](docs/how-it-works.md): Schritte, Befehle, Flags
+- [Zwei Personen an einem Mac](docs/shared-mac.md): dein eigenes Tailscale neben dem einer anderen Person
 - [Live-Aktivitäten und Push](docs/live-activities.md): mit deinem eigenen Apple-Developer-Build
 - [Linux](docs/linux.md): Pakete, Dienste, Deinstallation, Desktop-App
 - [Releases und Verifizierung](docs/releases.md): Prüfsummen, Signaturen, wie Releases gebaut werden

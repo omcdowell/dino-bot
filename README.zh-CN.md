@@ -38,22 +38,23 @@
 
 ## 快速开始
 
-在你的 Mac 或 Linux 电脑上：
+1. **安装 Tailscale**（免费，它把你的手机和电脑私密地连接起来）：从
+   [tailscale.com/download](https://tailscale.com/download) 在电脑和 iPhone 上安装，并在两边登录同一个账号。
+   跳过了？安装程序会告诉你怎么做。
+2. **安装 DinoBot**：在你的 Mac 或 Linux 电脑上，把这行粘贴到终端：
+   ```sh
+   curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
+   ```
+3. **配对 iPhone**：安装 DinoBot 应用，扫描安装程序显示的二维码，在应用中登录你的 AI 服务商，即可开始聊天。 加入 TestFlight 测试版：https://testflight.apple.com/join/QZm1NqTF
 
-```sh
-curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
-```
-
-1. 在电脑和手机上安装 [Tailscale](https://tailscale.com/download)，并登录同一个账号。
-   如果尚未安装，设置程序会一步步引导你完成。
-2. 在 iPhone 上安装 DinoBot 应用。 加入 TestFlight 测试版：https://testflight.apple.com/join/QZm1NqTF
-3. 扫描安装程序显示的二维码。在应用中登录你的 AI 服务商，即可开始聊天。
+和已经在用 DinoBot 或 Tailscale 的人共用一台 Mac？请参阅
+[两个人共用一台 Mac](docs/shared-mac.md)（进阶，英文）。
 
 ## 桌面应用（基础版）
 
 我们还提供适用于 Mac 和 Linux 的基础版桌面应用。它会与你的 DinoBot 电脑配对，列出你的机器人，
 并像手机应用一样让你与它们聊天。它本身不运行机器人：需要一台 DinoBot 主机（即上面的安装），
-可以是同一台电脑，也可以是你 tailnet 中的另一台。
+可以是同一台电脑，也可以是你 Tailscale 网络中的另一台。
 
 - **Mac**（Apple 芯片）：从[最新 release](https://github.com/omcdowell/dino-bot/releases/latest)
   下载 `DinoBot-<version>-arm64.dmg`。它暂未经过 Apple 签名，所以首次运行时请右键点按应用并选择
@@ -75,6 +76,7 @@ curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
 ## 了解更多
 
 - [安装程序的工作原理](docs/how-it-works.md)：步骤、命令、参数
+- [两个人共用一台 Mac](docs/shared-mac.md)：在别人的 Tailscale 旁边运行你自己的 Tailscale
 - [实时活动与推送](docs/live-activities.md)：使用你自己的 Apple 开发者构建版本
 - [Linux](docs/linux.md)：软件包、服务、卸载、桌面应用
 - [发布与验证](docs/releases.md)：校验和、签名、release 的构建方式

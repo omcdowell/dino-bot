@@ -43,6 +43,9 @@ COSIGN_SHA256S="darwin-arm64=9f9b8cd557cf2e5b3df3373a00baa005a86b02391e3e06dd0ce
 # Everything runs inside main(), called on the last line: a download cut off half-way defines
 # a function and runs nothing.
 main() {
+  # The very first thing, before any check or download: say what is happening (`curl | sh` is
+  # otherwise silent until the name question). Every slow step below prints a line as it starts.
+  echo "Installing $PRODUCT_NAME. This takes a minute or two; each step is shown below."
   # Owner-only files: bot memories, chats, logs and secrets are not for other users of this computer.
   umask 077
   ROOT=${DINOBOT_HOME:-$HOME/.$PRODUCT_ID}
@@ -58,6 +61,7 @@ main() {
   T0=$(now_ms)
 
   fail() { printf '%s install stopped: %s\n' "$PRODUCT_NAME" "$*" >&2; exit 1; }
+  echo "Checking this computer..."
   sha256_of() {
     if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
     elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
@@ -159,6 +163,7 @@ main() {
     esac
   }
 
+  echo "Downloading $PRODUCT_NAME ($OS/$ARCH) in the background into $ROOT"
   # 1. Download in the background (.tar.zst first when it can be unpacked here; the asset that
   # arrived is written to download/asset).
   rm -f "$ROOT/download/asset" "$ROOT/download/$NAME".tar.*
@@ -208,6 +213,7 @@ main() {
     else
       [ -n "$COSIGN_PIN" ] || { kill "$DL" 2>/dev/null; fail "no pinned signature checker (cosign) for $OS/$ARCH. Nothing was installed."; }
       COSIGN=$ROOT/tools/cosign
+      echo "Also downloading the signature checker (cosign, once) in the background"
       (
         rm -f "$COSIGN.part"
         if [ "$MODE" != tarball ]; then
@@ -241,12 +247,11 @@ main() {
   }
   NAME_DEFAULT=$(default_name)
   USER_NAME=${DINOBOT_NAME:-}
-  echo "Installing $PRODUCT_NAME ($OS/$ARCH) into $ROOT"
   if [ -z "$USER_NAME" ]; then
     case " $* " in *" --yes "*) USER_NAME=$NAME_DEFAULT ;; esac
   fi
   if [ -z "$USER_NAME" ] && [ -r /dev/tty ] && (exec </dev/tty) 2>/dev/null; then
-    printf 'What should your bots call you? [%s]: ' "$NAME_DEFAULT"
+    printf 'While that downloads: what should your bots call you? [%s]: ' "$NAME_DEFAULT"
     read -r USER_NAME </dev/tty || USER_NAME=""
   fi
   [ -n "$USER_NAME" ] || USER_NAME=$NAME_DEFAULT
@@ -275,6 +280,7 @@ main() {
   # Either is enough; if both are there they must agree. Checksums catch corruption; authenticity
   # comes from the signature check right after.
   # DINOBOT_ALLOW_UNVERIFIED=1 is for local development builds only.
+  echo "Checking the download (checksum$([ "$SIGN" = 1 ] && echo " and signature"))..."
   TAR_SHA=$(sha256_of "$TARBALL")
   PIN_SHA=""
   for p in $PINNED_SHA256S; do [ "${p%%=*}" = "$ASSET" ] && PIN_SHA=${p#*=}; done
@@ -317,6 +323,7 @@ main() {
     echo "Signature OK (built and signed by $SIGNER_REPO's release workflow)"
   elif [ "$SIGNING_MODE" != off ]; then echo "WARNING: signature not checked (DINOBOT_ALLOW_UNSIGNED / DINOBOT_ALLOW_UNVERIFIED)" >&2
   fi
+  echo "Unpacking into $ROOT/app..."
   rm -rf "$ROOT/app.new"
   mkdir -p "$ROOT/app.new"
   # -m: the files get today's time (the sources' fixed commit date may lie in the future).
@@ -333,6 +340,7 @@ main() {
   rm -f "$TARBALL" "$ROOT/download/$NAME".tar.*
   T1=$(now_ms)
 
+  echo "Starting the setup wizard..."
   # 4. The wizard (bundled Node). It prints the QR as soon as the daemon listens.
   # The wizard reads answers from /dev/tty itself, so `curl | sh` works.
   DINOBOT_T0_MS=$T0 DINOBOT_FETCH_MS=$((T1 - T0)) DINOBOT_HOME=$ROOT DINOBOT_TARBALL_SHA=$TAR_SHA DINOBOT_TARBALL_FORMAT=${ASSET##*.} DINOBOT_SOURCE_MODE=$MODE \

@@ -102,7 +102,7 @@ Ubuntu's address changes at every restart, and DinoBot would have to listen outs
 - **"is on a Windows drive"**: install from Ubuntu's own home folder (`cd ~`), not from
   `/mnt/c/…`. Windows drives are slow for the bots' many small files and can't keep DinoBot's
   password private.
-- **"Tailscale is on in Windows, but Ubuntu runs behind WSL's own network"**: do step 3 (or use
+- **"Tailscale is on in Windows, but your iPhone cannot reach DinoBot through it"**: do step 3 (or use
   mirrored networking, above).
 - **No systemd**: Ubuntu 24.04 has it switched on. If doctor says it is off, run
   `printf '[boot]\nsystemd=true\n' | sudo tee -a /etc/wsl.conf`, then `wsl --shutdown` in

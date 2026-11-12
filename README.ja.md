@@ -39,22 +39,24 @@ Paseo プロジェクトに心から感謝します。</p>
 
 ## クイックスタート
 
-Mac または Linux コンピュータで：
+1. **Tailscale を入手**（無料。スマートフォンとコンピュータを非公開でつなぎます）：
+   [tailscale.com/download](https://tailscale.com/download) からコンピュータと iPhone の両方にインストールし、
+   両方で同じアカウントにログインします。飛ばした場合は、インストーラが手順を案内します。
+2. **DinoBot をインストール**：Mac または Linux コンピュータのターミナルに、次を貼り付けます：
+   ```sh
+   curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
+   ```
+3. **iPhone をペアリング**：DinoBot アプリをインストールし、インストーラが表示する QR コードをスキャンして、
+   アプリで AI プロバイダにサインインすれば、すぐにチャットを始められます。 TestFlight ベータに参加: https://testflight.apple.com/join/QZm1NqTF
 
-```sh
-curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
-```
-
-1. コンピュータとスマートフォンの両方に [Tailscale](https://tailscale.com/download) をインストールし、
-   同じアカウントでサインインします。未インストールの場合は、セットアップが手順を案内します。
-2. iPhone に DinoBot アプリをインストールします。 TestFlight ベータに参加: https://testflight.apple.com/join/QZm1NqTF
-3. インストーラが表示する QR コードをスキャンします。アプリで AI プロバイダにサインインすれば、すぐにチャットを始められます。
+DinoBot や Tailscale をすでに使っている人と Mac を共有していますか？
+[1 台の Mac を 2 人で使う](docs/shared-mac.md)（上級者向け、英語）をご覧ください。
 
 ## デスクトップアプリ（基本版）
 
 Mac と Linux 向けの基本的なデスクトップアプリもあります。DinoBot コンピュータとペアリングし、ボットの
 一覧を表示して、スマホアプリと同じようにボットとチャットできます。アプリ自体はボットを実行しません。
-同じコンピュータ、または tailnet 上の別のコンピュータに DinoBot ホスト（上記のインストール）が必要です。
+同じコンピュータ、または Tailscale ネットワーク上の別のコンピュータに DinoBot ホスト（上記のインストール）が必要です。
 
 - **Mac**（Apple シリコン）：[最新リリース](https://github.com/omcdowell/dino-bot/releases/latest)から
   `DinoBot-<version>-arm64.dmg` を入手します。まだ Apple の署名がないため、初回はアプリを右クリックして
@@ -78,6 +80,7 @@ Mac と Linux 向けの基本的なデスクトップアプリもあります。
 ## 詳しく知る
 
 - [インストーラの仕組み](docs/how-it-works.md)：手順、コマンド、フラグ
+- [1 台の Mac を 2 人で使う](docs/shared-mac.md)：別の人の Tailscale と並べて自分の Tailscale を使う
 - [ライブアクティビティとプッシュ](docs/live-activities.md)：自分の Apple Developer ビルドで使う場合
 - [Linux](docs/linux.md)：パッケージ、サービス、アンインストール、デスクトップアプリ
 - [リリースと検証](docs/releases.md)：チェックサム、署名、リリースのビルド方法

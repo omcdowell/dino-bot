@@ -39,23 +39,25 @@ Un grand merci au projet Paseo.</p>
 
 ## Démarrage rapide
 
-Sur votre Mac ou votre ordinateur Linux :
+1. **Installez Tailscale** (gratuit ; il relie votre téléphone à votre ordinateur en privé) depuis
+   [tailscale.com/download](https://tailscale.com/download) sur l'ordinateur et sur l'iPhone, et
+   connectez-vous au même compte sur les deux. Oublié ? L'installeur vous explique comment faire.
+2. **Installez DinoBot** : sur votre Mac ou votre ordinateur Linux, collez ceci dans le Terminal :
+   ```sh
+   curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
+   ```
+3. **Associez votre iPhone** : installez l'app DinoBot, scannez le QR code affiché par l'installeur,
+   connectez-vous à votre fournisseur d'IA dans l'app, et c'est parti. Rejoignez la bêta TestFlight : https://testflight.apple.com/join/QZm1NqTF
 
-```sh
-curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
-```
-
-1. Installez [Tailscale](https://tailscale.com/download) sur l'ordinateur et sur votre téléphone, connectés
-   au même compte. S'il manque, l'installation vous guide.
-2. Installez l'app DinoBot sur votre iPhone. Rejoignez la bêta TestFlight : https://testflight.apple.com/join/QZm1NqTF
-3. Scannez le QR code affiché par l'installeur. Connectez-vous à votre fournisseur d'IA dans l'app, et c'est parti.
+Vous partagez un Mac avec quelqu'un qui utilise déjà DinoBot ou Tailscale ? Voir
+[Deux personnes sur un Mac](docs/shared-mac.md) (avancé, en anglais).
 
 ## App de bureau (version de base)
 
 Il existe aussi une app de bureau simple pour Mac et Linux. Elle s'associe à votre ordinateur DinoBot,
 liste vos bots et vous permet de discuter avec eux, comme l'app mobile. Elle n'exécute pas de bots
 elle-même : elle a besoin d'un hôte DinoBot (l'installation ci-dessus), sur le même ordinateur ou sur
-un autre de votre tailnet.
+un autre de votre réseau Tailscale.
 
 - **Mac** (Apple Silicon) : `DinoBot-<version>-arm64.dmg` depuis la
   [dernière release](https://github.com/omcdowell/dino-bot/releases/latest). Elle n'est pas encore signée
@@ -80,6 +82,7 @@ depuis la page des releases.
 ## En savoir plus
 
 - [Fonctionnement de l'installeur](docs/how-it-works.md) : étapes, commandes, options
+- [Deux personnes sur un Mac](docs/shared-mac.md) : votre propre Tailscale à côté de celui d'une autre personne
 - [Activités en direct et push](docs/live-activities.md) : avec votre propre build Apple Developer
 - [Linux](docs/linux.md) : paquets, services, désinstallation, app de bureau
 - [Releases et vérification](docs/releases.md) : sommes de contrôle, signatures, construction des releases

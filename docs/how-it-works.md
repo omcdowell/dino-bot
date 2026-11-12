@@ -59,7 +59,7 @@ Flags: `--yes` (defaults, no questions), `--answers '{"extras":"coordinator"}'`,
 `DINOBOT_TAILSCALE_BIN` / `DINOBOT_TAILSCALE_SOCKET` pick the Tailscale CLI and its daemon's socket (a
 userspace tailscaled of your own: the daemon then listens on `127.0.0.1` with
 `PASEO_TRUST_LOOPBACK=false`, so connections from `127.0.0.1` must also be end-to-end encrypted unless
-they carry the daemon's local credential; see the README, "Second person on the same Mac").
+they carry the daemon's local credential; see [Two people on one Mac](shared-mac.md)).
 
 ## pi
 

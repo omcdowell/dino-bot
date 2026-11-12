@@ -99,18 +99,18 @@ describe("WSL networking: Tailscale inside Ubuntu (recommended) or Windows' with
   it("nothing installed: install Tailscale inside Ubuntu (Linux line), then the iPhone, then the finish command", () => {
     const lines = tailscaleSteps({ installed: false, state: "NotInstalled" }, { wsl: WSL, rerun: "R" });
     const text = lines.join("\n");
-    assert.match(text, /^1\. Install Tailscale inside Ubuntu.*tailscale\.com\/install\.sh/m);
-    assert.match(text, /^2\. Turn it on: +sudo tailscale up/m);
-    assert.match(text, /^3\. On your iPhone/m);
+    assert.match(text, /^1\. In this Ubuntu window: install Tailscale and log in/m);
+    assert.match(text, /^ +curl -fsSL https:\/\/tailscale\.com\/install\.sh \| sh && sudo tailscale up --operator=\$USER$/m);
+    assert.match(text, /^2\. On your iPhone/m);
     assert.match(text, /Then finish setup: +R/);
     assert.doesNotMatch(text, /systemd/, "Ubuntu 24.04 on WSL has systemd on");
   });
   it("no systemd: turning it on comes first (tailscaled needs it), with wsl --shutdown", () => {
     const text = tailscaleSteps({ installed: false }, { wsl: { ...WSL, systemd: false } }).join("\n");
-    assert.match(text, /^1\. Turn on systemd/m);
+    assert.match(text, /^1\. Turn on Ubuntu's service manager \(systemd/m);
     assert.ok(text.includes(ENABLE_SYSTEMD));
     assert.match(text, /wsl --shutdown/);
-    assert.match(text, /^2\. Install Tailscale inside Ubuntu/m);
+    assert.match(text, /^2\. In this Ubuntu window: install Tailscale/m);
   });
   it("Windows Tailscale on but NAT networking: says why it cannot work and recommends Tailscale inside Ubuntu", () => {
     const t = { installed: true, running: true, state: "Running", ip: "100.101.102.103", windows: true, local: false };
@@ -118,6 +118,7 @@ describe("WSL networking: Tailscale inside Ubuntu (recommended) or Windows' with
     const text = wslTailscaleSteps(t, WSL).join("\n");
     assert.match(text, /on in Windows.*NAT/s);
     assert.match(text, /Install Tailscale inside Ubuntu/);
+    assert.match(text, /In this Ubuntu window: install Tailscale/);
     assert.match(text, /mirrored/);
   });
   it("Windows Tailscale with mirrored networking (its address is inside Ubuntu too): usable", () => {

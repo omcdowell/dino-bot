@@ -39,22 +39,25 @@ Many thanks to the Paseo project.</p>
 
 ## Quick start
 
-On your Mac or Linux computer:
+1. **Get Tailscale** (free; it links your phone to your computer privately): install it from
+   [tailscale.com/download](https://tailscale.com/download) on your computer and your iPhone, and
+   log in with the same account on both. Skipped it? The installer shows you how.
+2. **Install DinoBot**: on your Mac or Linux computer, paste this into Terminal:
+   ```sh
+   curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
+   ```
+3. **Pair your iPhone**: install the DinoBot app, scan the QR code the installer shows, sign in to
+   your AI provider in the app, and start chatting. Join the TestFlight beta: https://testflight.apple.com/join/QZm1NqTF
 
-```sh
-curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
-```
-
-1. Install [Tailscale](https://tailscale.com/download) on the computer and on your phone, signed
-   in to the same account. Setup walks you through it if it is missing.
-2. Install the DinoBot app on your iPhone. Join the TestFlight beta: https://testflight.apple.com/join/QZm1NqTF
-3. Scan the QR code the installer prints. Sign in to your AI provider in the app, and start chatting.
+Sharing a Mac with someone who already uses DinoBot or Tailscale? See
+[Two people on one Mac](docs/shared-mac.md) (advanced).
 
 ## Desktop app (basic)
 
 There is also a basic desktop app for Mac and Linux. It pairs with your DinoBot computer, lists
 your bots and lets you chat with them, as the phone app does. It does not run bots itself: it
-needs a DinoBot host (the install above), on the same computer or another one on your tailnet.
+needs a DinoBot host (the install above), on the same computer or another one on your Tailscale
+network.
 
 - **Mac** (Apple silicon): `DinoBot-<version>-arm64.dmg` from the
   [latest release](https://github.com/omcdowell/dino-bot/releases/latest). It is not signed by
@@ -75,35 +78,10 @@ from the release page.
 - An AI subscription or API key (Claude, ChatGPT, OpenRouter, …)
 - No root: the installer never uses sudo
 
-## Second person on the same Mac
-
-Each person needs their own macOS account and their own tailnet. The Mac's Tailscale app belongs
-to whoever signed it in; setup stops if it belongs to another macOS user rather than put your bots
-on their tailnet. Run your own userspace `tailscaled` in your home folder instead
-(`--tun=userspace-networking --socket=<path>`), sign it in to your tailnet, and point setup at it:
-
-```sh
-export DINOBOT_TAILSCALE_BIN=<your tailscale CLI> DINOBOT_TAILSCALE_SOCKET=<your tailscaled socket> DINOBOT_PORT=6747
-curl -fsSL https://omcdowell.github.io/dino-bot/install | sh
-```
-
-- `DINOBOT_TAILSCALE_BIN`: the Tailscale CLI to use. `DINOBOT_TAILSCALE_SOCKET`: its daemon's
-  socket (passed as `--socket`). Later `dinobot` commands remember both.
-- `DINOBOT_PORT`: a port the other person's DinoBot does not use.
-- A userspace tailscaled has no network interface, so DinoBot listens on `127.0.0.1:<port>` and
-  your tailscaled hands it your phone's connections. Because they arrive from `127.0.0.1`, setup
-  turns off DinoBot's "same computer" exemption (`PASEO_TRUST_LOOPBACK=false` in
-  `~/.dinobot/daemon.env`): a connection from `127.0.0.1` is treated like one from the network. The
-  app must use its end-to-end encrypted connection (an outdated app is refused with "update the
-  app"), and the only clients let in without it are your own DinoBot tools (`paseo`, your bots),
-  which prove themselves with the daemon's local credential, a file only your account can read.
-- Close your home folder to other users first (`chmod 700 ~`; macOS makes it readable to every
-  standard user). DinoBot runs only while your account is logged in (fast user switching keeps it
-  running).
-
 ## Learn more
 
 - [How the installer works](docs/how-it-works.md): steps, commands, flags
+- [Two people on one Mac](docs/shared-mac.md): your own Tailscale next to someone else's
 - [Live Activities and push](docs/live-activities.md): with your own Apple developer build
 - [Linux](docs/linux.md): packages, services, uninstall, desktop app
 - [Releases and verification](docs/releases.md): checksums, signatures, how releases are built
