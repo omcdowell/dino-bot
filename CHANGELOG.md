@@ -1,6 +1,21 @@
 # Changelog
 
-## Unreleased
+## v0.1.5
+
+### Faster, much smaller sync
+
+- **Opening a chat sends far less.** Connecting, opening a chat and one reply used to move about
+  129 KB between the computer and the phone; now about 3.6 KB. The bot list on a fresh start went
+  from about 16 KB to about 3 KB. Long tool output and message bodies come when you open them.
+- **The app opens from its cache first.** A chat you saw before (or the one a notification points
+  to) shows at once from the phone's cache; the live state replaces it as soon as it arrives.
+
+### Install
+
+- **The installer says what it is doing.** The first line shows before any check, each step gets
+  its own line, and the name question says the download is already running.
+- **Plainer Tailscale steps** in the installer and the README (a three-step Quick start), and a
+  short guide for two people on one Mac, each with their own Tailscale (`docs/shared-mac.md`).
 
 ### Bugs fixed
 
