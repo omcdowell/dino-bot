@@ -148,6 +148,8 @@ export const DEFAULT_CLIENT_CAPABILITIES = {
   [CLIENT_CAPS.agentPatches]: true,
   [CLIENT_CAPS.workspaceSetupBlocked]: true,
   [CLIENT_CAPS.explicitEventSubscriptions]: true,
+  [CLIENT_CAPS.prioritySync]: true,
+  [CLIENT_CAPS.compactV2]: true,
 } satisfies Record<Exclude<ClientCapability, typeof CLIENT_CAPS.browserHost>, true>;
 
 /** Calling releases demand; ready waits for membership, or local attachment on broadcast hosts. */

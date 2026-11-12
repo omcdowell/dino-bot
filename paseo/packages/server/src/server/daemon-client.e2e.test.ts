@@ -1000,7 +1000,8 @@ test("resume_agent rehydrates the newest private MCP config from a redacted pers
     if (!projectedHandle) {
       throw new Error("Expected a projected persistence handle");
     }
-    expect(projectedHandle.metadata).not.toHaveProperty("mcpServers");
+    // SI1/D0: session clients get no persistence.metadata at all; resume still works by sessionId.
+    expect(projectedHandle.metadata ?? {}).not.toHaveProperty("mcpServers");
     expect(JSON.stringify(projectedHandle)).not.toContain(bearerA);
 
     await localCtx.client.archiveAgent(created.id);
@@ -1021,7 +1022,7 @@ test("resume_agent rehydrates the newest private MCP config from a redacted pers
     expect(provider.resumeOverrides).toHaveLength(2);
     expect(provider.resumeOverrides[1]?.mcpServers?.hub).toEqual(externalMcpB.hub);
     expect(provider.resumeOverrides[1]?.mcpServers?.hub).not.toEqual(externalMcpA.hub);
-    expect(resumedNewest.persistence?.metadata).not.toHaveProperty("mcpServers");
+    expect(resumedNewest.persistence?.metadata ?? {}).not.toHaveProperty("mcpServers");
     expect(JSON.stringify(resumedNewest)).not.toContain(bearerA);
     expect(JSON.stringify(resumedNewest)).not.toContain(bearerB);
   } finally {

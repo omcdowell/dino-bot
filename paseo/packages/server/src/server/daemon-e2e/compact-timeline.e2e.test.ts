@@ -8,12 +8,18 @@ import { createDaemonTestContext, type DaemonTestContext } from "../test-utils/i
 let ctx: DaemonTestContext;
 let cwd: string;
 
+const previousCompactV2 = process.env.PASEO_COMPACT_V2;
 beforeEach(async () => {
+  // These tests read paseoCompact contents; compact_v2 sockets (the default client) carry only the
+  // marker (the app reads nothing else), so the wire encoding is off here.
+  process.env.PASEO_COMPACT_V2 = "0";
   ctx = await createDaemonTestContext();
   cwd = mkdtempSync(path.join(tmpdir(), "compact-timeline-"));
 });
 
 afterEach(async () => {
+  if (previousCompactV2 === undefined) delete process.env.PASEO_COMPACT_V2;
+  else process.env.PASEO_COMPACT_V2 = previousCompactV2;
   await ctx.cleanup();
   rmSync(cwd, { recursive: true, force: true });
 }, 60_000);
@@ -35,11 +41,17 @@ test("compact fetches omit large tool output and the item RPC loads it in full",
     text: "done",
   });
 
-  const full = await ctx.client.fetchAgentTimeline(agent.id, { direction: "tail", limit: 10 });
+  // full: true - this client has priority_sync, whose default short rows would replace compact.
+  const full = await ctx.client.fetchAgentTimeline(agent.id, {
+    direction: "tail",
+    limit: 10,
+    full: true,
+  });
   const compact = await ctx.client.fetchAgentTimeline(agent.id, {
     direction: "tail",
     limit: 10,
     compact: true,
+    full: true,
   });
   const fullBytes = JSON.stringify(full.entries).length;
   const compactBytes = JSON.stringify(compact.entries).length;
@@ -114,7 +126,7 @@ test("lean fetches leave out reasoning and cut every tool call to a one-line stu
   await manager.appendTimelineItem(agent.id, { type: "assistant_message", text: "All fine." });
 
   const page = (options: { compact?: boolean; lean?: boolean }) =>
-    ctx.client.fetchAgentTimeline(agent.id, { direction: "tail", limit: 20, ...options });
+    ctx.client.fetchAgentTimeline(agent.id, { direction: "tail", limit: 20, full: true, ...options });
   const full = await page({});
   const compact = await page({ compact: true });
   const lean = await page({ compact: true, lean: true });

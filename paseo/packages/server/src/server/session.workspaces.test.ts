@@ -7,6 +7,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   statSync,
@@ -9601,4 +9602,241 @@ test("workspace.create.request reports an archived explicit project", async () =
     workspace: null,
     errorCode: "archived_project",
   });
+});
+
+// ---------------------------------------------------------------------------
+// B3 slim directory (perf/slim-directory)
+// ---------------------------------------------------------------------------
+
+const SLIM_PARENT_LABEL = "paseo.parent-agent-id";
+
+function createSlimDirectoryFixtureSession(onMessage: (message: SessionOutboundMessage) => void) {
+  const session = createSessionForWorkspaceTests({ onMessage });
+  const project = createPersistedProjectRecord({
+    projectId: "proj-slim",
+    rootPath: "/tmp/slim",
+    kind: "non_git",
+    displayName: "slim",
+    createdAt: "2026-03-01T12:00:00.000Z",
+    updatedAt: "2026-03-01T12:00:00.000Z",
+  });
+  const workspaces = Array.from({ length: 6 }, (_, index) =>
+    createPersistedWorkspaceRecord({
+      workspaceId: `ws-slim-${index}`,
+      projectId: project.projectId,
+      cwd: `/tmp/slim/${index}`,
+      kind: "directory",
+      displayName: `slim ${index}`,
+      createdAt: "2026-03-01T12:00:00.000Z",
+      updatedAt: `2026-03-01T12:0${index}:00.000Z`,
+      ...(index === 5 ? { pinnedAt: "2026-03-01T13:00:00.000Z" } : {}),
+    }),
+  );
+  session.projectRegistry.list = async () => [project];
+  session.projectRegistry.get = async () => project;
+  session.workspaceRegistry.list = async () => workspaces;
+  session.workspaceRegistry.get = async (id: string) =>
+    workspaces.find((workspace) => workspace.workspaceId === id) ?? null;
+  const agent = (
+    id: string,
+    index: number,
+    minute: number,
+    extra: Partial<Parameters<typeof makeAgent>[0]> = {},
+  ) =>
+    makeAgent({
+      id,
+      cwd: `/tmp/slim/${index}`,
+      workspaceId: `ws-slim-${index}`,
+      status: "idle",
+      updatedAt: `2026-03-01T12:${String(minute).padStart(2, "0")}:00.000Z`,
+      ...extra,
+    });
+  session.listAgentPayloads = async () => [
+    agent("recent-1", 0, 50),
+    agent("recent-2", 1, 49),
+    agent("idle-child", 1, 48, { labels: { [SLIM_PARENT_LABEL]: "recent-2" } }),
+    agent("running-child", 2, 47, {
+      status: "running",
+      labels: { [SLIM_PARENT_LABEL]: "recent-2" },
+    }),
+    agent("recent-3", 3, 46),
+    agent("old-running", 3, 10, { status: "running" }),
+    agent("old-needs-input", 4, 9, { pendingPermissions: 1 }),
+    agent("old-pinned", 5, 5),
+    agent("oldest", 4, 1),
+  ];
+  return session;
+}
+
+function normalizeGolden(messages: SessionOutboundMessage[]): string {
+  const generations = new Map<string, string>();
+  return JSON.stringify(
+    messages,
+    (key, value) => {
+      if (key === "generation" && typeof value === "string") {
+        if (!generations.has(value)) generations.set(value, `gen-${generations.size}`);
+        return generations.get(value);
+      }
+      if (key === "subscriptionId" && typeof value === "string") return "sub";
+      if (key === "statusEnteredAt") return "<time>";
+      return value;
+    },
+    1,
+  );
+}
+
+const OLD_CLIENT_GOLDEN = path.join(
+  path.dirname(new URL(import.meta.url).pathname),
+  "__golden__",
+  "slim-directory-old-client.json",
+);
+
+test("old clients without slim get byte-identical directory responses (golden, f79beee)", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = createSlimDirectoryFixtureSession((message) => emitted.push(message));
+  await session.handleMessage({
+    type: "fetch_agents_request",
+    requestId: "sync-agents",
+    scope: "active",
+    includeBackground: true,
+    sort: [{ key: "updated_at", direction: "desc" }],
+    page: { limit: 200 },
+    sync: {},
+  });
+  await session.handleMessage({
+    type: "fetch_workspaces_request",
+    requestId: "sync-workspaces",
+    includeBackground: true,
+    sort: [{ key: "activity_at", direction: "desc" }],
+    page: { limit: 200 },
+    sync: {},
+  });
+  await session.handleMessage({
+    type: "fetch_agents_request",
+    requestId: "paged-agents-1",
+    scope: "active",
+    sort: [{ key: "updated_at", direction: "desc" }],
+    page: { limit: 3 },
+  });
+  await session.handleMessage({
+    type: "fetch_workspaces_request",
+    requestId: "paged-workspaces-1",
+    sort: [{ key: "activity_at", direction: "desc" }],
+    page: { limit: 2 },
+  });
+  const actual = normalizeGolden(
+    emitted.filter(
+      (message) =>
+        message.type === "fetch_agents_response" || message.type === "fetch_workspaces_response",
+    ),
+  );
+  if (process.env.UPDATE_SLIM_GOLDEN === "1") writeFileSync(OLD_CLIENT_GOLDEN, actual);
+  expect(actual).toBe(readFileSync(OLD_CLIENT_GOLDEN, "utf8"));
+});
+
+function slimAgentRequest(extra: Record<string, unknown> = {}) {
+  return {
+    type: "fetch_agents_request" as const,
+    requestId: "slim-agents",
+    scope: "active" as const,
+    includeBackground: true,
+    sort: [{ key: "updated_at" as const, direction: "desc" as const }],
+    slim: true,
+    omitIdleDelegated: true,
+    ...extra,
+  };
+}
+
+test("slim fetch_agents: priority first page of slim rows, idle children omitted, plain later pages", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = createSlimDirectoryFixtureSession((message) => emitted.push(message));
+  await session.handleMessage(slimAgentRequest({ page: { limit: 6 }, sync: {} }));
+  const first = filterByType(emitted, "fetch_agents_response").at(-1)!.payload;
+  expect(agentIdsFromEntries(first.entries)).toEqual([
+    "old-pinned",
+    "running-child",
+    "old-running",
+    "old-needs-input",
+    "recent-1",
+    "recent-2",
+  ]);
+  for (const entry of first.entries) {
+    const agent = entry.agent as Record<string, unknown>;
+    expect(agent.slim).toBe(true);
+    expect(agent.capabilities).toBeUndefined();
+    expect(agent.persistence).toBeUndefined();
+    expect(agent.runtimeInfo).toBeUndefined();
+  }
+  expect(first.sync).toMatchObject({ mode: "snapshot" });
+  expect(first.pageInfo.hasMore).toBe(true);
+
+  await session.handleMessage(
+    slimAgentRequest({
+      requestId: "slim-2",
+      page: { limit: 6, cursor: first.pageInfo.nextCursor },
+    }),
+  );
+  const second = filterByType(emitted, "fetch_agents_response").at(-1)!.payload;
+  expect(agentIdsFromEntries(second.entries)).toEqual([
+    "running-child",
+    "recent-3",
+    "old-running",
+    "old-needs-input",
+    "old-pinned",
+    "oldest",
+  ]);
+  expect(second.pageInfo.hasMore).toBe(false);
+  expect(second.sync).toBeUndefined();
+
+  // Warm reconnect: sync cursor -> "changes" with nothing new, unpaged.
+  await session.handleMessage(
+    slimAgentRequest({
+      requestId: "slim-warm",
+      page: { limit: 6 },
+      sync: {
+        generation: first.sync!.generation,
+        afterSeq: first.sync!.headSeq,
+      },
+    }),
+  );
+  const warm = filterByType(emitted, "fetch_agents_response").at(-1)!.payload;
+  expect(warm.sync).toMatchObject({
+    mode: "changes",
+    headSeq: first.sync!.headSeq,
+  });
+  expect(warm.entries).toEqual([]);
+});
+
+test("slim fetch_agents defaults to a 25-row page and keeps idle children when not asked to omit", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = createSlimDirectoryFixtureSession((message) => emitted.push(message));
+  await session.handleMessage(slimAgentRequest({ omitIdleDelegated: undefined }));
+  const page = filterByType(emitted, "fetch_agents_response").at(-1)!.payload;
+  expect(page.entries).toHaveLength(9);
+  expect(agentIdsFromEntries(page.entries)).toContain("idle-child");
+  expect(page.pageInfo.hasMore).toBe(false);
+});
+
+test("slim fetch_workspaces: first page carries pinned, active and the slim agent page's workspaces", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = createSlimDirectoryFixtureSession((message) => emitted.push(message));
+  await session.handleMessage({
+    type: "fetch_workspaces_request",
+    requestId: "slim-ws",
+    includeBackground: true,
+    sort: [{ key: "activity_at", direction: "desc" }],
+    page: { limit: 2 },
+    slim: true,
+    sync: {},
+  });
+  const first = filterByType(emitted, "fetch_workspaces_response").at(-1)!.payload;
+  const ids = first.entries.map((workspace) => workspace.id);
+  // agent page (limit 2): old-pinned (ws-5), running-child (ws-2), old-running (ws-3),
+  // old-needs-input (ws-4), one fill recent-1 (ws-0); ws-5 is pinned.
+  expect(ids[0]).toBe("ws-slim-5");
+  expect([...ids].sort()).toEqual(
+    ["ws-slim-0", "ws-slim-2", "ws-slim-3", "ws-slim-4", "ws-slim-5", "ws-slim-1"].sort(),
+  );
+  expect(first.sync).toMatchObject({ mode: "snapshot" });
+  expect(first.pageInfo.hasMore).toBe(false);
 });

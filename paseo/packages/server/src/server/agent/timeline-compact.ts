@@ -1,4 +1,5 @@
 import type { AgentTimelineItem, ToolCallDetail } from "./agent-sdk-types.js";
+import { createHash } from "node:crypto";
 
 /**
  * Compact projection (`compactTimeline`). Background and catch-up fetches from clients on slow
@@ -229,4 +230,66 @@ function stripLarge(metadata: Record<string, unknown>): Record<string, unknown> 
     if (byteLength(value) <= 128) out[key] = value;
   }
   return out;
+}
+
+/**
+ * Short projection (PS2 B1b, `priority_sync` clients, pages and live rows). The open chat reads as
+ * text with one-line steps: tool calls become the lean stub (name, status, the identifying line,
+ * the first error line), reasoning keeps a one-line preview, user and assistant text is never cut.
+ * A shortened tool call is marked `metadata.paseoCompact = { omittedBytes, lean, short, bodyHash? }`.
+ * `bodyHash` (16 hex, a 64-bit content hash of the full item) is set only once the call is final
+ * (completed or failed), so a body cached under it is never stale. The full row comes from
+ * `agent.timeline.bodies.request` (by seq or callId) or `agent.timeline.item.request`.
+ */
+export const SHORT_REASONING_CHARS = 200;
+
+const bodyHashes = new WeakMap<object, string>();
+
+/** 64-bit content hash of the full item, as 16 hex chars. Cached per item object. */
+export function timelineBodyHash(item: AgentTimelineItem): string {
+  const cached = bodyHashes.get(item);
+  if (cached) return cached;
+  const hash = createHash("sha256")
+    .update(JSON.stringify(item) ?? "")
+    .digest("hex")
+    .slice(0, 16);
+  bodyHashes.set(item, hash);
+  return hash;
+}
+
+export function isFinalTimelineItem(item: AgentTimelineItem): boolean {
+  return item.type !== "tool_call" || item.status === "completed" || item.status === "failed";
+}
+
+function previewLine(text: string, chars: number): string {
+  const first = text.split("\n", 1)[0] ?? "";
+  return first.length > chars || first.length < text.length ? `${first.slice(0, chars)}…` : first;
+}
+
+/** Returns the same reference when nothing changes. Never drops a row (live seqs stay dense). */
+export function shortTimelineItem(item: AgentTimelineItem): AgentTimelineItem {
+  if (item.type === "reasoning") {
+    const text = previewLine(item.text, SHORT_REASONING_CHARS);
+    return text === item.text ? item : { ...item, text };
+  }
+  if (item.type !== "tool_call") return item;
+  const marker = item.metadata?.[COMPACT_METADATA_KEY] as { short?: unknown } | undefined;
+  if (marker?.short === true) return item;
+  const stub = leanTimelineItem(item);
+  if (!stub || stub === item) return item;
+  const leanMarker = (stub as ToolCallItem).metadata?.[COMPACT_METADATA_KEY] as {
+    omittedBytes: number;
+  };
+  return {
+    ...stub,
+    metadata: {
+      ...(stub as ToolCallItem).metadata,
+      [COMPACT_METADATA_KEY]: {
+        omittedBytes: leanMarker.omittedBytes,
+        lean: true,
+        short: true,
+        ...(isFinalTimelineItem(item) ? { bodyHash: timelineBodyHash(item) } : {}),
+      },
+    },
+  } as AgentTimelineItem;
 }

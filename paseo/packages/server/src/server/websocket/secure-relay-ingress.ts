@@ -42,6 +42,8 @@ export interface SecureRelayIngressOptions {
    * runtime applies to every admission from that moment on.
    */
   requireProtectedMode: () => boolean;
+  /** Noise msg1 from the upgrade (direct sockets, HS1): answered at once, no in-band hello needed. */
+  carriedMsg1?: string;
 }
 
 /**
@@ -76,6 +78,7 @@ export async function admitSecuredRelaySocket(
     const channel = await openDaemonSecureChannel(relayTransport, {
       daemonKeyPair: options.daemonKeyPair,
       minimumMode: () => (options.requireProtectedMode() ? "protected" : "legacy"),
+      ...(options.carriedMsg1 !== undefined ? { carriedMsg1: options.carriedMsg1 } : {}),
       events: {
         onmessage: emitMessage,
         onclose: (code, reason) => emitter.emit("close", code, reason),

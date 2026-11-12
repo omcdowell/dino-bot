@@ -31,6 +31,21 @@ function mergeSnapshotTurn(previous: Agent | undefined, incoming: Agent): Agent 
   return turn === incoming.turn ? incoming : { ...incoming, turn };
 }
 
+/**
+ * slimDirectory: a slim row (no capabilities/persistence/runtimeInfo) never downgrades
+ * a full row that is already known; it updates everything else.
+ */
+export function keepFullAgentDetail(previous: Agent | undefined, incoming: Agent): Agent {
+  if (!incoming.slim || !previous || previous.slim) return incoming;
+  const { slim: _slim, ...rest } = incoming;
+  return {
+    ...rest,
+    capabilities: previous.capabilities,
+    persistence: previous.persistence,
+    ...(previous.runtimeInfo ? { runtimeInfo: previous.runtimeInfo } : {}),
+  };
+}
+
 export class AgentStoreProjection {
   constructor(private readonly serverId: string) {}
 
@@ -59,7 +74,10 @@ export class AgentStoreProjection {
     let accepted = agent;
     useSessionStore.getState().setAgents(this.serverId, (current) => {
       const previous = current.get(agent.id);
-      accepted = acceptAgentDirectoryUpdate(previous, mergeSnapshotTurn(previous, agent));
+      accepted = acceptAgentDirectoryUpdate(
+        previous,
+        mergeSnapshotTurn(previous, keepFullAgentDetail(previous, agent)),
+      );
       if (accepted === previous) return current;
       const next = new Map(current);
       next.set(agent.id, accepted);
@@ -116,7 +134,7 @@ export class AgentStoreProjection {
     const agents = new Map<string, Agent>();
     for (const [agentId, fetchedAgent] of fetched) {
       const existing = current.get(agentId);
-      const merged = mergeSnapshotTurn(existing, fetchedAgent);
+      const merged = mergeSnapshotTurn(existing, keepFullAgentDetail(existing, fetchedAgent));
       agents.set(agentId, existing && equal(existing, merged) ? existing : merged);
       if (fetchedAgent.archivedAt) {
         clearArchiveAgentPending({ queryClient, serverId: this.serverId, agentId });

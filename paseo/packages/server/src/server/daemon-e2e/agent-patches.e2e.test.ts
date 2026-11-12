@@ -11,6 +11,7 @@ import {
   JsonFrameDecompressor,
 } from "@getpaseo/protocol/binary-frames/compressed-json";
 import type { SessionOutboundMessage } from "@getpaseo/protocol/messages";
+import { toClientAgentPayload } from "../agent/agent-projections.js";
 import { createDaemonTestContext, type DaemonTestContext } from "../test-utils/index.js";
 
 /**
@@ -115,4 +116,53 @@ test("capable clients get patches but see full updates; old clients keep full sn
   }
   // Repeats that change nothing are not sent at all.
   expect(modern.updates.length).toBeLessThanOrEqual(old.updates.length);
+});
+
+test("A6: compact_v2 clients patch on the snapshot row; priority_sync-only and agent_patches-only apps are unchanged", async () => {
+  // The agent exists before anyone subscribes, as when the app opens the sidebar and then a turn runs.
+  const agent = await ctx.client.createAgent({ provider: "codex", cwd, title: "patch base" });
+  await ctx.client.sendAgentMessage(agent.id, "warm up");
+  await ctx.client.waitForFinish(agent.id, 15_000);
+
+  const modern = await observer();
+  const b1d = await observer({ compact_v2: false });
+  const build7 = await observer({ priority_sync: false, compact_v2: false });
+  const old = await observer({ agent_patches: false, priority_sync: false, compact_v2: false });
+  const mark = {
+    modern: modern.wire.length,
+    b1d: b1d.wire.length,
+    build7: build7.wire.length,
+    old: old.wire.length,
+  };
+
+  await ctx.client.sendAgentMessage(agent.id, "hello there, how are you");
+  await ctx.client.waitForFinish(agent.id, 15_000);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  const during = (wire: string[], from: number) =>
+    wire.slice(from).filter((type) => type === "agent_update" || type === "agent_patch");
+  // Modern: the snapshot was rev 1, so the turn carries only patches.
+  expect(during(modern.wire, mark.modern)).not.toContain("agent_update");
+  expect(during(modern.wire, mark.modern)).toContain("agent_patch");
+  // B1d app (priority_sync, no compact_v2): no observeSnapshot, so first change in full.
+  expect(during(b1d.wire, mark.b1d)[0]).toBe("agent_update");
+  // Build 3/7 (agent_patches, no priority_sync): first change still in full, then patches.
+  expect(during(build7.wire, mark.build7)[0]).toBe("agent_update");
+  expect(during(build7.wire, mark.build7)).toContain("agent_patch");
+  expect(during(old.wire, mark.old)).not.toContain("agent_patch");
+
+  // Listeners on all three see the same final agent.
+  const last = (updates: AgentUpdate["payload"][]) => {
+    const found = updates.findLast((u) => u.kind === "upsert" && u.agent.id === agent.id);
+    if (found?.kind !== "upsert") throw new Error("no upsert");
+    return found.agent;
+  };
+  // D0 is gated on priority_sync: modern and B1d get the trimmed persistence handle, build 3/7 and
+  // old get it in full. Otherwise all four end in the same agent.
+  expect(last(old.updates).persistence).toHaveProperty("metadata");
+  expect(last(build7.updates)).toEqual(last(old.updates));
+  expect(last(b1d.updates)).toEqual(toClientAgentPayload(last(old.updates)));
+  expect(last(modern.updates)).toEqual(toClientAgentPayload(last(old.updates)));
+  expect(statuses(modern.updates, agent.id)).toEqual(statuses(old.updates, agent.id));
+  expect(last(modern.updates).status).toBe("idle");
 });

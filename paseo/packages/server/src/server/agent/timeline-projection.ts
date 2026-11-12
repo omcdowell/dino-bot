@@ -327,6 +327,27 @@ export class TimelineProjection {
     return this.rows.map((row) => ({ ...row }));
   }
 
+  /** PS2 bodies: a tool/plugin row by its identity (callId), through the identity index. */
+  findByIdentity(identity: string): ProjectedTimelineRow | null {
+    const index = this.identities.get(identity);
+    const row = index === undefined ? undefined : this.rows[index];
+    return row ? { ...row } : null;
+  }
+
+  /** PS2 bodies: rows with a source seq in [from, to] (inclusive), in timeline order. */
+  findBySeqRange(from: number, to: number, max: number): ProjectedTimelineRow[] {
+    const out: ProjectedTimelineRow[] = [];
+    for (const row of this.rows) {
+      if (out.length >= max) break;
+      if (row.seqStart > to || row.seqEnd < from) continue;
+      const ranges = row.sourceSeqRanges.length
+        ? row.sourceSeqRanges
+        : [{ startSeq: row.seqStart, endSeq: row.seqEnd }];
+      if (ranges.some((range) => range.startSeq <= to && range.endSeq >= from)) out.push({ ...row });
+    }
+    return out;
+  }
+
   enrichSubmittedUserMessage(
     clientMessageId: string,
     providerMessageId: string,

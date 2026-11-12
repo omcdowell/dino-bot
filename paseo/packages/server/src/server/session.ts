@@ -94,6 +94,14 @@ import {
 } from "./lifecycle-reasons.js";
 import { DirectorySyncService } from "./directory-sync/index.js";
 import {
+  SLIM_DIRECTORY_PAGE_LIMIT,
+  isAgentActive,
+  isIdleDelegatedAgent,
+  isWorkspaceActive,
+  priorityFirstPage,
+  slimAgentSnapshot,
+} from "./directory-sync/slim.js";
+import {
   assertWorkspaceAutomationAllowedForWorkspace,
   clearWorkspaceAutomationBlock,
   formatWorkspaceAutomationBlockedMessage,
@@ -125,13 +133,23 @@ import {
   setAgentModeCommand,
   updateAgentCommand,
 } from "./agent/lifecycle-command.js";
-import { buildStoredAgentPayload, toAgentPayload } from "./agent/agent-projections.js";
+import {
+  buildStoredAgentPayload,
+  toAgentPayload,
+  toClientAgentPayload,
+} from "./agent/agent-projections.js";
 import {
   appendTimelineItemIfAgentKnown,
   emitLiveTimelineItemIfAgentKnown,
 } from "./agent/timeline-append.js";
 import { assertPluginTimelineDataSize } from "./agent/agent-timeline-content.js";
-import { compactTimelineItem, leanTimelineItem } from "./agent/timeline-compact.js";
+import {
+  compactTimelineItem,
+  leanTimelineItem,
+  shortTimelineItem,
+  timelineBodyHash,
+  isFinalTimelineItem,
+} from "./agent/timeline-compact.js";
 import { parsePluginClientId } from "./plugins/plugin-session-identity.js";
 import { pluginCatalogForClient } from "./plugins/catalog-bundles.js";
 import { buildAgentForkContextAttachment } from "./agent/activity-curator.js";
@@ -302,6 +320,26 @@ function errorToFriendlyMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
   return "Unknown error";
+}
+
+/** priority_sync bodies: a body message stays under 16 KB on the wire (JSON escaping included). */
+const BODY_CHUNK_BYTES = 12 * 1024;
+
+/** Splits JSON text into parts whose JSON-string encoding is at most maxBytes each. */
+export function chunkJsonText(text: string, maxBytes: number): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    let end = Math.min(text.length, start + maxBytes);
+    while (end > start + 1 && Buffer.byteLength(JSON.stringify(text.slice(start, end)), "utf8") > maxBytes)
+      end = start + Math.max(1, Math.floor((end - start) * 0.8));
+    // never split a surrogate pair
+    const code = text.charCodeAt(end - 1);
+    if (end < text.length && code >= 0xd800 && code <= 0xdbff) end -= 1;
+    parts.push(text.slice(start, end));
+    start = end;
+  }
+  return parts;
 }
 
 function isAppVersionAtLeast(appVersion: string | null, minVersion: string): boolean {
@@ -1125,6 +1163,7 @@ export class Session {
         this.agentDirectory.includes(agent, includeBackground),
       emit: (message) => this.emit(message),
       enrichAgentPayload: (payload) => this.enrichAgentPayload(payload),
+      clientAgentPayload: (payload) => this.clientAgentPayload(payload),
       buildStoredAgentPayload: (record) => this.buildStoredAgentPayload(record),
       isProviderVisibleToClient: (provider) => this.isProviderVisibleToClient(provider),
       buildProjectPlacementForWorkspaceId: (workspaceId) =>
@@ -1293,6 +1332,13 @@ export class Session {
     }
   }
 
+  /** priority_sync (B1c): does this socket already receive the agent's live timeline? */
+  isTimelineSubscribed(agentId: string, source: object): boolean {
+    for (const subscription of this.timelineSubscriptions.values())
+      if (subscription.owner.source === source && subscription.agentIds.has(agentId)) return true;
+    return false;
+  }
+
   clearAgentTimelineSubscription(source: object): void {
     void this.delivery
       .detach(source)
@@ -1342,6 +1388,24 @@ export class Session {
       type: "agent_stream",
       payload: this.buildAgentStreamPayload(event, serializedEvent),
     };
+    // priority_sync: capable sockets get the live row in short form (built once, on first use).
+    let shortMessage: SessionOutboundMessage | null = null;
+    const forSource = (source: object): SessionOutboundMessage => {
+      if (serializedEvent.type !== "timeline" || !this.wantsShortRows(source)) return message;
+      if (shortMessage) return shortMessage;
+      const item = shortTimelineItem(serializedEvent.item as AgentTimelineItem);
+      shortMessage =
+        item === serializedEvent.item
+          ? message
+          : {
+              type: "agent_stream",
+              payload: this.buildAgentStreamPayload(event, {
+                ...serializedEvent,
+                item,
+              } as typeof serializedEvent),
+            };
+      return shortMessage;
+    };
     for (const subscription of this.timelineSubscriptions.values()) {
       const source = subscription.owner.source;
       if (!subscription.agentIds.has(event.agentId)) continue;
@@ -1356,7 +1420,7 @@ export class Session {
         !this.supportsTimelineItem(serializedEvent.item, source)
       )
         continue;
-      subscription.owner.emit(message);
+      subscription.owner.emit(forSource(source));
     }
     // COMPAT(ownedSubscriptions): added in v0.8.0, remove implicit timeline delivery after 2027-03-09.
     for (const [source, { capabilities }] of this.clientSources) {
@@ -1371,7 +1435,7 @@ export class Session {
         (subscription) =>
           subscription.owner.source === source && subscription.agentIds.has(event.agentId),
       );
-      if (!alreadyDelivered) this.onMessageToSource?.(source, message);
+      if (!alreadyDelivered) this.onMessageToSource?.(source, forSource(source));
     }
     if (
       this.clientSources.size === 0 &&
@@ -1379,6 +1443,14 @@ export class Session {
       this.timelineSubscriptions.size === 0
     )
       this.emit(message);
+  }
+
+  /** priority_sync (PS2 B1b): short rows on pages and live. PASEO_PRIORITY_SYNC=0 turns it off. */
+  private wantsShortRows(source?: object): boolean {
+    if (process.env.PASEO_PRIORITY_SYNC === "0") return false;
+    return source
+      ? this.supportsForSource(CLIENT_CAPS.prioritySync, source)
+      : this.supports(CLIENT_CAPS.prioritySync);
   }
 
   supports(capability: ClientCapability): boolean {
@@ -2096,14 +2168,23 @@ export class Session {
   }
 
   private buildAgentPayload(agent: ManagedAgent): Promise<AgentSnapshotPayload> {
-    return this.enrichAgentPayload(toAgentPayload(agent));
+    return this.enrichAgentPayload(this.clientAgentPayload(toAgentPayload(agent)));
+  }
+
+  /**
+   * D0 (server-trim), gated on priority_sync: those clients get the agent without
+   * persistence.nativeHandle/metadata and runtimeInfo.extra. Every other client (shipped builds,
+   * CLI, anything that resumes from a client-held handle) keeps the full fields as before.
+   */
+  private clientAgentPayload(payload: AgentSnapshotPayload): AgentSnapshotPayload {
+    return this.supports(CLIENT_CAPS.prioritySync) ? toClientAgentPayload(payload) : payload;
   }
 
   private buildStoredAgentPayload(
     record: StoredAgentRecord,
     registeredProviderIds = new Set(this.providerSnapshotManager.listRegisteredProviderIds()),
   ): AgentSnapshotPayload {
-    return buildStoredAgentPayload(record, registeredProviderIds);
+    return this.clientAgentPayload(buildStoredAgentPayload(record, registeredProviderIds));
   }
 
   private isProviderVisibleToClient(provider: string): boolean {
@@ -2720,6 +2801,8 @@ export class Session {
         return this.handleAgentTimelineSearchRequest(msg, source);
       case "agent.timeline.item.request":
         return this.handleAgentTimelineItemRequest(msg, source);
+      case "agent.timeline.bodies.request":
+        return this.handleAgentTimelineBodiesRequest(msg, source);
       case "agent_patch.resync":
         return this.handleAgentPatchResync(msg.agentId);
       case "agent.image.thumbnail.request":
@@ -6305,6 +6388,9 @@ export class Session {
           },
           syncEnabled: Boolean(request.sync),
           patches: this.supportsForSource(CLIENT_CAPS.agentPatches, owner.source),
+          // A6 rides on compact_v2: only the app that ships with it seeds bases from the snapshot
+          // (priority_sync-only clients, e.g. B1d, have no observeSnapshot and must keep agent_update).
+          snapshotBases: this.supportsForSource(CLIENT_CAPS.compactV2, owner.source),
           emit: (message) => {
             if (message.type === "agent_update" || message.type === "agent_patch")
               owner.emit(message);
@@ -6313,9 +6399,7 @@ export class Session {
         this.refreshObservationProducers();
       }
 
-      const payload = request.sync
-        ? await this.readAgentDirectorySync(request)
-        : await this.listFetchAgentsEntries(request);
+      const payload = await this.readFetchAgentsPayload(request);
       const snapshotUpdatedAtByAgentId = new Map<string, number>();
       for (const entry of payload.entries) {
         const parsedUpdatedAt = Date.parse(entry.agent.updatedAt);
@@ -6324,12 +6408,14 @@ export class Session {
         }
       }
 
+      const patchBase = owner ? this.agentUpdates.seedSnapshot(owner.id, payload.entries) : false;
       this.emit({
         type: "fetch_agents_response",
         payload: {
           requestId: request.requestId,
           ...(subscriptionId ? { subscriptionId } : {}),
           ...payload,
+          ...(patchBase ? { patchBase: true as const } : {}),
         },
       });
 
@@ -6468,9 +6554,7 @@ export class Session {
         },
         "fetch_workspaces_request_received",
       );
-      const payload = request.sync
-        ? await this.readWorkspaceDirectorySync(request)
-        : await this.listFetchWorkspacesEntries(request);
+      const payload = await this.readFetchWorkspacesPayload(request);
 
       this.sessionLogger.debug(
         {
@@ -6716,6 +6800,157 @@ export class Session {
       ),
     );
     return { ...result, entries: entries.filter((entry) => entry !== null) };
+  }
+
+  private readFetchAgentsPayload(
+    request: Extract<SessionInboundMessage, { type: "fetch_agents_request" }>,
+  ) {
+    if (request.slim) return this.readSlimAgentDirectory(request);
+    if (request.sync) return this.readAgentDirectorySync(request);
+    return this.listFetchAgentsEntries(request);
+  }
+
+  private readFetchWorkspacesPayload(
+    request: Extract<SessionInboundMessage, { type: "fetch_workspaces_request" }>,
+  ) {
+    if (request.slim) return this.readSlimWorkspaceDirectory(request);
+    if (request.sync) return this.readWorkspaceDirectorySync(request);
+    return this.listFetchWorkspacesEntries(request);
+  }
+
+  /**
+   * slimDirectory (B3). Slim rows; idle delegated children optionally left out; a
+   * sequenced snapshot or uncursored read returns only the priority first page
+   * (pinned, needs-input/running, then recency). Sequenced "changes" reads are not
+   * paged, so sync cursors and warm reconnects are unchanged.
+   */
+  private async readSlimAgentDirectory(
+    request: Extract<SessionInboundMessage, { type: "fetch_agents_request" }>,
+  ): Promise<{
+    entries: FetchAgentsResponseEntry[];
+    pageInfo: FetchAgentsResponsePageInfo;
+    sync?: Awaited<ReturnType<Session["readAgentDirectorySync"]>>["sync"];
+  }> {
+    const limit = request.page?.limit ?? SLIM_DIRECTORY_PAGE_LIMIT;
+    const cursor = request.page?.cursor;
+    const sort = this.agentsPager.normalizeSort(request.sort);
+    const keep = (entry: FetchAgentsResponseEntry) =>
+      !request.omitIdleDelegated || !isIdleDelegatedAgent(entry.agent);
+    const slimEntry = (entry: FetchAgentsResponseEntry): FetchAgentsResponseEntry => ({
+      ...entry,
+      agent: slimAgentSnapshot(entry.agent),
+    });
+    const synced = request.sync && !cursor ? await this.readAgentDirectorySync(request) : null;
+    if (synced?.sync?.mode === "changes") {
+      return { ...synced, entries: synced.entries.map(slimEntry) };
+    }
+    const rows = (
+      synced
+        ? synced.entries
+        : (
+            await this.listFetchAgentsEntries({
+              ...request,
+              sync: undefined,
+              page: {
+                limit: Number.MAX_SAFE_INTEGER,
+                ...(cursor ? { cursor } : {}),
+              },
+            })
+          ).entries
+    )
+      .filter(keep)
+      .sort((left, right) => this.agentsPager.compare(left.agent, right.agent, sort));
+    if (cursor) {
+      const page = rows.slice(0, limit);
+      const hasMore = rows.length > limit;
+      return {
+        entries: page.map(slimEntry),
+        pageInfo: {
+          nextCursor: hasMore ? this.agentsPager.encode(page[page.length - 1].agent, sort) : null,
+          prevCursor: cursor,
+          hasMore,
+        },
+      };
+    }
+    const pinned = await this.pinnedWorkspaceIds();
+    const first = priorityFirstPage(rows, limit, (entry) => {
+      if (entry.agent.workspaceId && pinned.has(entry.agent.workspaceId)) return 0;
+      return isAgentActive(entry.agent) ? 1 : 2;
+    });
+    return {
+      ...synced,
+      entries: first.page.map(slimEntry),
+      pageInfo: {
+        nextCursor:
+          first.hasMore && first.anchor ? this.agentsPager.encode(first.anchor.agent, sort) : null,
+        prevCursor: null,
+        hasMore: first.hasMore,
+      },
+    };
+  }
+
+  private async pinnedWorkspaceIds(): Promise<Set<string>> {
+    const workspaces = await this.workspaceRegistry.list();
+    return new Set(
+      workspaces
+        .filter((workspace) => workspace.pinnedAt && !workspace.archivedAt)
+        .map((workspace) => workspace.workspaceId),
+    );
+  }
+
+  /**
+   * slimDirectory (B3). First page = the workspaces of the slim agent first page plus
+   * pinned and needs-input/running workspaces, then recency; later pages are plain.
+   */
+  private async readSlimWorkspaceDirectory(
+    request: Extract<SessionInboundMessage, { type: "fetch_workspaces_request" }>,
+  ) {
+    const limit = request.page?.limit ?? SLIM_DIRECTORY_PAGE_LIMIT;
+    if (request.page?.cursor) {
+      return this.listFetchWorkspacesEntries({
+        ...request,
+        sync: undefined,
+        page: { limit, cursor: request.page.cursor },
+      });
+    }
+    const base = request.sync
+      ? await this.readWorkspaceDirectorySync(request)
+      : await this.listFetchWorkspacesEntries({
+          ...request,
+          page: { limit: Number.MAX_SAFE_INTEGER },
+        });
+    const baseSync = "sync" in base ? (base.sync as { mode?: string } | undefined) : undefined;
+    if (baseSync?.mode === "changes") return base;
+    const agentPage = await this.readSlimAgentDirectory({
+      type: "fetch_agents_request",
+      requestId: request.requestId,
+      scope: "active",
+      ...(request.includeBackground ? { includeBackground: true } : {}),
+      omitIdleDelegated: true,
+      page: { limit },
+    });
+    const agentWorkspaceIds = new Set(
+      agentPage.entries.flatMap((entry) =>
+        entry.agent.workspaceId ? [entry.agent.workspaceId] : [],
+      ),
+    );
+    const rows = this.workspaceDirectory.sortEntries(base.entries, request.sort);
+    const first = priorityFirstPage(rows, limit, (workspace) => {
+      if (workspace.pinnedAt) return 0;
+      return isWorkspaceActive(workspace) || agentWorkspaceIds.has(workspace.id) ? 1 : 2;
+    });
+    return {
+      ...base,
+      entries: first.page,
+      pageInfo: {
+        nextCursor:
+          first.hasMore && first.anchor
+            ? this.workspaceDirectory.encodeCursor(first.anchor, request.sort)
+            : null,
+        prevCursor: null,
+        hasMore: first.hasMore,
+      },
+    };
   }
 
   private async readWorkspaceDirectorySync(
@@ -7900,8 +8135,11 @@ export class Session {
         selectedTimeline.endSeq !== null
           ? { epoch: selectedTimeline.timeline.epoch, seq: selectedTimeline.endSeq }
           : null;
+      // priority_sync: short rows by default (lean wins; full: true opts out; compact is ignored).
+      const short = msg.lean !== true && msg.full !== true && this.wantsShortRows(source);
       const entries = selectedTimeline.entries.flatMap((entry) => {
         if (!this.supportsTimelineItem(entry.item, source)) return [];
+        if (short) return [{ ...entry, item: shortTimelineItem(entry.item) }];
         if (msg.lean !== true) return [entry];
         // leanTimeline: a chat nobody is looking at; no reasoning, tool calls as stubs.
         const item = leanTimelineItem(entry.item);
@@ -7930,7 +8168,7 @@ export class Session {
             entries: entries.map((entry) => {
               const payloadEntry = {
                 provider: snapshot.provider,
-                item: msg.compact === true ? compactTimelineItem(entry.item) : entry.item,
+                item: msg.compact === true && !short ? compactTimelineItem(entry.item) : entry.item,
                 timestamp: entry.timestamp,
                 seqStart: entry.seqStart,
                 seqEnd: entry.seqEnd,
@@ -8039,6 +8277,87 @@ export class Session {
       reply(null, "Item not found");
     } catch (error) {
       reply(null, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /**
+   * priority_sync bodies: full rows for short rows, by seq ranges and callIds. One
+   * agent.timeline.body per row (rows over BODY_CHUNK_BYTES come as chunks of their JSON), then
+   * agent.timeline.bodies.done. Rows whose final bodyHash the client already has are skipped.
+   * Reads the live timeline or the durable store; never loads or resumes an agent (notLoaded).
+   * The lane comes from priority (lane-policy.ts); without one, a single key counts as a tap.
+   */
+  private async handleAgentTimelineBodiesRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.timeline.bodies.request" }>,
+    source?: object,
+  ): Promise<void> {
+    const keyCount = (msg.callIds?.length ?? 0) + (msg.seqs?.length ?? 0);
+    const singleSeq = msg.seqs?.length === 1 && msg.seqs[0][0] === msg.seqs[0][1];
+    const priority =
+      msg.priority ?? (keyCount === 1 && (singleSeq || !msg.seqs?.length) ? "tap" : undefined);
+    const base = { requestId: msg.requestId, agentId: msg.agentId, ...(priority ? { priority } : {}) };
+    const done = (fields: {
+      sent: number;
+      skipped: number;
+      missing: (number | string)[];
+      notLoaded?: boolean;
+      error: string | null;
+    }) =>
+      this.emitForSource(
+        { type: "agent.timeline.bodies.done", payload: { ...base, ...fields } },
+        source,
+      );
+    try {
+      const found = await this.agentManager.findTimelineBodyRows(msg.agentId, {
+        seqs: msg.seqs,
+        callIds: msg.callIds,
+      });
+      if (!found) {
+        done({ sent: 0, skipped: 0, missing: [], notLoaded: true, error: "Agent is not loaded" });
+        return;
+      }
+      const have = new Set(msg.have ?? []);
+      let sent = 0;
+      let skipped = 0;
+      for (const row of found.rows) {
+        if (!this.supportsTimelineItem(row.item, source)) continue;
+        const final = isFinalTimelineItem(row.item);
+        const hash = final ? timelineBodyHash(row.item) : undefined;
+        if (hash && have.has(hash)) {
+          skipped += 1;
+          continue;
+        }
+        const head = {
+          ...base,
+          seq: row.seqStart,
+          ...(row.item.type === "tool_call" ? { callId: row.item.callId } : {}),
+          ...(hash ? { hash } : {}),
+        };
+        const json = JSON.stringify(row.item);
+        if (Buffer.byteLength(json, "utf8") <= BODY_CHUNK_BYTES) {
+          this.emitForSource({ type: "agent.timeline.body", payload: { ...head, item: row.item } }, source);
+        } else {
+          const parts = chunkJsonText(json, BODY_CHUNK_BYTES);
+          parts.forEach((part, index) =>
+            this.emitForSource(
+              {
+                type: "agent.timeline.body",
+                payload: { ...head, chunk: [index, parts.length, part] },
+              },
+              source,
+            ),
+          );
+        }
+        sent += 1;
+      }
+      done({ sent, skipped, missing: found.missing, error: null });
+    } catch (error) {
+      done({
+        sent: 0,
+        skipped: 0,
+        missing: [],
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

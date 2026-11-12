@@ -71,6 +71,34 @@ export interface ClientSecureChannelOptions {
   /** Lowest mode this client accepts. "protected" refuses a daemon that only offers legacy. */
   minimumMode?: SecurityMode;
   events?: SecureChannelEvents;
+  /**
+   * A handshake prepared before the transport opened (see
+   * {@link prepareClientSecureHandshake}) whose Noise msg1 was offered in the
+   * WebSocket upgrade. Without it the channel builds its own and sends msg1 in-band.
+   */
+  prepared?: PreparedClientHandshake;
+  /**
+   * What became of the msg1 carried in the upgrade:
+   * - "accepted": the daemon selected {@link UPGRADE_CARRIER_ACCEPTED_SUBPROTOCOL}; its ready is
+   *   the first frame, so nothing is sent in-band unless no ready arrives within 1 s.
+   * - "ignored": the daemon selected another subprotocol (older daemon): msg1 goes in-band now.
+   * - "unknown": the runtime does not report the selected subprotocol: wait up to 1 s, then in-band.
+   * Every in-band fallback re-sends the same msg1, so the transcript never changes.
+   */
+  carrier?: "accepted" | "ignored" | "unknown";
+  /** Reports whether the daemon's ready arrived before any in-band hello was sent. */
+  onCarrierOutcome?: (answeredWithoutInBandHello: boolean) => void;
+}
+
+/**
+ * Client handshake state built before the socket opens so msg1 can ride in the
+ * upgrade. Same pattern, keys, prologue and payload as the in-band hello.
+ */
+export interface PreparedClientHandshake {
+  /** Subprotocols to offer after DIRECT_E2EE_SUBPROTOCOL: the accept marker and the msg1 carrier. */
+  readonly upgradeProtocols: readonly string[];
+  /** @internal */
+  readonly state: ClientHandshakeSetup;
 }
 
 export interface DaemonSecureChannelOptions {
@@ -82,6 +110,12 @@ export interface DaemonSecureChannelOptions {
    */
   minimumMode?: SecurityMode | (() => SecurityMode);
   events?: SecureChannelEvents;
+  /**
+   * The value of the msg1 carrier subprotocol from the upgrade request, when the
+   * daemon selected {@link UPGRADE_CARRIER_ACCEPTED_SUBPROTOCOL}. The daemon then
+   * processes it as if it were the protected part of an in-band hello, at once.
+   */
+  carriedMsg1?: string;
 }
 
 /** Thrown by {@link openDaemonSecureChannel} when the handshake is refused; carries the close to send. */
@@ -119,6 +153,20 @@ const PARAM_FLAGS_KNOWN = PARAM_FLAG_BINARY_CIPHERTEXT;
 const HANDSHAKE_RETRY_MS = 1000;
 const MAX_PENDING_SENDS = 200;
 
+/**
+ * Upgrade carrier for Noise msg1 (direct sockets). The client offers, after the
+ * direct E2EE subprotocol, this marker plus `UPGRADE_CARRIER_MSG1_PREFIX + base64url(msg1)`.
+ * A daemon that consumed the carried msg1 selects the marker and sends e2ee_ready as its
+ * first frame; an older daemon selects the plain E2EE subprotocol and the client sends
+ * msg1 in-band. Sec-WebSocket-Protocol is a header: proxies (Tailscale serve, nginx,
+ * Caddy) forward it for WebSocket to work at all and do not write it to access logs,
+ * unlike a query string. msg1 is public-key material and an AEAD tag, never app data.
+ */
+export const UPGRADE_CARRIER_ACCEPTED_SUBPROTOCOL = "paseo.e2ee.v1.m1";
+export const UPGRADE_CARRIER_MSG1_PREFIX = "paseo.e2ee.m1.";
+/** Noise NK msg1 with the 2-byte parameter payload is 50 bytes; anything far larger is not msg1. */
+const MAX_CARRIED_MSG1_BYTES = 128;
+
 interface ProtectedEnvelope {
   v: number;
   message: string;
@@ -150,14 +198,17 @@ interface NegotiatedParams {
  * `events.onopen` fires when the channel is usable. Sends queued before open
  * are flushed in order after the handshake, capped at {@link MAX_PENDING_SENDS}.
  */
-export async function openClientSecureChannel(
-  transport: Transport,
-  options: ClientSecureChannelOptions,
-): Promise<SecureChannel> {
-  const events = options.events ?? {};
-  const minimumMode = options.minimumMode ?? "legacy";
-  const daemonPublicKey = importPublicKey(options.daemonPublicKeyB64);
+export interface ClientHandshakeSetup {
+  daemonPublicKeyB64: string;
+  noise: NoiseHandshake;
+  offered: NegotiatedParams;
+  legacySharedKey: Uint8Array;
+  helloText: string;
+  used: boolean;
+}
 
+function buildClientHandshake(daemonPublicKeyB64: string): ClientHandshakeSetup {
+  const daemonPublicKey = importPublicKey(daemonPublicKeyB64);
   // Separate ephemeral keys per protocol: the legacy box key is routing and
   // compatibility input only; the Noise ephemeral lives inside the handshake.
   const legacyKeyPair = generateKeyPair();
@@ -171,7 +222,73 @@ export async function openClientSecureChannel(
     capabilities: { binaryCiphertext: true },
     protected: { v: PROTECTED_ENVELOPE_VERSION, message: arrayBufferToBase64(toArrayBuffer(msg1)) },
   };
-  const helloText = JSON.stringify(hello);
+  return {
+    daemonPublicKeyB64,
+    noise,
+    offered,
+    legacySharedKey,
+    helloText: JSON.stringify(hello),
+    used: false,
+  };
+}
+
+/**
+ * Builds the client handshake before the socket exists, so its msg1 can be
+ * offered in the upgrade. Single use: pass it to exactly one
+ * {@link openClientSecureChannel} on the socket that carried it.
+ */
+export function prepareClientSecureHandshake(daemonPublicKeyB64: string): PreparedClientHandshake {
+  const state = buildClientHandshake(daemonPublicKeyB64);
+  const hello = JSON.parse(state.helloText) as HelloEnvelope;
+  const msg1 = new Uint8Array(base64ToArrayBuffer(hello.protected!.message));
+  return {
+    upgradeProtocols: [
+      UPGRADE_CARRIER_ACCEPTED_SUBPROTOCOL,
+      UPGRADE_CARRIER_MSG1_PREFIX + toBase64Url(msg1),
+    ],
+    state,
+  };
+}
+
+/**
+ * Reads the msg1 carrier from the offered subprotocols. Returns the standard-base64
+ * msg1 (the in-band `protected.message` form), or an Error when a carrier is present
+ * but malformed (several carriers, bad alphabet, non-canonical, oversized). A present
+ * but invalid carrier fails the handshake; it never falls back. null: no carrier.
+ */
+export function readUpgradeCarrier(protocols: Iterable<string>): string | Error | null {
+  const carriers = [...protocols].filter((p) => p.startsWith(UPGRADE_CARRIER_MSG1_PREFIX));
+  if (carriers.length === 0) return null;
+  if (carriers.length > 1) return new NoiseProtocolError("several msg1 carriers");
+  const encoded = carriers[0]!.slice(UPGRADE_CARRIER_MSG1_PREFIX.length);
+  if (!/^[A-Za-z0-9_-]+$/.test(encoded)) return new NoiseProtocolError("malformed msg1 carrier");
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(base64ToArrayBuffer(encoded));
+  } catch {
+    return new NoiseProtocolError("malformed msg1 carrier");
+  }
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_CARRIED_MSG1_BYTES)
+    return new NoiseProtocolError("malformed msg1 carrier");
+  if (toBase64Url(bytes) !== encoded) return new NoiseProtocolError("malformed msg1 carrier");
+  return arrayBufferToBase64(toArrayBuffer(bytes));
+}
+
+export async function openClientSecureChannel(
+  transport: Transport,
+  options: ClientSecureChannelOptions,
+): Promise<SecureChannel> {
+  const events = options.events ?? {};
+  const minimumMode = options.minimumMode ?? "legacy";
+  const setup = options.prepared?.state ?? buildClientHandshake(options.daemonPublicKeyB64);
+  if (setup.used) throw new Error("prepared handshake already used");
+  if (setup.daemonPublicKeyB64 !== options.daemonPublicKeyB64) {
+    throw new Error("prepared handshake is for another daemon key");
+  }
+  setup.used = true;
+  const { noise, offered, legacySharedKey, helloText } = setup;
+  // Without a prepared handshake nothing was carried: always in-band.
+  const carrier = options.prepared ? (options.carrier ?? "ignored") : "ignored";
 
   const channel = new ClientSecureChannel(transport, events, {
     minimumMode,
@@ -180,11 +297,13 @@ export async function openClientSecureChannel(
     legacySharedKey,
   });
 
+  let sentInBand = false;
   let retry: ReturnType<typeof setInterval> | null = null;
   const emitSendError = (error: unknown) => {
     events.onerror?.(error instanceof Error ? error : new Error(String(error)));
   };
   const sendHello = () => {
+    sentInBand = true;
     try {
       const result = transport.send(helloText);
       if (result) void result.catch(emitSendError);
@@ -201,8 +320,13 @@ export async function openClientSecureChannel(
   };
   channel.onTransitionToOpen(clearRetry);
   channel.onClose(clearRetry);
+  if (carrier !== "ignored") {
+    channel.onTransitionToOpen(() => options.onCarrierOutcome?.(!sentInBand));
+  }
 
-  sendHello();
+  // Carried msg1: the daemon's ready is already on its way; the interval below
+  // is the in-band fallback (same msg1) if it does not arrive within 1 s.
+  if (carrier === "ignored") sendHello();
   retry = setInterval(() => {
     if (channel.isOpen()) {
       clearRetry();
@@ -446,8 +570,8 @@ export async function openDaemonSecureChannel(
                 transport,
                 events,
                 options.daemonKeyPair,
-                parsed,
-                helloText,
+                parsed.protected,
+                { helloText, carriedMsg1: null },
               )
             : await acceptLegacyHello(
                 transport,
@@ -467,12 +591,36 @@ export async function openDaemonSecureChannel(
       }
     };
 
+    // msg1 came in the upgrade: answer it now, exactly as if it were the
+    // protected part of an in-band hello. Frames arriving meanwhile (a fallback
+    // in-band hello, early records) are buffered and handled by the channel.
+    const handleCarried = async (carriedMsg1: string): Promise<void> => {
+      try {
+        Object.assign(transport, {
+          onmessage: (next: TransportMessage) => buffered.push(next),
+        });
+        const channel = await acceptProtectedHello(
+          transport,
+          events,
+          options.daemonKeyPair,
+          { v: PROTECTED_ENVELOPE_VERSION, message: carriedMsg1 },
+          { helloText: null, carriedMsg1 },
+        );
+        events.onopen?.();
+        for (const next of buffered) transport.onmessage?.(next);
+        resolve(channel);
+      } catch (error) {
+        reject(error);
+      }
+    };
+
     Object.assign(transport, {
       onmessage: handleHello,
       onerror: (error: Error) => reject(error),
       onclose: (code: number, reason: string) =>
         reject(new Error(`Connection closed during handshake: ${code} ${reason}`)),
     });
+    if (options.carriedMsg1 !== undefined) void handleCarried(options.carriedMsg1);
   });
 }
 
@@ -480,10 +628,9 @@ async function acceptProtectedHello(
   transport: Transport,
   events: SecureChannelEvents,
   daemonKeyPair: KeyPair,
-  hello: HelloEnvelope,
-  helloText: string,
+  envelope: ProtectedEnvelope,
+  retryMatch: Omit<DaemonRetryTranscript, "readyText">,
 ): Promise<SecureChannel> {
-  const envelope = hello.protected!;
   if (envelope.v !== PROTECTED_ENVELOPE_VERSION) {
     throw new NoiseProtocolError("unsupported protected envelope version");
   }
@@ -500,7 +647,7 @@ async function acceptProtectedHello(
   await transport.send(readyText);
   const keys = noise.split();
   return new ProtectedChannel(transport, events, keys.send, keys.receive, selected, {
-    retry: { helloText, readyText },
+    retry: { ...retryMatch, readyText },
     failureCloseCode: DAEMON_RECORD_FAILURE_CLOSE_CODE,
   });
 }
@@ -571,8 +718,31 @@ class LegacyInner implements InnerChannel {
 }
 
 interface DaemonRetryTranscript {
-  helloText: string;
+  /** In-band hello: only the byte-identical hello text is a retry. */
+  helloText: string | null;
+  /**
+   * Carried msg1 (standard base64): an in-band hello is the client's fallback retry
+   * when its protected part carries this exact msg1 (its legacy key is unused in
+   * protected mode and differs per client).
+   */
+  carriedMsg1: string | null;
   readyText: string;
+}
+
+function isRetryOf(retry: DaemonRetryTranscript, helloText: string): boolean {
+  if (retry.helloText !== null) return helloText === retry.helloText;
+  if (retry.carriedMsg1 === null) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(helloText);
+  } catch {
+    return false;
+  }
+  return (
+    isHelloEnvelope(parsed) &&
+    parsed.protected?.v === PROTECTED_ENVELOPE_VERSION &&
+    parsed.protected.message === retry.carriedMsg1
+  );
 }
 
 /**
@@ -635,7 +805,7 @@ class ProtectedChannel implements InnerChannel {
   ): Promise<void> {
     if (handshake.kind === "ready") return; // client ignores duplicate ready after open
     if (!this.role.retry) return; // a client never answers hellos
-    if (handshake.text === this.role.retry.helloText) {
+    if (isRetryOf(this.role.retry, handshake.text)) {
       await this.transport.send(this.role.retry.readyText);
       return;
     }
@@ -818,6 +988,13 @@ function decodeTransportText(data: string | ArrayBuffer): string {
 function requireArrayBuffer(data: string | ArrayBuffer): ArrayBuffer {
   if (data instanceof ArrayBuffer) return data;
   throw new Error("Binary WebSocket frame did not contain bytes");
+}
+
+function toBase64Url(bytes: Uint8Array): string {
+  return arrayBufferToBase64(toArrayBuffer(bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {

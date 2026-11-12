@@ -68,6 +68,91 @@ export const CLIENT_CAPS = {
   // revision) instead of repeated full agent_update snapshots on owned agent subscriptions, and no
   // update at all when nothing changed. Others keep full snapshots.
   agentPatches: "agent_patches",
+  // COMPAT(prioritySync): added in v0.11.3 (PS2). Capable clients get JSON messages through
+  // per-socket priority lanes (open chat and notifications first, bulk last, low-watermark sending)
+  // and may receive several messages in one {"type":"batch","m":[...]} frame. Old clients keep one
+  // frame per message in send order.
+  prioritySync: "priority_sync",
+  // compact_v2 (CV1): directory, status and timeline messages in the compact wire encoding of
+  // protocol/compact-v2 (feature map by hash, per-message tables, omitted defaults, epoch times).
+  // The client undoes it before validation. Old clients keep today's bytes.
+  compactV2: "compact_v2",
 } as const;
 
 export type ClientCapability = (typeof CLIENT_CAPS)[keyof typeof CLIENT_CAPS];
+
+/**
+ * Compact hello capabilities (HS1 option b). Bit i of the `cb` hello field (lowercase hex,
+ * bit 0 = least significant) means CLIENT_CAPABILITY_BITS[i] is true. APPEND-ONLY: never
+ * reorder or remove an entry, or an old client's bits change meaning. Capabilities with a
+ * non-boolean value (browser_host) stay in the `capabilities` map. A daemon merges the bits
+ * under the map; old daemons ignore `cb`, so a client sends the compact form only to a daemon
+ * it knows reads it (one that accepted the msg1 upgrade carrier).
+ */
+export const CLIENT_CAPABILITY_BITS: readonly ClientCapability[] = [
+  CLIENT_CAPS.helloRejection,
+  CLIENT_CAPS.sessionTokens,
+  CLIENT_CAPS.ownedSubscriptions,
+  CLIENT_CAPS.explicitEventSubscriptions,
+  CLIENT_CAPS.allProviders,
+  CLIENT_CAPS.selectiveAgentTimeline,
+  CLIENT_CAPS.reasoningMergeEnum,
+  CLIENT_CAPS.customModeIcons,
+  CLIENT_CAPS.terminalReflowableSnapshot,
+  CLIENT_CAPS.providerSubagents,
+  CLIENT_CAPS.projectedSubagentTimeline,
+  CLIENT_CAPS.projectUpdates,
+  CLIENT_CAPS.compactProviderSnapshots,
+  CLIENT_CAPS.providerSnapshotReferences,
+  CLIENT_CAPS.timelineReplacementInvalidation,
+  CLIENT_CAPS.timelineNotifications,
+  CLIENT_CAPS.pluginTimelineItems,
+  CLIENT_CAPS.workspaceSetupBlocked,
+  CLIENT_CAPS.messageReceivedAck,
+  CLIENT_CAPS.compressedFrames,
+  CLIENT_CAPS.checkedFrames,
+  CLIENT_CAPS.zstdFrames,
+  CLIENT_CAPS.agentPatches,
+  CLIENT_CAPS.prioritySync,
+  CLIENT_CAPS.compactV2,
+];
+
+/** Splits a capability map into the `cb` bits (true values of known bits) and the rest. */
+export function encodeCompactCapabilities(capabilities: Record<string, unknown>): {
+  cb: string;
+  rest: Record<string, unknown>;
+} {
+  // Nibbles, least significant first (no BigInt: older Hermes builds lack it).
+  const nibbles: number[] = [];
+  const rest: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(capabilities)) {
+    const index = CLIENT_CAPABILITY_BITS.indexOf(name as ClientCapability);
+    if (index >= 0 && value === true) {
+      const n = index >> 2;
+      while (nibbles.length <= n) nibbles.push(0);
+      nibbles[n]! |= 1 << (index & 3);
+    } else if (index < 0 || value !== false) {
+      rest[name] = value;
+    }
+  }
+  while (nibbles.length > 1 && nibbles[nibbles.length - 1] === 0) nibbles.pop();
+  const cb =
+    nibbles.length === 0
+      ? "0"
+      : nibbles
+          .map((n) => n.toString(16))
+          .reverse()
+          .join("");
+  return { cb, rest };
+}
+
+/** The `cb` bits as a capability map (unknown high bits from newer clients are ignored). */
+export function decodeCompactCapabilities(cb: string): Partial<Record<ClientCapability, true>> {
+  const out: Partial<Record<ClientCapability, true>> = {};
+  if (!/^[0-9a-f]{1,32}$/.test(cb)) return out;
+  CLIENT_CAPABILITY_BITS.forEach((name, index) => {
+    const char = cb[cb.length - 1 - (index >> 2)];
+    if (char !== undefined && (parseInt(char, 16) >> (index & 3)) & 1) out[name] = true;
+  });
+  return out;
+}

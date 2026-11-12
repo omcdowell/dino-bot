@@ -3,6 +3,10 @@ import type { SessionOutboundMessage } from "@getpaseo/protocol/messages";
 type AgentUpdateMessage = Extract<SessionOutboundMessage, { type: "agent_update" }>;
 type AgentPatchMessage = Extract<SessionOutboundMessage, { type: "agent_patch" }>;
 type UpsertPayload = Extract<AgentUpdateMessage["payload"], { kind: "upsert" }>;
+type FetchAgentsResponseMessage = Extract<
+  SessionOutboundMessage,
+  { type: "fetch_agents_response" }
+>;
 
 interface Base {
   agent: UpsertPayload["agent"];
@@ -40,6 +44,21 @@ export class AgentPatchExpander {
     const key = baseKey(payload.subscriptionId, payload.agent.id);
     this.bases.set(key, { agent: payload.agent, project: payload.project, rev: payload.rev });
     this.resyncing.delete(key);
+  }
+
+  /**
+   * A6: a subscribed fetch_agents_response with patchBase makes each entry rev 1 of its agent on
+   * that subscription, so the first live change can arrive as a patch. Without patchBase (older
+   * daemons) nothing is seeded and the first change still comes in full.
+   */
+  observeSnapshot(message: FetchAgentsResponseMessage): void {
+    const payload = message.payload;
+    if (payload.patchBase !== true || !payload.subscriptionId) return;
+    for (const entry of payload.entries) {
+      const key = baseKey(payload.subscriptionId, entry.agent.id);
+      this.bases.set(key, { agent: entry.agent, project: entry.project, rev: 1 });
+      this.resyncing.delete(key);
+    }
   }
 
   expand(message: AgentPatchMessage): AgentPatchResult {

@@ -33,6 +33,8 @@ const exceptions = {
   terminals_changed: ["subscribe_terminals_request"],
   "usage.list_reports.update": ["usage.list_reports.request"],
   send_agent_message_received: ["send_agent_message_request"],
+  "agent.timeline.body": ["agent.timeline.bodies.request"],
+  "agent.timeline.bodies.done": ["agent.timeline.bodies.request"],
   "daemon.update.progress": ["daemon.update.request"],
   // Transcription belongs to the explicitly retained voice operation, not a request ID.
   transcription_result: [],

@@ -1,4 +1,6 @@
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
+import { ProvisionalReplyPreview } from "@/timeline/provisional-reply-preview";
+import { useToolBodyPrefetch } from "@/timeline/use-body-prefetch";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
@@ -788,6 +790,17 @@ function ChatAgentContent({
       : ("cold" as const),
   );
   const hasAppliedAuthoritativeHistory = replicaTimelineStatus === "synced";
+  const replicaTimelineItemCount = useSessionStore((state) => {
+    if (!agentId) return 0;
+    const timeline = selectAgentTimelineState(state.sessions[serverId], agentId);
+    return "items" in timeline ? timeline.items.length : 0;
+  });
+  useToolBodyPrefetch({
+    serverId,
+    agentId,
+    synced: hasAppliedAuthoritativeHistory,
+    itemCount: replicaTimelineItemCount,
+  });
   const agentHistorySyncGeneration = useSessionStore((state) =>
     agentId ? (state.sessions[serverId]?.agentHistorySyncGeneration?.get(agentId) ?? -1) : -1,
   );
@@ -1272,6 +1285,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
       {bannerBelowFloatingHeader ? <View style={floatingHeaderSpacerStyle} /> : null}
       <ConnectionBanner serverId={serverId} workspaceId={workspaceId} cwd={cwd} />
       {agentStreamSection}
+      <ProvisionalReplyPreview serverId={serverId} agentId={agentId} />
       {hasActiveComposer ? (
         <AgentTracks
           serverId={serverId}

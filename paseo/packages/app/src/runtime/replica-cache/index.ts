@@ -1774,6 +1774,8 @@ export class ReplicaCache {
           inactive.add(entry.serverId);
           continue;
         }
+        // B2b: tool bodies have their own budget (DurableBodyCache); chat rows never evict them.
+        if (entry.kind === "body") continue;
         const rows = this.storedRows.get(entry.serverId) ?? new Map<string, ReplicaRowIndexEntry>();
         rows.set(rowKey(entry), entry);
         this.storedRows.set(entry.serverId, rows);

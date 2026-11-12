@@ -368,6 +368,17 @@ export const CompactProviderSnapshotSchema = z.object({
   thinkingSets: z.array(ProviderSnapshotThinkingSetSchema),
 });
 
+// slimDirectory: what a slim row (no capabilities on the wire) parses to until the full
+// row arrives. All off, so no capability-gated control appears on stale guesses.
+const SLIM_AGENT_CAPABILITIES: AgentCapabilityFlags = {
+  supportsStreaming: false,
+  supportsSessionPersistence: false,
+  supportsDynamicModes: false,
+  supportsMcpServers: false,
+  supportsReasoningStream: false,
+  supportsToolInvocations: false,
+};
+
 const AgentCapabilityFlagsSchema: z.ZodType<AgentCapabilityFlags> = z
   .object({
     supportsStreaming: z.boolean(),
@@ -848,12 +859,16 @@ export const AgentSnapshotPayloadSchema = z.object({
   lastUserMessageAt: z.string().nullable(),
   status: AgentStatusSchema,
   activeTurn: AgentActiveTurnPayloadSchema.nullable().optional(),
-  capabilities: AgentCapabilityFlagsSchema,
+  // Slim directory rows (slim: true) omit capabilities and persistence; the full row
+  // comes from fetch_agent. Defaults keep the parsed type unchanged.
+  capabilities: AgentCapabilityFlagsSchema.default(SLIM_AGENT_CAPABILITIES),
   currentModeId: z.string().nullable(),
   availableModes: z.array(AgentModeSchema),
   pendingPermissions: z.array(AgentPermissionRequestPayloadSchema),
-  persistence: AgentPersistenceHandleSchema.nullable(),
+  persistence: AgentPersistenceHandleSchema.nullable().default(null),
   runtimeInfo: AgentRuntimeInfoSchema.optional(),
+  /** slimDirectory: capabilities/persistence/runtimeInfo were left out; fetch the full row. */
+  slim: z.boolean().optional(),
   lastUsage: AgentUsageSchema.optional(),
   lastError: z.string().optional(),
   title: z.string().nullable(),
@@ -1304,6 +1319,11 @@ export const FetchAgentsRequestMessageSchema = z.object({
     .optional(),
   // COMPAT(directorySync): added in v0.3.x, remove optional after 2027-02-12.
   sync: DirectorySyncRequestSchema.optional(),
+  // slimDirectory (B3): rows without capabilities/persistence/runtimeInfo (marked `slim`),
+  // first page pinned > needs-input/running > recency, default page.limit 25.
+  slim: z.boolean().optional(),
+  // slimDirectory: leave idle delegated children out of the listing (loaded lazily).
+  omitIdleDelegated: z.boolean().optional(),
 });
 
 const WorkspaceStateBucketSchema = z.enum([
@@ -1350,6 +1370,9 @@ export const FetchWorkspacesRequestMessageSchema = z.object({
     .optional(),
   // COMPAT(directorySync): added in v0.3.x, remove optional after 2027-02-12.
   sync: DirectorySyncRequestSchema.optional(),
+  // slimDirectory (B3): first page = workspaces of the slim agent first page, pinned and
+  // needs-input/running first, then recency; default page.limit 25.
+  slim: z.boolean().optional(),
 });
 
 export const ProjectListRequestMessageSchema = z.object({
@@ -1993,6 +2016,9 @@ export const FetchAgentTimelineRequestMessageSchema = z.object({
   // server_info.features.leanTimeline: for chats nobody is looking at. No reasoning rows, tool
   // calls as one-line stubs marked metadata.paseoCompact (agent.timeline.item.request loads one).
   lean: z.boolean().optional(),
+  // priority_sync clients get short rows by default (tool calls as one-line stubs, reasoning as a
+  // one-line preview, user/assistant text in full). full: true asks for full rows instead.
+  full: z.boolean().optional(),
 });
 
 /**
@@ -2020,6 +2046,23 @@ export const AgentTimelineItemRequestMessageSchema = z.object({
   agentId: z.string(),
   requestId: z.string(),
   callId: z.string(),
+});
+
+/**
+ * priority_sync: full bodies of short rows. Keys are row seqs (seqs: [from, to] ranges, inclusive)
+ * and/or tool callIds. Answered with one agent.timeline.body per row (a row over ~15 KB comes as
+ * chunks of its JSON) and then agent.timeline.bodies.done. Rows whose bodyHash is in `have` are
+ * skipped. priority picks the send lane: tap (now), open (open-chat bodies), other, background.
+ * Never resumes an agent that is not loaded.
+ */
+export const AgentTimelineBodiesRequestMessageSchema = z.object({
+  type: z.literal("agent.timeline.bodies.request"),
+  agentId: z.string(),
+  requestId: z.string(),
+  seqs: z.array(z.tuple([z.number().int(), z.number().int()])).optional(),
+  callIds: z.array(z.string()).optional(),
+  priority: z.enum(["tap", "open", "other", "background"]).optional(),
+  have: z.array(z.string()).optional(),
 });
 
 /** agent_patches: the client lost the base of an agent_patch; send that agent in full again. */
@@ -3446,6 +3489,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   FetchAgentTimelineRequestMessageSchema,
   AgentTimelineSearchRequestMessageSchema,
   AgentTimelineItemRequestMessageSchema,
+  AgentTimelineBodiesRequestMessageSchema,
   AgentPatchResyncMessageSchema,
   AgentImageThumbnailRequestMessageSchema,
   AgentTimelineListPromptsRequestMessageSchema,
@@ -3759,6 +3803,8 @@ export const ServerInfoStatusPayloadSchema = z
         providersSnapshotCwd: z.boolean().optional(),
         // COMPAT(directorySync): added in v0.3.x, remove gate after 2027-02-12.
         directorySync: z.boolean().optional(),
+        // slimDirectory (B3): fetch_agents/fetch_workspaces accept `slim`.
+        slimDirectory: z.boolean().optional(),
         // COMPAT(workspaceLabels): added in v0.5.0, remove after 2027-08-14.
         workspaceLabels: z.boolean().optional(),
         // COMPAT(workspaceSetupRun): added in v0.8.0, remove gate after 2027-09-02.
@@ -4404,6 +4450,9 @@ export const FetchAgentsResponseMessageSchema = z.object({
     entries: z.array(AgentDirectoryResponseEntrySchema),
     pageInfo: AgentDirectoryPageInfoSchema,
     sync: DirectorySyncMetadataSchema.optional(),
+    // A6 (agent_patches + compact_v2): every entry is rev 1 of its agent on this subscription,
+    // so the first live change is an agent_patch on it instead of a full agent_update.
+    patchBase: z.literal(true).optional(),
   }),
 });
 
@@ -4899,6 +4948,35 @@ export const AgentTimelineItemResponseMessageSchema = z.object({
     agentId: z.string(),
     callId: z.string(),
     item: AgentTimelineItemPayloadSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const AgentTimelineBodyMessageSchema = z.object({
+  type: z.literal("agent.timeline.body"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    priority: z.enum(["tap", "open", "other", "background"]).optional(),
+    seq: z.number().int(),
+    callId: z.string().optional(),
+    hash: z.string().optional(),
+    item: AgentTimelineItemPayloadSchema.optional(),
+    // [index, count, part of JSON.stringify(item)]
+    chunk: z.tuple([z.number().int(), z.number().int(), z.string()]).optional(),
+  }),
+});
+
+export const AgentTimelineBodiesDoneMessageSchema = z.object({
+  type: z.literal("agent.timeline.bodies.done"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    priority: z.enum(["tap", "open", "other", "background"]).optional(),
+    sent: z.number().int(),
+    skipped: z.number().int(),
+    missing: z.array(z.union([z.number().int(), z.string()])),
+    notLoaded: z.boolean().optional(),
     error: z.string().nullable(),
   }),
 });
@@ -7334,6 +7412,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   AgentTimelineReplacementMessageSchema,
   AgentTimelineSearchResponseMessageSchema,
   AgentTimelineItemResponseMessageSchema,
+  AgentTimelineBodyMessageSchema,
+  AgentTimelineBodiesDoneMessageSchema,
   AgentImageThumbnailResponseMessageSchema,
   AgentTimelineListPromptsResponseMessageSchema,
   ProviderSubagentListResponseMessageSchema,
@@ -7978,6 +8058,10 @@ export const WSHelloMessageSchema = z.object({
       voice: z.boolean().optional(),
       [CLIENT_CAPS.helloRejection]: z.boolean().optional(),
       [CLIENT_CAPS.sessionTokens]: z.boolean().optional(),
+      [CLIENT_CAPS.prioritySync]: z.boolean().optional(),
+      [CLIENT_CAPS.compactV2]: z.boolean().optional(),
+      // compact_v2: hash of the server_info feature map the client holds (A1).
+      compact_v2_fh: z.string().max(64).optional(),
       pushNotifications: z.boolean().optional(),
       [CLIENT_CAPS.explicitEventSubscriptions]: z.boolean().optional(),
       [CLIENT_CAPS.allProviders]: z.boolean().optional(),
@@ -7994,6 +8078,22 @@ export const WSHelloMessageSchema = z.object({
       [CLIENT_CAPS.browserHost]: BrowserAutomationHostCapabilitySchema.optional(),
     })
     .passthrough()
+    .optional(),
+  // Compact capabilities (HS1): lowercase hex bitset over CLIENT_CAPABILITY_BITS, merged under
+  // `capabilities`. Old daemons ignore it; clients send it only to daemons that read it.
+  cb: z
+    .string()
+    .regex(/^[0-9a-f]{1,32}$/)
+    .optional(),
+  // priority_sync (PS2d): the chat to show first (opened from a notification). The daemon answers
+  // it as a fetch_agent_timeline_response (requestId r) right after server_info, with no extra
+  // round trip: tail page, or the page after cursor c. Old daemons ignore it.
+  f: z
+    .object({
+      a: z.string().min(1).max(128),
+      r: z.string().min(1).max(64),
+      c: z.object({ epoch: z.string(), seq: z.number().int().nonnegative() }).optional(),
+    })
     .optional(),
 });
 

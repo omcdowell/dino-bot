@@ -5,6 +5,11 @@ export interface DaemonTransport {
   onOpen: (handler: () => void) => () => void;
   onClose: (handler: (event?: unknown) => void) => () => void;
   onError: (handler: (event?: unknown) => void) => () => void;
+  /**
+   * The subprotocol the server selected, once open. undefined when the runtime does not
+   * report it (an empty string counts as unknown too).
+   */
+  selectedProtocol?: () => string | undefined;
 }
 
 export type DaemonTransportFactory = (options: {
@@ -20,6 +25,8 @@ export type WebSocketFactory = (
 
 export interface WebSocketLike {
   readyState: number;
+  /** Selected subprotocol (browser, ws, React Native after open). */
+  protocol?: string;
   send: (data: string | Uint8Array | ArrayBuffer) => void;
   close: (code?: number, reason?: string) => void;
   binaryType?: string;

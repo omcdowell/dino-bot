@@ -24,6 +24,7 @@ interface AgentUpdatesSubscriptionState {
   pendingUpdatesByAgentId: Map<string, AgentUpdatePayload>;
   /** agent_patches: what this subscription last sent per agent, so the next send is a patch. */
   patches: boolean;
+  snapshotBases: boolean;
   sent: Map<string, SentAgent>;
 }
 
@@ -67,9 +68,22 @@ export interface AgentUpdatesService {
     syncEnabled?: boolean;
     /** Client capability agent_patches on this subscription's socket. */
     patches?: boolean;
+    /** A6: the client also seeds patch bases from the snapshot (agent_patches + compact_v2). */
+    snapshotBases?: boolean;
   }): void;
   /** The client lost an agent_patch base: the next update of this agent goes out in full. */
   forgetSent(agentId: string): void;
+  /**
+   * A6: the bootstrap snapshot rows become rev 1 of each agent on a patching subscription, so
+   * the first live change is a patch. Returns true when it seeded (the response says patchBase).
+   */
+  seedSnapshot(
+    subscriptionId: string,
+    entries: ReadonlyArray<{
+      agent: AgentSnapshotPayload;
+      project?: ProjectPlacementPayload | null;
+    }>,
+  ): boolean;
   flushBootstrapped(
     subscriptionId: string,
     options?: { snapshotUpdatedAtByAgentId?: Map<string, number> },
@@ -87,6 +101,11 @@ export interface AgentUpdatesServiceDeps {
   includesWorkspace?(agent: AgentSnapshotPayload, includeBackground?: boolean): Promise<boolean>;
   emit(message: SessionOutboundMessage): void;
   enrichAgentPayload(payload: AgentSnapshotPayload): Promise<AgentSnapshotPayload>;
+  /**
+   * D0: the wire shape of a live agent for this client (toClientAgentPayload for priority_sync
+   * clients, unchanged for the rest). Defaults to unchanged.
+   */
+  clientAgentPayload?(payload: AgentSnapshotPayload): AgentSnapshotPayload;
   buildStoredAgentPayload(record: StoredAgentRecord): AgentSnapshotPayload;
   isProviderVisibleToClient(provider: string): boolean;
   buildProjectPlacementForWorkspaceId(workspaceId: string): Promise<ProjectPlacementPayload | null>;
@@ -195,6 +214,8 @@ function agentUpdateTargetId(update: AgentUpdatePayload): string {
 }
 
 export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentUpdatesService {
+  const clientAgentPayload = (payload: AgentSnapshotPayload): AgentSnapshotPayload =>
+    deps.clientAgentPayload ? deps.clientAgentPayload(payload) : payload;
   const subscriptions = new Map<string, AgentUpdatesSubscriptionState>();
   const liveAgentUpdateTails = new Map<string, Promise<void>>();
   const sequence = <T extends AgentUpdatePayload>(
@@ -272,6 +293,21 @@ export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentU
     for (const sub of subscriptions.values()) sub.sent.delete(agentId);
   }
 
+  function seedSnapshot(
+    subscriptionId: string,
+    entries: ReadonlyArray<{
+      agent: AgentSnapshotPayload;
+      project?: ProjectPlacementPayload | null;
+    }>,
+  ): boolean {
+    const sub = subscriptions.get(subscriptionId);
+    if (!sub?.patches || !sub.snapshotBases || !sub.isBootstrapping) return false;
+    for (const entry of entries) {
+      sub.sent.set(entry.agent.id, { agent: entry.agent, project: entry.project ?? null, rev: 1 });
+    }
+    return true;
+  }
+
   function beginSubscription(input: {
     subscriptionId: string;
     isProviderVisible?: (provider: string) => boolean;
@@ -279,12 +315,14 @@ export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentU
     filter?: AgentUpdatesFilter;
     syncEnabled?: boolean;
     patches?: boolean;
+    snapshotBases?: boolean;
   }): void {
     subscriptions.set(input.subscriptionId, {
       ...input,
       emit: input.emit ?? deps.emit,
       syncEnabled: input.syncEnabled ?? false,
       patches: input.patches ?? false,
+      snapshotBases: input.snapshotBases ?? false,
       sent: new Map(),
       isProviderVisible: input.isProviderVisible ?? deps.isProviderVisibleToClient,
       isBootstrapping: true,
@@ -330,7 +368,7 @@ export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentU
       (sub) => !subscriptionIds || subscriptionIds.has(sub.subscriptionId),
     );
     if (observers.length === 0) return false;
-    const payload = await deps.enrichAgentPayload(toAgentPayload(agent));
+    const payload = await deps.enrichAgentPayload(clientAgentPayload(toAgentPayload(agent)));
     const project = payload.workspaceId
       ? await deps.buildProjectPlacementForWorkspaceId(payload.workspaceId)
       : null;
@@ -419,7 +457,7 @@ export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentU
           })
         : Promise.resolve();
     }
-    const payload = toAgentPayload(agent);
+    const payload = clientAgentPayload(toAgentPayload(agent));
     return enqueueAgentUpdate(payload.id, () => emitLiveAgentUpdate(payload));
   }
 
@@ -438,6 +476,7 @@ export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentU
   return {
     beginSubscription,
     forgetSent,
+    seedSnapshot,
     flushBootstrapped,
     clearSubscription,
     hasSubscription,

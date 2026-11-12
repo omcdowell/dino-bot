@@ -1,4 +1,5 @@
 import "@/styles/unistyles";
+import { noteProvisionalReply, provisionalFromNotification } from "@/timeline/provisional-open";
 import { startOutboxRuntime } from "@/runtime/outbox-runtime";
 import { startNetworkMonitor } from "@/runtime/network-monitor";
 import { getOutboxSender } from "@/composer/outbox/sender";
@@ -258,6 +259,19 @@ function PushNotificationRouter() {
       const data = response.notification.request.content.data as
         | Record<string, unknown>
         | undefined;
+      // B2a: paint the cached chat and the notification's own reply text at once, name the chat
+      // in the first hello; live data replaces both (timeline/provisional-open.ts).
+      const rawDate = response.notification.date;
+      const provisional = provisionalFromNotification({
+        data,
+        body: response.notification.request.content.body,
+        date: typeof rawDate === "number" && rawDate < 1e12 ? rawDate * 1000 : rawDate,
+        now: Date.now(),
+      });
+      if (provisional) {
+        noteProvisionalReply(provisional);
+        getHostRuntimeStore().openFromNotification(provisional.serverId, provisional.agentId);
+      }
       openNotification(data);
     };
 

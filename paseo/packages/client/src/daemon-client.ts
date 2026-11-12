@@ -11,7 +11,17 @@ import { CreationClient } from "./creation/index.js";
 import type { CreationSnapshot } from "@getpaseo/protocol/messages";
 import type { z } from "zod";
 import type { SessionEventSubscription } from "@getpaseo/protocol/messages";
-import type { ClientCapability } from "@getpaseo/protocol/client-capabilities";
+import {
+  CLIENT_CAPS,
+  encodeCompactCapabilities,
+  type ClientCapability,
+} from "@getpaseo/protocol/client-capabilities";
+import {
+  COMPACT_V2_FEATURES_HASH_CAP,
+  CompactV2Decoder,
+  createMemoryFeatureCache,
+  type CompactV2FeatureCache,
+} from "@getpaseo/protocol/compact-v2";
 import type { AgentAttentionNotificationPayload } from "@getpaseo/protocol/agent-attention-notification";
 import {
   AgentCreateFailedStatusPayloadSchema,
@@ -489,6 +499,11 @@ export interface DaemonClientConfig {
     minimumMode?: RelaySecurityMode;
     /** Called with the negotiated mode after each authenticated relay handshake. */
     onSecurityMode?: (mode: RelaySecurityMode) => void;
+    /**
+     * Direct E2EE only: offer Noise msg1 in the upgrade so the daemon can answer e2ee_ready
+     * first (one round trip less). Default on; false always sends msg1 in-band (old behaviour).
+     */
+    upgradeCarrier?: boolean;
   };
   reconnect?: {
     enabled?: boolean;
@@ -513,10 +528,21 @@ export interface DaemonClientConfig {
   };
   /** Per-device session token storage (default: in memory for this client only). */
   sessionTokens?: DaemonSessionTokenStore;
+  /**
+   * compact_v2: where the daemon's feature map is kept between connects (default: in memory for
+   * this client). Persist it per host so even a cold launch sends only the hash.
+   */
+  featureCache?: CompactV2FeatureCache;
   runtimeMetricsIntervalMs?: number;
   runtimeMetricsWindowMs?: number;
   trace?: DaemonClientTrace;
   capabilities?: Partial<Record<ClientCapability, unknown>>;
+  /**
+   * priority_sync: the chat to show first (the app was opened from a notification). Sent in the
+   * hello; the daemon answers with that chat's page right after server_info, no extra round trip.
+   * Read it with priorityChatPage(). cursor = the last seq already cached: only the page after it.
+   */
+  priorityChat?: { agentId: string; cursor?: { epoch: string; seq: number } };
 }
 
 export interface DaemonClientTrace {
@@ -785,6 +811,8 @@ export interface FetchAgentTimelineOptions {
   ifLoaded?: boolean;
   /** leanTimeline: no reasoning, tool calls as stubs; for chats nobody is looking at. */
   lean?: boolean;
+  /** priority_sync: full rows instead of the default short rows. */
+  full?: boolean;
   requestId?: string;
   timeout?: number;
 }
@@ -806,6 +834,18 @@ export type AgentTimelineItemPayload = Extract<
   SessionOutboundMessage,
   { type: "agent.timeline.item.response" }
 >["payload"];
+
+export interface AgentTimelineBodiesResult {
+  bodies: {
+    seq: number;
+    callId?: string;
+    hash?: string;
+    item: Extract<SessionOutboundMessage, { type: "agent.timeline.body" }>["payload"]["item"];
+  }[];
+  skipped: number;
+  missing: (number | string)[];
+  notLoaded: boolean;
+}
 
 export interface AgentTimelineSearchOptions {
   agentId: string;
@@ -1437,10 +1477,21 @@ function buildFetchAgentsRequest(
     ...(options?.page ? { page: options.page } : {}),
     ...(options?.subscribe ? { subscribe: options.subscribe } : {}),
     ...(options?.sync ? { sync: options.sync } : {}),
+    ...(options?.slim ? { slim: true } : {}),
+    ...(options?.omitIdleDelegated ? { omitIdleDelegated: true } : {}),
     ...(options?.includeBackground !== undefined
       ? { includeBackground: options.includeBackground }
       : {}),
   });
+}
+
+function isBatchFrame(value: unknown): value is { type: "batch"; m: unknown[] } {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (value as { type?: unknown }).type === "batch" &&
+    Array.isArray((value as { m?: unknown }).m)
+  );
 }
 
 export class DaemonClient {
@@ -1480,6 +1531,8 @@ export class DaemonClient {
   private checkedResetTimer: ReturnType<typeof setTimeout> | null = null;
   /** agent_patches: per-socket bases that turn agent_patch back into full agent_update. */
   private readonly agentPatches = new AgentPatchExpander();
+  /** compact_v2: undoes the daemon's compact encoding (armed per socket by server_info). */
+  private readonly compactV2: CompactV2Decoder;
   private helloAuth: HelloAuth;
   private readonly sessionTokens: DaemonSessionTokenStore;
   /** The next reconnect goes at once (a stale session token was dropped; a stuck socket was replaced). */
@@ -1527,6 +1580,8 @@ export class DaemonClient {
    * negotiates it, so a later reconnect cannot be downgraded to legacy.
    */
   private relaySecurityFloorValue: RelaySecurityMode | undefined;
+  /** HS1: transports whose daemon accepted the msg1 carrier, so it reads hello `cb`. */
+  private readonly compactHelloTransports = new WeakSet<DaemonTransport>();
   private readonly logConnectionPath: "direct" | "relay";
   private readonly logServerId: string | null;
   private readonly logClientIdHash: string;
@@ -1550,6 +1605,7 @@ export class DaemonClient {
   constructor(private config: DaemonClientConfig) {
     this.logger = config.logger ?? consoleLogger;
     this.sessionTokens = config.sessionTokens ?? createMemorySessionTokenStore();
+    this.compactV2 = new CompactV2Decoder(config.featureCache ?? createMemoryFeatureCache());
     this.relaySecurityFloorValue = config.e2ee?.minimumMode;
     this.logConnectionPath = isRelayClientWebSocketUrl(this.config.url) ? "relay" : "direct";
     let parsedUrlForLog: URL | null = null;
@@ -1659,6 +1715,7 @@ export class DaemonClient {
       this.checkedDecoder = new CheckedJsonFrameDecoder();
       this.uplinkEncoder = null;
       this.agentPatches.clear();
+      this.compactV2.reset();
       this.clearCheckedResetTimer();
       this.lastServerInfoMessage = null;
       this.authFailureReasonValue = null;
@@ -1851,12 +1908,21 @@ export class DaemonClient {
         daemonPublicKeyB64,
         logger: this.logger,
         ...this.e2eeMinimumMode(isDirectE2ee),
+        ...(isDirectE2ee && this.config.e2ee.upgradeCarrier !== false
+          ? {
+              upgradeCarrier: true,
+              onUpgradeCarrier: (accepted: boolean) => {
+                if (accepted) this.compactHelloTransports.add(transport);
+              },
+            }
+          : {}),
         onSecurityMode: (mode) => {
           if (mode === "protected") this.relaySecurityFloorValue = "protected";
           this.config.e2ee?.onSecurityMode?.(mode);
         },
       });
     }
+    // The carrier callback above reads `transport`; it runs on socket open, after this line.
     const transport = transportFactory({
       url: this.resolveTransportUrlForAttempt(),
       headers: selected.headers,
@@ -3689,6 +3755,7 @@ export class DaemonClient {
       ...(options.compact === true ? { compact: true } : {}),
       ...(options.ifLoaded === true ? { ifLoaded: true } : {}),
       ...(options.lean === true ? { lean: true } : {}),
+      ...(options.full === true ? { full: true } : {}),
     });
 
     const payload = await this.sendRequest({
@@ -3742,6 +3809,66 @@ export class DaemonClient {
     });
     if (payload.error) throw new Error(payload.error);
     return payload;
+  }
+
+  /**
+   * priority_sync: full bodies of short rows, by seq ranges and/or tool callIds. Chunked bodies
+   * are reassembled. Rows whose bodyHash is in `have` are skipped by the daemon. Resolves when
+   * the daemon sends agent.timeline.bodies.done.
+   */
+  async fetchAgentTimelineBodies(
+    agentId: string,
+    keys: {
+      seqs?: [number, number][];
+      callIds?: string[];
+      priority?: "tap" | "open" | "other" | "background";
+      have?: string[];
+    },
+    options: { timeout?: number } = {},
+  ): Promise<AgentTimelineBodiesResult> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.timeline.bodies.request",
+      agentId,
+      requestId,
+      ...keys,
+    });
+    const bodies: AgentTimelineBodiesResult["bodies"] = [];
+    const parts = new Map<number, string[]>();
+    const done = await this.sendRequest({
+      requestId,
+      message,
+      timeout: options.timeout,
+      options: { skipQueue: true },
+      select: (response) => {
+        if (response.type === "agent.timeline.body" && response.payload.requestId === requestId) {
+          const { seq, callId, hash, item, chunk } = response.payload;
+          if (item) bodies.push({ seq, callId, hash, item });
+          else if (chunk) {
+            const [index, count, text] = chunk;
+            const got = parts.get(seq) ?? new Array<string>(count);
+            got[index] = text;
+            parts.set(seq, got);
+            if (got.filter((part) => part !== undefined).length === count) {
+              parts.delete(seq);
+              bodies.push({ seq, callId, hash, item: JSON.parse(got.join("")) });
+            }
+          }
+          return null;
+        }
+        return response.type === "agent.timeline.bodies.done" &&
+          response.payload.requestId === requestId
+          ? response.payload
+          : null;
+      },
+    });
+    if (done.error && !done.notLoaded) throw new Error(done.error);
+    return {
+      bodies,
+      skipped: done.skipped,
+      missing: done.missing,
+      notLoaded: done.notLoaded === true,
+    };
   }
 
   /**
@@ -6964,6 +7091,74 @@ export class DaemonClient {
     return this.config.url;
   }
 
+  private priorityChatWait: Promise<FetchAgentTimelinePayload> | null = null;
+
+  /**
+   * priority_sync: the page the daemon sent for config.priorityChat after the first hello, or null
+   * when none was asked for. Rejects on timeout (an old daemon ignores hello.f: fetch it instead).
+   */
+  priorityChatPage(): Promise<FetchAgentTimelinePayload> | null {
+    return this.priorityChatWait;
+  }
+
+  private helloSent = false;
+
+  /**
+   * B2a provisional open: name the chat to show first after construction (the app learns which
+   * notification was tapped asynchronously, after its host clients exist). Effective only before
+   * the first hello; returns false once it has been sent (the app then fetches as usual).
+   */
+  setPriorityChat(
+    chat: { agentId: string; cursor?: { epoch: string; seq: number } },
+    onPage?: (page: FetchAgentTimelinePayload) => void,
+  ): boolean {
+    if (this.helloSent || this.priorityChatWait) return false;
+    this.config = { ...this.config, priorityChat: chat };
+    this.priorityChatListener = onPage ?? null;
+    return true;
+  }
+
+  private priorityChatListener: ((page: FetchAgentTimelinePayload) => void) | null = null;
+
+  private preparePriorityChat(): {
+    a: string;
+    r: string;
+    c?: { epoch: string; seq: number };
+  } | null {
+    const chat = this.config.priorityChat;
+    // Only the first hello: after a reconnect the app asks for what it needs as usual.
+    if (!chat || this.priorityChatWait) return null;
+    const requestId = this.createRequestId();
+    const { promise } = this.waitForWithCancel<FetchAgentTimelinePayload>(
+      (msg) =>
+        msg.type === "fetch_agent_timeline_response" && msg.payload.requestId === requestId
+          ? msg.payload
+          : null,
+      DEFAULT_SESSION_RPC_TIMEOUT_MS,
+      { skipQueue: true, requestId },
+    );
+    void promise.catch(() => undefined);
+    const listener = this.priorityChatListener;
+    if (listener) void promise.then(listener, () => undefined);
+    this.priorityChatWait = promise;
+    return { a: chat.agentId, r: requestId, ...(chat.cursor ? { c: chat.cursor } : {}) };
+  }
+
+  /**
+   * Full capability map, or (HS1) the compact `cb` bitset plus whatever does not fit in it,
+   * for a daemon known to read `cb`. Old daemons always get the full map.
+   */
+  private helloCapabilities(): {
+    capabilities: Record<string, unknown>;
+    cb?: string;
+  } {
+    const capabilities = this.helloCapabilityMap();
+    if (!this.transport || !this.compactHelloTransports.has(this.transport))
+      return { capabilities };
+    const { cb, rest } = encodeCompactCapabilities(capabilities);
+    return { capabilities: rest, cb };
+  }
+
   private async sendHelloMessage(): Promise<void> {
     const transport = this.transport;
     if (!transport) {
@@ -6978,17 +7173,17 @@ export class DaemonClient {
     try {
       if (this.transport !== transport) return;
       const auth = this.helloAuth;
+      const f = this.preparePriorityChat();
+      this.helloSent = true;
       this.sendJsonMessage("hello", "hello", {
         type: "hello",
         clientId: this.config.clientId,
         clientType: this.config.clientType ?? "cli",
         protocolVersion: 1,
         ...(auth ? { auth } : {}),
-        capabilities: {
-          ...DEFAULT_CLIENT_CAPABILITIES,
-          ...this.config.capabilities,
-        },
+        ...this.helloCapabilities(),
         ...(this.config.appVersion ? { appVersion: this.config.appVersion } : {}),
+        ...(f ? { f } : {}),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to send hello message";
@@ -7576,6 +7771,31 @@ export class DaemonClient {
       this.endTraceSection(parseTraceOpen);
     }
 
+    // priority_sync: several messages in one frame, in order.
+    if (isBatchFrame(parsedJson)) {
+      const each = Math.round(bytes / Math.max(1, parsedJson.m.length));
+      for (const item of parsedJson.m) this.handleParsedJson(item, each, startMs);
+      return;
+    }
+    this.handleParsedJson(parsedJson, bytes, startMs);
+  }
+
+  /** Hello capabilities; compact_v2 also presents the hash of the feature map it holds (A1). */
+  /** The full capability map (old daemons read only this; carrier daemons get it as cb + rest). */
+  private helloCapabilityMap(): Record<string, unknown> {
+    const capabilities: Record<string, unknown> = {
+      ...DEFAULT_CLIENT_CAPABILITIES,
+      ...this.config.capabilities,
+    };
+    const featuresHash = this.compactV2.cachedFeaturesHash();
+    if (capabilities[CLIENT_CAPS.compactV2] === true && featuresHash)
+      capabilities[COMPACT_V2_FEATURES_HASH_CAP] = featuresHash;
+    return capabilities;
+  }
+
+  private handleParsedJson(rawJson: unknown, bytes: number, startMs: number): void {
+    // compact_v2: back to the full shape before validation (inert unless the daemon marked it).
+    const parsedJson = this.compactV2.decode(rawJson);
     const parsed = validateWSOutboundMessage(parsedJson);
     if (!parsed.success) {
       const responseIdentity = extractCorrelatedResponseIdentity(parsedJson);
@@ -7971,6 +8191,8 @@ export class DaemonClient {
       msg = expanded.message;
     } else if (msg.type === "agent_update") {
       this.agentPatches.observe(msg);
+    } else if (msg.type === "fetch_agents_response") {
+      this.agentPatches.observeSnapshot(msg);
     }
     msg = this.owned.normalize(msg);
     if (

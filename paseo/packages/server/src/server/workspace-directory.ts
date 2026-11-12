@@ -647,6 +647,23 @@ export class WorkspaceDirectory {
     return true;
   }
 
+  /** slimDirectory: order rows like a fetch_workspaces page with this sort. */
+  sortEntries<T extends WorkspaceDescriptorPayload>(
+    entries: readonly T[],
+    sortRequest: FetchWorkspacesRequestMessage["sort"],
+  ): T[] {
+    const sort = this.pager.normalizeSort(sortRequest);
+    return [...entries].sort((left, right) => this.pager.compare(left, right, sort));
+  }
+
+  /** slimDirectory: the page cursor that resumes after `workspace`. */
+  encodeCursor(
+    workspace: WorkspaceDescriptorPayload,
+    sortRequest: FetchWorkspacesRequestMessage["sort"],
+  ): string {
+    return this.pager.encode(workspace, this.pager.normalizeSort(sortRequest));
+  }
+
   async listFetchEntries(request: FetchWorkspacesRequestMessage): Promise<{
     entries: FetchWorkspacesResponseEntry[];
     emptyProjects: WorkspaceProjectDescriptor[];

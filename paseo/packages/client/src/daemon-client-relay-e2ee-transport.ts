@@ -1,5 +1,8 @@
 import {
   openClientSecureChannel,
+  prepareClientSecureHandshake,
+  UPGRADE_CARRIER_ACCEPTED_SUBPROTOCOL,
+  type PreparedClientHandshake,
   PROTECTED_HANDSHAKE_FAILED_CLOSE_CODE,
   type SecureChannel,
   type SecurityMode,
@@ -25,13 +28,60 @@ export interface RelayE2eeTransportOptions {
   minimumMode?: SecurityMode;
   /** Reports the negotiated mode once the daemon has authenticated the handshake. */
   onSecurityMode?: (mode: SecurityMode) => void;
+  /**
+   * Direct sockets only (HS1): offer Noise msg1 in the upgrade (Sec-WebSocket-Protocol) so a
+   * daemon that understands it answers e2ee_ready as the first frame, saving one round trip.
+   * Never set for relay sockets: relay upgrades carry routing only.
+   */
+  upgradeCarrier?: boolean;
+  /**
+   * Called before the channel opens when the daemon's selected subprotocol says whether it
+   * consumed the carried msg1. Such a daemon also reads the compact hello capabilities (`cb`).
+   */
+  onUpgradeCarrier?: (accepted: boolean) => void;
+}
+
+interface CarrierContext {
+  prepared: PreparedClientHandshake;
+  hostKey: string;
+}
+
+/**
+ * Per-host memory of whether the daemon answered a carried msg1. Used only when the runtime
+ * does not report the selected subprotocol: a host known not to answer gets msg1 in-band at
+ * once instead of after the 1 s fallback.
+ */
+const carrierCapabilityByHost = new Map<string, boolean>();
+
+/** Test hook. */
+export function resetUpgradeCarrierCache(): void {
+  carrierCapabilityByHost.clear();
+}
+
+function hostKeyOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 export function createRelayE2eeTransportFactory(
   args: RelayE2eeTransportOptions & { baseFactory: DaemonTransportFactory },
 ): DaemonTransportFactory {
   const { baseFactory, ...options } = args;
-  return ({ url }) => createEncryptedTransport(baseFactory({ url }), options);
+  return ({ url }) => {
+    if (!options.upgradeCarrier) return createEncryptedTransport(baseFactory({ url }), options);
+    const prepared = prepareClientSecureHandshake(options.daemonPublicKeyB64);
+    const base = baseFactory({
+      url,
+      protocols: [...prepared.upgradeProtocols],
+    });
+    return createEncryptedTransport(base, options, {
+      prepared,
+      hostKey: hostKeyOf(url),
+    });
+  };
 }
 
 const DAEMON_REQUIRES_PROTECTED_REASON = "daemon requires protected endpoint security";
@@ -96,7 +146,18 @@ export function createRelayUpgradeTransportFactory(
 export function createDirectE2eeUpgradeTransportFactory(
   baseFactory: DaemonTransportFactory,
 ): DaemonTransportFactory {
-  return ({ url }) => baseFactory({ url, protocols: [DIRECT_E2EE_SUBPROTOCOL] });
+  return ({ url, protocols }) =>
+    baseFactory({
+      url,
+      // The E2EE subprotocol first (old daemons select it), then only E2EE carrier tokens
+      // (HS1 msg1 carrier). Bearer subprotocols never pass.
+      protocols: [
+        DIRECT_E2EE_SUBPROTOCOL,
+        ...(protocols ?? []).filter(
+          (p) => p !== DIRECT_E2EE_SUBPROTOCOL && p.startsWith("paseo.e2ee."),
+        ),
+      ],
+    });
 }
 
 /** Close codes that mean the daemon at a direct address refused or could not run the channel. */
@@ -145,6 +206,7 @@ export function describeDirectE2eeFailure(event: unknown): string | null {
 export function createEncryptedTransport(
   base: DaemonTransport,
   options: RelayE2eeTransportOptions,
+  carrierContext?: CarrierContext,
 ): DaemonTransport {
   const { daemonPublicKeyB64, logger, minimumMode, onSecurityMode } = options;
   let channel: SecureChannel | null = null;
@@ -229,11 +291,37 @@ export function createEncryptedTransport(
     onerror: null,
   };
 
+  const carrierOptions = () => {
+    if (!carrierContext) return {};
+    const { prepared, hostKey } = carrierContext;
+    const selected = base.selectedProtocol?.();
+    let carrier: "accepted" | "ignored" | "unknown";
+    if (selected === UPGRADE_CARRIER_ACCEPTED_SUBPROTOCOL) carrier = "accepted";
+    else if (selected !== undefined) carrier = "ignored";
+    else carrier = carrierCapabilityByHost.get(hostKey) === false ? "ignored" : "unknown";
+    if (selected !== undefined) {
+      carrierCapabilityByHost.set(hostKey, carrier === "accepted");
+      options.onUpgradeCarrier?.(carrier === "accepted");
+    }
+    return {
+      prepared,
+      carrier,
+      onCarrierOutcome: (answered: boolean) => {
+        if (selected === undefined) carrierCapabilityByHost.set(hostKey, answered);
+      },
+    };
+  };
+
+  // With msg1 in the upgrade, the daemon's ready can arrive in the same read as the 101, so
+  // the channel may open (and the consumer send) before `channel` is assigned below.
+  let sendsBeforeChannel: Array<string | ArrayBuffer> = [];
+
   const startHandshake = async () => {
     try {
       channel = await openClientSecureChannel(relayTransport, {
         daemonPublicKeyB64,
         ...(minimumMode ? { minimumMode } : {}),
+        ...carrierOptions(),
         events: {
           onopen: () => {
             onSecurityMode?.(channel?.securityMode() ?? "legacy");
@@ -249,6 +337,11 @@ export function createEncryptedTransport(
           },
         },
       });
+      const early = sendsBeforeChannel;
+      sendsBeforeChannel = [];
+      for (const data of early) {
+        void channel.send(data).catch((error) => emitError(error));
+      }
     } catch (error) {
       logger.warn({ err: normalizeTransportError(error) }, "relay_e2ee_handshake_failed");
       emitError(error);
@@ -277,6 +370,10 @@ export function createEncryptedTransport(
   return {
     send: (data) => {
       if (!channel) {
+        if (opened && !closed) {
+          sendsBeforeChannel.push(normalizeTransportPayload(data));
+          return;
+        }
         throw new Error("Encrypted channel not ready");
       }
       void channel.send(normalizeTransportPayload(data)).catch((error) => {

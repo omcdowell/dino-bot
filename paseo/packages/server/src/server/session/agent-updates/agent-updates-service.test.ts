@@ -7,6 +7,7 @@ import type {
   SessionOutboundMessage,
 } from "../../messages.js";
 import type { ManagedAgent } from "../../agent/agent-manager.js";
+import { toClientAgentPayload } from "../../agent/agent-projections.js";
 import type { StoredAgentRecord } from "../../agent/agent-storage.js";
 import { DirectorySyncService } from "../../directory-sync/index.js";
 
@@ -103,6 +104,7 @@ function buildHarness() {
   let providerVisible: (provider: string) => boolean = () => true;
   let buildAgentPayloadError: Error | null = null;
   let enrichProjectedPayload = false;
+  let trimClientPayload = false;
   const directorySync = new DirectorySyncService("test-generation");
 
   const service = createAgentUpdatesService({
@@ -124,6 +126,7 @@ function buildHarness() {
       }
       return registeredPayload;
     },
+    clientAgentPayload: (payload) => (trimClientPayload ? toClientAgentPayload(payload) : payload),
     buildStoredAgentPayload: (record) => {
       const payload = payloadById.get(record.id);
       if (!payload) {
@@ -169,6 +172,10 @@ function buildHarness() {
     },
     useProjectedPayload() {
       enrichProjectedPayload = true;
+    },
+    // D0: the session trims the wire agent for priority_sync clients only.
+    useClientTrim() {
+      trimClientPayload = true;
     },
     failBuildAgentPayload(error: Error) {
       buildAgentPayloadError = error;
@@ -404,6 +411,28 @@ describe("forwardLiveAgent", () => {
     expect(update.agent).not.toHaveProperty("mcpServers");
     expect(update.agent.persistence?.metadata).toEqual({ conversationId: "conversation-a" });
     expect(JSON.stringify(update.agent)).not.toContain("execution-secret");
+  });
+
+  test("D0: a priority_sync client gets the live agent without persistence metadata/nativeHandle", async () => {
+    const h = buildHarness();
+    h.service.beginSubscription({ subscriptionId: "sub", filter: {} });
+    h.service.flushBootstrapped("sub");
+    h.register(makeAgentPayload({ id: "a", workspaceId: "ws-1" }));
+    h.useProjectedPayload();
+    h.useClientTrim();
+    const agent = h.managed("a");
+    agent.persistence = {
+      provider: "codex",
+      sessionId: "session-a",
+      nativeHandle: "native-a",
+      metadata: { conversationId: "conversation-a" },
+    };
+
+    await h.service.forwardLiveAgent(agent);
+
+    const update = h.agentUpdates()[0];
+    if (update?.kind !== "upsert") throw new Error("Expected an agent upsert");
+    expect(update.agent.persistence).toEqual({ provider: "codex", sessionId: "session-a" });
   });
 
   test("emits a remove when the agent's workspace resolves to no project", async () => {
@@ -755,5 +784,58 @@ describe("agent_patches", () => {
         message.type === "agent_update" ? `${message.payload.kind}` : message.type,
       ),
     ).toEqual(["upsert", "upsert", "remove", "upsert"]);
+  });
+
+  test("A6: with snapshotBases the snapshot rows are rev 1, so the first live change is a patch", async () => {
+    const h = buildHarness();
+    h.service.beginSubscription({
+      subscriptionId: "sub",
+      filter: {},
+      patches: true,
+      snapshotBases: true,
+    });
+    const idle = h.register(makeAgentPayload({ id: "a", workspaceId: "ws-1", status: "idle" }));
+    expect(h.service.seedSnapshot("sub", [{ agent: idle, project: null }])).toBe(true);
+    h.service.flushBootstrapped("sub");
+    h.register({ ...idle, status: "running", updatedAt: "2026-03-01T12:00:01.000Z" });
+    await h.service.emitStoredRecord(h.stored("a"));
+
+    expect(h.emitted.map((message) => message.type)).toEqual(["agent_patch"]);
+    expect(h.emitted[0]).toMatchObject({
+      type: "agent_patch",
+      payload: { agentId: "a", rev: 2, baseRev: 1 },
+    });
+    const set = (h.emitted[0] as Extract<(typeof h.emitted)[number], { type: "agent_patch" }>)
+      .payload.set;
+    expect(set).toEqual({ status: "running", updatedAt: "2026-03-01T12:00:01.000Z" });
+  });
+
+  test("A6: without snapshotBases (old apps with agent_patches) nothing is seeded", async () => {
+    const h = buildHarness();
+    h.service.beginSubscription({ subscriptionId: "sub", filter: {}, patches: true });
+    const idle = h.register(makeAgentPayload({ id: "a", workspaceId: "ws-1", status: "idle" }));
+    expect(h.service.seedSnapshot("sub", [{ agent: idle, project: null }])).toBe(false);
+    h.service.flushBootstrapped("sub");
+    h.register({ ...idle, status: "running", updatedAt: "2026-03-01T12:00:01.000Z" });
+    await h.service.emitStoredRecord(h.stored("a"));
+
+    expect(h.emitted.map((message) => message.type)).toEqual(["agent_update"]);
+    expect(h.emitted[0]).toMatchObject({ payload: { kind: "upsert", rev: 1 } });
+  });
+
+  test("A6: snapshotBases without agent_patches, or after bootstrap, seeds nothing", () => {
+    const h = buildHarness();
+    const idle = makeAgentPayload({ id: "a", workspaceId: "ws-1" });
+    h.service.beginSubscription({ subscriptionId: "full", filter: {}, snapshotBases: true });
+    expect(h.service.seedSnapshot("full", [{ agent: idle }])).toBe(false);
+    h.service.beginSubscription({
+      subscriptionId: "late",
+      filter: {},
+      patches: true,
+      snapshotBases: true,
+    });
+    h.service.flushBootstrapped("late");
+    expect(h.service.seedSnapshot("late", [{ agent: idle }])).toBe(false);
+    expect(h.service.seedSnapshot("missing", [{ agent: idle }])).toBe(false);
   });
 });

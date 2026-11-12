@@ -103,6 +103,8 @@ export interface Agent {
   projectPlacement?: ProjectPlacementPayload | null;
   /** Messages the daemon holds for this agent until it is idle (agentMessageQueue). */
   messageQueue?: AgentSnapshotPayload["messageQueue"];
+  /** slimDirectory: sidebar row without capabilities/persistence/runtimeInfo; see ensureFullAgent. */
+  slim?: boolean;
 }
 
 export interface WorkspaceDescriptor {

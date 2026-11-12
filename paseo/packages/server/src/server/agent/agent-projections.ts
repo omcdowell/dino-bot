@@ -171,6 +171,29 @@ export function toAgentPayload(
   return payload;
 }
 
+/**
+ * D0 (server-trim): what session clients (app, desktop, CLI) get of an agent. The persistence
+ * handle is cut to provider + sessionId and runtimeInfo loses `extra`: no client build reads
+ * `persistence.nativeHandle`, `persistence.metadata` or `runtimeInfo.extra` (the app reads
+ * persistence.sessionId only). Storage, the managed agent, MCP tools and hub payloads keep them.
+ */
+export function toClientAgentPayload(payload: AgentSnapshotPayload): AgentSnapshotPayload {
+  const persistence = payload.persistence;
+  const trimPersistence =
+    persistence != null &&
+    (persistence.nativeHandle !== undefined || persistence.metadata !== undefined);
+  const trimRuntime = payload.runtimeInfo?.extra !== undefined;
+  if (!trimPersistence && !trimRuntime) return payload;
+  const next: AgentSnapshotPayload = { ...payload };
+  if (trimPersistence)
+    next.persistence = { provider: persistence.provider, sessionId: persistence.sessionId };
+  if (trimRuntime) {
+    const { extra: _extra, ...runtimeInfo } = payload.runtimeInfo!;
+    next.runtimeInfo = runtimeInfo;
+  }
+  return next;
+}
+
 function buildStoredRuntimeInfo(record: StoredAgentRecord): AgentRuntimeInfo | undefined {
   if (!record.runtimeInfo) return undefined;
   const ri = record.runtimeInfo;

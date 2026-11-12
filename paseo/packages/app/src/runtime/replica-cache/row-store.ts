@@ -6,7 +6,9 @@ export type ReplicaRowKind =
   | "project"
   | "timeline"
   | "timeline_page"
-  | "checkpoint";
+  | "checkpoint"
+  /** B2b: a tool call's full body, id = the daemon's bodyHash. Budgeted by DurableBodyCache. */
+  | "body";
 
 export interface ReplicaRowKey {
   serverId: string;

@@ -23,7 +23,7 @@ export interface ReplicaSqliteDriver {
 const CREATE_ROWS_SQL = `
   CREATE TABLE IF NOT EXISTS rows (
     server_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('agent', 'workspace', 'project', 'timeline', 'timeline_page', 'checkpoint')),
+    kind TEXT NOT NULL CHECK (kind IN ('agent', 'workspace', 'project', 'timeline', 'timeline_page', 'checkpoint', 'body')),
     id TEXT NOT NULL,
     payload TEXT NOT NULL,
     bytes INTEGER NOT NULL DEFAULT 0,
@@ -38,6 +38,25 @@ const CREATE_META_SQL = `
     value TEXT NOT NULL
   )
 `;
+
+/**
+ * B2b: the `body` kind (durable tool bodies by hash) widened the kind CHECK without a schema
+ * bump, so an existing cache is copied over instead of dropped (no cold re-download after update).
+ */
+async function widenRowKinds(connection: ReplicaSqliteConnection): Promise<void> {
+  const table = await connection.all<{ sql: string }>(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'rows'",
+  );
+  if (!table[0] || table[0].sql.includes("'body'")) return;
+  await connection.transaction(async (transaction) => {
+    await transaction.exec("ALTER TABLE rows RENAME TO rows_before_body");
+    await transaction.exec(CREATE_ROWS_SQL);
+    await transaction.exec(
+      "INSERT INTO rows (server_id, kind, id, payload, bytes, touched_at) SELECT server_id, kind, id, payload, bytes, touched_at FROM rows_before_body",
+    );
+    await transaction.exec("DROP TABLE rows_before_body");
+  });
+}
 
 interface StoredMeta {
   value: string;
@@ -108,6 +127,7 @@ export function createSqliteReplicaRowStore(
         });
       } else {
         await openedConnection.exec(CREATE_ROWS_SQL);
+        await widenRowKinds(openedConnection);
       }
 
       connection = openedConnection;

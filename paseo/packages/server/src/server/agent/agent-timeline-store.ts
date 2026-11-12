@@ -26,6 +26,44 @@ interface AgentTimelineState {
   nextSeq: number;
 }
 const DEFAULT_TIMELINE_FETCH_LIMIT = 200;
+/** At most this many rows per bodies request. */
+export const TIMELINE_BODY_MAX_ROWS = 200;
+
+export interface TimelineBodyKeys {
+  seqs?: readonly (readonly [number, number])[];
+  callIds?: readonly string[];
+}
+
+export interface TimelineBodyLookup {
+  rows: ProjectedTimelineRow[];
+  /** Keys with no row: callIds, and the first seq of empty ranges. */
+  missing: (number | string)[];
+}
+
+export function findTimelineBodyRows(
+  projection: TimelineProjection,
+  keys: TimelineBodyKeys,
+): TimelineBodyLookup {
+  const rows: ProjectedTimelineRow[] = [];
+  const seen = new Set<number>();
+  const missing: (number | string)[] = [];
+  const add = (row: ProjectedTimelineRow) => {
+    if (seen.has(row.seqStart) || rows.length >= TIMELINE_BODY_MAX_ROWS) return;
+    seen.add(row.seqStart);
+    rows.push(row);
+  };
+  for (const [from, to] of keys.seqs ?? []) {
+    const found = projection.findBySeqRange(from, to, TIMELINE_BODY_MAX_ROWS);
+    if (found.length === 0) missing.push(from);
+    found.forEach(add);
+  }
+  for (const callId of keys.callIds ?? []) {
+    const row = projection.findByIdentity(callId);
+    if (row) add(row);
+    else missing.push(callId);
+  }
+  return { rows, missing };
+}
 function cloneRow<T extends AgentTimelineRow>(row: T): T {
   return { ...row };
 }
@@ -87,6 +125,11 @@ export class InMemoryAgentTimelineStore {
       clientMessageId,
       providerMessageId,
     );
+  }
+
+  /** PS2 bodies: rows by seq ranges and callIds, without cloning the whole timeline. */
+  findRows(agentId: string, keys: TimelineBodyKeys): TimelineBodyLookup {
+    return findTimelineBodyRows(this.requireState(agentId).projection, keys);
   }
 
   getEpoch(agentId: string): string {

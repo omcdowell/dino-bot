@@ -40,9 +40,11 @@ describe("daemon restart resume", () => {
       const afterRemember = await ctx.client.waitForFinish(agent.id, 5_000);
       expect(afterRemember.status).toBe("idle");
       expect(afterRemember.final?.persistence).toBeTruthy();
-      expect(afterRemember.final!.persistence!.metadata).toMatchObject({ marker });
-
-      const handle = afterRemember.final!.persistence as PersistenceHandle;
+      // SI1/D0: session clients no longer get persistence.metadata/nativeHandle (no shipped app or CLI
+      // resumes from a client-held handle); the full handle comes from the daemon here.
+      const handle = ctx.daemon.daemon.agentManager.getAgent(agent.id)!
+        .persistence as PersistenceHandle;
+      expect(handle.metadata).toMatchObject({ marker });
 
       await ctx.cleanup();
       ctx = await createDaemonTestContext();
@@ -56,7 +58,11 @@ describe("daemon restart resume", () => {
       const afterRecall = await ctx.client.waitForFinish(resumed.id, 5_000);
       expect(afterRecall.status).toBe("idle");
       expect(afterRecall.final?.persistence).toBeTruthy();
-      expect(afterRecall.final!.persistence!.metadata).toMatchObject({ marker });
+      expect(
+        ctx.daemon.daemon.agentManager.getAgent(resumed.id)!.persistence!.metadata,
+      ).toMatchObject({
+        marker,
+      });
 
       await ctx.client.deleteAgent(resumed.id);
     } finally {

@@ -42,7 +42,10 @@ describe("two-cycle Codex agent resume", () => {
       expect(afterRemember.status).toBe("idle");
       expect(afterRemember.final?.persistence).toBeTruthy();
 
-      const persistence0 = afterRemember.final!.persistence as PersistenceHandle;
+      // SI1/D0: session clients no longer get persistence.metadata/nativeHandle (no shipped app or CLI
+      // resumes from a client-held handle); the full handle comes from the daemon here.
+      const persistence0 = ctx.daemon.daemon.agentManager.getAgent(agent.id)!
+        .persistence as PersistenceHandle;
       await ctx.client.deleteAgent(agent.id);
 
       collector.clear();
@@ -54,9 +57,9 @@ describe("two-cycle Codex agent resume", () => {
       const afterRecall1 = await ctx.client.waitForFinish(resumed1.id, 5_000);
       expect(afterRecall1.status).toBe("idle");
       expect(afterRecall1.final?.persistence).toBeTruthy();
-      expect(afterRecall1.final!.persistence!.metadata).toMatchObject({ marker });
-
-      const persistence1 = afterRecall1.final!.persistence as PersistenceHandle;
+      const persistence1 = ctx.daemon.daemon.agentManager.getAgent(resumed1.id)!
+        .persistence as PersistenceHandle;
+      expect(persistence1.metadata).toMatchObject({ marker });
       await ctx.client.deleteAgent(resumed1.id);
 
       collector.clear();
@@ -68,7 +71,9 @@ describe("two-cycle Codex agent resume", () => {
       const afterRecall2 = await ctx.client.waitForFinish(resumed2.id, 5_000);
       expect(afterRecall2.status).toBe("idle");
       expect(afterRecall2.final?.persistence).toBeTruthy();
-      expect(afterRecall2.final!.persistence!.metadata).toMatchObject({ marker });
+      expect(
+        ctx.daemon.daemon.agentManager.getAgent(resumed2.id)!.persistence!.metadata,
+      ).toMatchObject({ marker });
 
       await ctx.client.deleteAgent(resumed2.id);
     } finally {

@@ -1,6 +1,10 @@
 export {
   openClientSecureChannel,
   openDaemonSecureChannel,
+  prepareClientSecureHandshake,
+  readUpgradeCarrier,
+  UPGRADE_CARRIER_ACCEPTED_SUBPROTOCOL,
+  UPGRADE_CARRIER_MSG1_PREFIX,
   PROTECTED_HANDSHAKE_FAILED_CLOSE_CODE,
   PROTECTED_MODE_REQUIRED_CLOSE_CODE,
   PROTECTED_MODE_REQUIRED_CLOSE_REASON,
@@ -10,6 +14,7 @@ export {
 export type {
   ClientSecureChannelOptions,
   DaemonSecureChannelOptions,
+  PreparedClientHandshake,
   SecureChannel,
   SecureChannelEvents,
   SecurityMode,

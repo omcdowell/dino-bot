@@ -126,14 +126,16 @@ function resolveConnectionCredentials(
         password?: string;
         localCredential?: DaemonClientConfig["localCredential"];
         sessionTokens?: DaemonClientConfig["sessionTokens"];
+        featureCache?: DaemonClientConfig["featureCache"];
       }
     | undefined,
-): Pick<DaemonClientConfig, "password" | "localCredential" | "sessionTokens"> {
+): Pick<DaemonClientConfig, "password" | "localCredential" | "sessionTokens" | "featureCache"> {
   const password = options?.password;
   return {
     ...(password ? { password } : {}),
     ...(options?.localCredential ? { localCredential: options.localCredential } : {}),
     ...(options?.sessionTokens ? { sessionTokens: options.sessionTokens } : {}),
+    ...(options?.featureCache ? { featureCache: options.featureCache } : {}),
   };
 }
 
@@ -158,6 +160,8 @@ export async function buildClientConfig(
     localCredential?: DaemonClientConfig["localCredential"];
     /** The host connection's session token store, shared with its main client. */
     sessionTokens?: DaemonClientConfig["sessionTokens"];
+    /** compact_v2: the host's cached daemon feature map, shared with its main client. */
+    featureCache?: DaemonClientConfig["featureCache"];
     /** Defaults to RELEASE_POLICY; tests pass their own. */
     policy?: { tailnetOnly: boolean };
   },
@@ -309,6 +313,7 @@ interface ProbeOptions {
   timeoutMs?: number;
   password?: string;
   sessionTokens?: DaemonClientConfig["sessionTokens"];
+  featureCache?: DaemonClientConfig["featureCache"];
   localCredential?: DaemonClientConfig["localCredential"];
   capabilities?: DaemonClientConfig["capabilities"];
   trace?: DaemonClientConfig["trace"];

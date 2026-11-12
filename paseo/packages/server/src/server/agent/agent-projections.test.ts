@@ -4,6 +4,7 @@ import { AGENT_LIFECYCLE_STATUSES } from "./agent-manager.js";
 import {
   buildStoredAgentPayload,
   toAgentPayload,
+  toClientAgentPayload,
   toRecentProviderSessionDescriptorPayload,
   toStoredAgentRecord,
   type ManagedAgent,
@@ -537,5 +538,48 @@ describe("toRecentProviderSessionDescriptorPayload", () => {
       firstPromptPreview: null,
       lastPromptPreview: null,
     });
+  });
+});
+
+describe("toClientAgentPayload (D0)", () => {
+  const agent = () =>
+    createManagedAgent({
+      provider: "codex",
+      config: { provider: "codex" },
+      runtimeInfo: { provider: "codex", sessionId: "rt-1", model: "gpt-5", extra: { t: "/x" } },
+      persistence: {
+        provider: "codex",
+        sessionId: "persist-1",
+        nativeHandle: "native-1",
+        metadata: { conversationId: "c-1", cwd: "/w" },
+      },
+    });
+
+  it("drops persistence.nativeHandle, persistence.metadata and runtimeInfo.extra", () => {
+    const full = toAgentPayload(agent());
+    expect(full.persistence).toHaveProperty("nativeHandle", "native-1");
+    expect(full.runtimeInfo).toHaveProperty("extra");
+    const client = toClientAgentPayload(full);
+    expect(client.persistence).toEqual({ provider: "codex", sessionId: "persist-1" });
+    expect(client.runtimeInfo).toEqual({ provider: "codex", sessionId: "rt-1", model: "gpt-5" });
+    expect({ ...client, persistence: full.persistence, runtimeInfo: full.runtimeInfo }).toEqual(
+      full,
+    );
+    // The full projection (storage, MCP tools, hub) is untouched.
+    expect(full.persistence).toHaveProperty("metadata");
+  });
+
+  it("does the same for stored payloads and keeps storage whole", () => {
+    const record = toStoredAgentRecord(agent());
+    const client = toClientAgentPayload(buildStoredAgentPayload(record, ["codex"]));
+    expect(client.persistence).toEqual({ provider: "codex", sessionId: "persist-1" });
+    expect(client.runtimeInfo).not.toHaveProperty("extra");
+    expect(record.persistence?.nativeHandle).toBe("native-1");
+    expect(record.runtimeInfo?.extra).toEqual({ t: "/x" });
+  });
+
+  it("returns the same object when there is nothing to drop", () => {
+    const payload = toAgentPayload(createManagedAgent({ persistence: null }));
+    expect(toClientAgentPayload(payload)).toBe(payload);
   });
 });

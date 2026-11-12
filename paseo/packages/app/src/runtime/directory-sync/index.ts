@@ -39,6 +39,9 @@ type FetchAgentsPayload = Awaited<ReturnType<DaemonClient["fetchAgents"]>>;
 type FetchWorkspacesPayload = Awaited<ReturnType<DaemonClient["fetchWorkspaces"]>>;
 
 const PAGE_LIMIT = 200;
+/** slimDirectory (B3): first page and scroll page size against a slim-capable host. */
+export const SLIM_PAGE_LIMIT = 25;
+export const PARENT_AGENT_LABEL = "paseo.parent-agent-id";
 const AGENT_SORT: NonNullable<FetchAgentsOptions["sort"]> = [
   { key: "updated_at", direction: "desc" },
 ];
@@ -160,6 +163,12 @@ export class DirectorySync {
   private demandRefresh: Promise<void> | null = null;
   private satisfiedDemandSource: DirectorySourceToken | null = null;
   private cursors: DirectoryCheckpoint = {};
+  /** slimDirectory: page cursors for rows left out of the first page (loaded on scroll). */
+  private agentPageCursor: string | null = null;
+  private workspacePageCursor: string | null = null;
+  // False after a warm (sync "changes") start: the page cursors are not known yet.
+  private pageCursorsKnown = false;
+  private readonly loadedChildParents = new Set<string>();
 
   constructor(
     private readonly serverId: string,
@@ -352,6 +361,127 @@ export class DirectorySync {
     await this.loadCachedAgent(agentId);
     const agent = useSessionStore.getState().sessions[this.serverId]?.agents.get(agentId);
     if (agent?.workspaceId) await this.loadCachedWorkspace(agent.workspaceId);
+    if (agent?.slim) void this.ensureFullAgent(agentId).catch(() => undefined);
+    void this.loadAgentChildren(agentId).catch(() => undefined);
+  }
+
+  /** slimDirectory: replace a slim sidebar row with the full row (fetch_agent). */
+  async ensureFullAgent(agentId: string): Promise<void> {
+    const connection = this.getOnlineConnection();
+    if (!connection) return;
+    const existing = useSessionStore.getState().sessions[this.serverId]?.agents.get(agentId);
+    if (existing && !existing.slim) return;
+    const token = this.agents.captureTimeline(agentId);
+    const result = await connection.client.fetchAgent({ agentId });
+    if (!result || !this.isCurrent(connection.client, connection.source)) return;
+    if (this.agents.submitTimelineAgent(token, result.agent)) {
+      this.revision += 1;
+      this.persistCheckpoint();
+    }
+  }
+
+  hasMoreAgents(): boolean {
+    if (!this.supportsSlimDirectory()) return false;
+    return (
+      !this.pageCursorsKnown || this.agentPageCursor !== null || this.workspacePageCursor !== null
+    );
+  }
+
+  /** slimDirectory: next sidebar page (agents and workspaces) when the list scrolls to the end. */
+  async loadMoreAgents(): Promise<void> {
+    const connection = this.getOnlineConnection();
+    if (!connection || !this.supportsSlimDirectory()) return;
+    const { client, source } = connection;
+    // A warm start skipped the snapshot that carries the page cursors: re-read the
+    // (uncursored, unsequenced) first page to learn them.
+    const known = this.pageCursorsKnown;
+    const agentCursor = this.agentPageCursor;
+    const workspaceCursor = this.workspacePageCursor;
+    const [agents, workspaces] = await Promise.all([
+      agentCursor || !known
+        ? client.fetchAgents({
+            ...this.slimAgentQuery(client),
+            page: agentCursor
+              ? { limit: SLIM_PAGE_LIMIT, cursor: agentCursor }
+              : { limit: SLIM_PAGE_LIMIT },
+          })
+        : null,
+      workspaceCursor || !known
+        ? client.fetchWorkspaces({
+            ...(client.supportsBackgroundWorkspaces() ? { includeBackground: true } : {}),
+            sort: [{ key: "activity_at", direction: "desc" }],
+            page: workspaceCursor
+              ? { limit: SLIM_PAGE_LIMIT, cursor: workspaceCursor }
+              : { limit: SLIM_PAGE_LIMIT },
+            slim: true,
+          })
+        : null,
+    ]);
+    this.pageCursorsKnown = true;
+    if (!this.isCurrent(client, source)) return;
+    if (workspaces && this.workspacePageCursor === workspaceCursor) {
+      for (const workspace of workspaces.entries)
+        this.receiveWorkspaceDelta(source, { kind: "upsert", workspace });
+      this.workspacePageCursor = workspaces.pageInfo.hasMore
+        ? workspaces.pageInfo.nextCursor
+        : null;
+    }
+    if (agents && this.agentPageCursor === agentCursor) {
+      this.acceptAgentEntries(source, agents.entries);
+      const next = resolveAgentNextPage(agents.pageInfo as AgentPageInfo);
+      this.agentPageCursor = next.hasMore ? next.nextCursor : null;
+    }
+  }
+
+  /** slimDirectory: idle delegated children are left out of the directory; load them on demand. */
+  async loadAgentChildren(parentAgentId: string): Promise<void> {
+    const connection = this.getOnlineConnection();
+    if (!connection || !this.supportsSlimDirectory()) return;
+    if (this.loadedChildParents.has(parentAgentId)) return;
+    this.loadedChildParents.add(parentAgentId);
+    const { client, source } = connection;
+    try {
+      const payload = await client.fetchAgents({
+        filter: {
+          labels: { [PARENT_AGENT_LABEL]: parentAgentId },
+          ...(client.supportsBackgroundWorkspaces() ? { includeBackground: true } : {}),
+        },
+        sort: AGENT_SORT,
+        page: { limit: PAGE_LIMIT },
+        slim: true,
+      });
+      if (!this.isCurrent(client, source)) return;
+      this.acceptAgentEntries(source, payload.entries);
+    } catch (error) {
+      this.loadedChildParents.delete(parentAgentId);
+      throw error;
+    }
+  }
+
+  private acceptAgentEntries(source: DirectorySourceToken, entries: FetchAgentsEntry[]): void {
+    for (const entry of entries)
+      this.receiveAgentDelta(source, {
+        kind: "upsert",
+        agent: entry.agent,
+        project: entry.project,
+      });
+  }
+
+  private slimAgentQuery(client: DaemonClient): Omit<FetchAgentsOptions, "subscribe"> {
+    return {
+      scope: "active",
+      ...(client.supportsBackgroundWorkspaces() ? { includeBackground: true } : {}),
+      sort: AGENT_SORT,
+      slim: true,
+      omitIdleDelegated: true,
+    };
+  }
+
+  private supportsSlimDirectory(): boolean {
+    return (
+      useSessionStore.getState().sessions[this.serverId]?.serverInfo?.features?.slimDirectory ===
+      true
+    );
   }
 
   async prepareWorkspaceRoute(workspaceId: string): Promise<void> {
@@ -533,11 +663,14 @@ export class DirectorySync {
   ): Promise<void> {
     let cursor: string | null = null;
     let subscribe = initialSubscribe;
+    const slim = this.supportsSlimDirectory();
+    const limit = slim ? SLIM_PAGE_LIMIT : PAGE_LIMIT;
     while (true) {
       const query: Parameters<DaemonClient["observeWorkspaces"]>[0] = {
+        ...(slim ? { slim: true } : {}),
         ...(client.supportsBackgroundWorkspaces() ? { includeBackground: true } : {}),
         sort: [{ key: "activity_at", direction: "desc" }],
-        page: cursor ? { limit: PAGE_LIMIT, cursor } : { limit: PAGE_LIMIT },
+        page: cursor ? { limit, cursor } : { limit },
         ...(supportsDirectorySync
           ? { sync: transaction.snapshot.requestCursors.workspaces ?? {} }
           : {}),
@@ -558,7 +691,9 @@ export class DirectorySync {
       } else payload = await client.fetchWorkspaces(query);
       this.assertWorkspaceTransactionCurrent(client, source, transaction);
       applyWorkspaceSnapshotPage(transaction.snapshot, payload, cursor === null);
-      if (!payload.pageInfo.hasMore || !payload.pageInfo.nextCursor) return;
+      if (slim && (payload.sync?.mode ?? "snapshot") === "snapshot")
+        this.workspacePageCursor = payload.pageInfo.hasMore ? payload.pageInfo.nextCursor : null;
+      if (slim || !payload.pageInfo.hasMore || !payload.pageInfo.nextCursor) return;
       cursor = payload.pageInfo.nextCursor;
       subscribe = false;
     }
@@ -631,17 +766,10 @@ export class DirectorySync {
   ): Promise<void> {
     let cursor = input.page?.cursor ?? null;
     let subscribe = input.subscribe;
+    // slimDirectory: the sidebar takes one priority page; the rest loads on scroll.
+    const slim = !input.filter && !input.page && this.supportsSlimDirectory();
     while (true) {
-      const limit = input.page?.limit ?? PAGE_LIMIT;
-      const query: Omit<FetchAgentsOptions, "subscribe"> = {
-        ...(input.filter ? { filter: input.filter } : { scope: "active" as const }),
-        ...(client.supportsBackgroundWorkspaces() ? { includeBackground: true } : {}),
-        sort: AGENT_SORT,
-        page: cursor ? { limit, cursor } : { limit },
-        ...(!input.filter && cursor === null && this.supportsDirectorySync()
-          ? { sync: this.readCursors().agents ?? {} }
-          : {}),
-      };
+      const query = this.agentPageQuery(client, input, cursor, slim);
       let payload: FetchAgentsPayload;
       if (subscribe) {
         if (subscribe.subscriptionId) throw new Error("Subscription IDs are assigned by the host");
@@ -662,10 +790,38 @@ export class DirectorySync {
       transaction.snapshot.subscriptionId ??= payload.subscriptionId ?? null;
       this.recordAgentSync(transaction.snapshot, payload.sync);
       const { hasMore, nextCursor } = resolveAgentNextPage(payload.pageInfo as AgentPageInfo);
-      if (!hasMore || !nextCursor) break;
+      if (slim) this.recordSlimAgentPage(payload, hasMore ? nextCursor : null);
+      if (slim || !hasMore || !nextCursor) break;
       cursor = nextCursor;
       subscribe = undefined;
     }
+  }
+
+  private agentPageQuery(
+    client: DaemonClient,
+    input: RefreshAgentDirectoryInput,
+    cursor: string | null,
+    slim: boolean,
+  ): Omit<FetchAgentsOptions, "subscribe"> {
+    const limit = input.page?.limit ?? (slim ? SLIM_PAGE_LIMIT : PAGE_LIMIT);
+    return {
+      ...(slim ? { slim: true, omitIdleDelegated: true } : {}),
+      ...(input.filter ? { filter: input.filter } : { scope: "active" as const }),
+      ...(client.supportsBackgroundWorkspaces() ? { includeBackground: true } : {}),
+      sort: AGENT_SORT,
+      page: cursor ? { limit, cursor } : { limit },
+      ...(!input.filter && cursor === null && this.supportsDirectorySync()
+        ? { sync: this.readCursors().agents ?? {} }
+        : {}),
+    };
+  }
+
+  /** slimDirectory: a snapshot first page carries the cursor for the rows it left out. */
+  private recordSlimAgentPage(payload: FetchAgentsPayload, nextCursor: string | null): void {
+    if (payload.sync?.mode === "changes") return;
+    this.agentPageCursor = nextCursor;
+    this.pageCursorsKnown = true;
+    this.loadedChildParents.clear();
   }
 
   private assertAgentTransactionCurrent(

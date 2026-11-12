@@ -74,3 +74,42 @@ test("bases are per subscription", () => {
   expander.observe(upsert(1));
   expect(expander.expand(patch({ subscriptionId: "other" })).kind).toBe("resync");
 });
+
+type FetchAgentsResponse = Extract<SessionOutboundMessage, { type: "fetch_agents_response" }>;
+const snapshot = (extra: Partial<FetchAgentsResponse["payload"]>): FetchAgentsResponse => ({
+  type: "fetch_agents_response",
+  payload: {
+    requestId: "r1",
+    subscriptionId: "s1",
+    entries: [{ agent, project: null } as unknown as FetchAgentsResponse["payload"]["entries"][0]],
+    pageInfo: { nextCursor: null, prevCursor: null, hasMore: false },
+    ...extra,
+  } as FetchAgentsResponse["payload"],
+});
+
+test("A6: a patchBase snapshot is rev 1, so the first live patch applies without a full row", () => {
+  const expander = new AgentPatchExpander();
+  expander.observeSnapshot(snapshot({ patchBase: true }));
+  const result = expander.expand(patch({ set: { status: "running" } }));
+  if (result.kind !== "update" || result.message.payload.kind !== "upsert")
+    throw new Error("expected an update");
+  expect(result.message.payload.agent).toEqual({ ...agent, status: "running" });
+  expect(result.message.payload).toMatchObject({ subscriptionId: "s1", rev: 2 });
+});
+
+test("A6: a snapshot without patchBase (older daemon) or subscription seeds nothing", () => {
+  const plain = new AgentPatchExpander();
+  plain.observeSnapshot(snapshot({}));
+  expect(plain.expand(patch({}))).toEqual({ kind: "resync", agentId: "a1", subscriptionId: "s1" });
+  const unsubscribed = new AgentPatchExpander();
+  unsubscribed.observeSnapshot(snapshot({ patchBase: true, subscriptionId: undefined }));
+  expect(unsubscribed.expand(patch({}))).toMatchObject({ kind: "resync" });
+});
+
+test("A6: a newer snapshot replaces an older base and clears a pending resync", () => {
+  const expander = new AgentPatchExpander();
+  expander.observe(upsert(1));
+  expect(expander.expand(patch({ rev: 5, baseRev: 4 }))).toMatchObject({ kind: "resync" });
+  expander.observeSnapshot(snapshot({ patchBase: true }));
+  expect(expander.expand(patch({ set: { title: "New" } }))).toMatchObject({ kind: "update" });
+});

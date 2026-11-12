@@ -48,6 +48,7 @@ import {
 } from "@/hooks/use-sidebar-workspace-pin";
 import { useSidebarCollapsedSectionsStore } from "@/stores/sidebar-collapsed-sections-store";
 import { useHostFeatureMap } from "@/runtime/host-features";
+import { useLoadMoreDirectoryOnScroll } from "@/runtime/directory-sync/use-load-more-on-scroll";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useProjectIcons } from "@/projects/icons";
 import {
@@ -2133,6 +2134,12 @@ function ProjectModeList({
   );
   const selectionEnabled = isWorkspaceRoute;
   const activeWorkspaceSelection = useActiveWorkspaceSelection();
+  const hostsForPaging = useHosts();
+  const pagingServerIds = useMemo(
+    () => hostsForPaging.map((host) => host.serverId),
+    [hostsForPaging],
+  );
+  const onListScroll = useLoadMoreDirectoryOnScroll(pagingServerIds);
   const { pinnedChats, unpinnedProjects } = pinnedGroups;
   const {
     visibleItems: visiblePinnedChats,
@@ -2463,6 +2470,8 @@ function ProjectModeList({
           style={styles.list}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          onScroll={onListScroll}
+          scrollEventThrottle={200}
           testID="sidebar-project-workspace-list-scroll"
         >
           {content}
@@ -2472,6 +2481,8 @@ function ProjectModeList({
           style={styles.list}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          onScroll={onListScroll}
+          scrollEventThrottle={200}
           testID="sidebar-project-workspace-list-scroll"
         >
           {content}

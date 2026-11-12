@@ -73,6 +73,8 @@ export function createWebSocketTransportFactory(factory: WebSocketFactory): Daem
       onClose: (handler) => bindWsHandler(ws, "close", handler),
       onError: (handler) => bindWsHandler(ws, "error", handler),
       onMessage: (handler) => bindWsMessageHandler(ws, handler),
+      selectedProtocol: () =>
+        typeof ws.protocol === "string" && ws.protocol.length > 0 ? ws.protocol : undefined,
     };
   };
 }

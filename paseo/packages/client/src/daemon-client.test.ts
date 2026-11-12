@@ -17,6 +17,7 @@ import {
 } from "./daemon-client";
 import { DIRECT_E2EE_FAILED_MESSAGE, describeDirectE2eeFailure } from "./daemon-client-transport";
 import { CLIENT_CAPS } from "@getpaseo/protocol/client-capabilities";
+import { createMemoryFeatureCache } from "@getpaseo/protocol/compact-v2";
 import { BROWSER_AUTOMATION_COMMAND_NAMES } from "@getpaseo/protocol/browser-automation/rpc-schemas";
 import {
   decodeFileTransferFrame,
@@ -106,7 +107,11 @@ function createMockTransport() {
   return {
     transport,
     sent,
-    triggerOpen: (options?: { preserveSent?: boolean; features?: Record<string, boolean> }) => {
+    triggerOpen: (options?: {
+      preserveSent?: boolean;
+      features?: Record<string, boolean>;
+      status?: Record<string, unknown>;
+    }) => {
       onOpen();
       if (!options?.preserveSent) {
         // Ignore HELLO handshake payloads in assertions.
@@ -117,7 +122,7 @@ function createMockTransport() {
           type: "session",
           message: {
             type: "status",
-            payload: {
+            payload: options?.status ?? {
               status: "server_info",
               serverId: `srv_test_${serverInfoOrdinal++}`,
               hostname: null,
@@ -938,7 +943,11 @@ test("direct E2EE upgrades carry only the E2EE subprotocol, never the password",
     clientId: "clsk_direct_e2ee_unit",
     password: "shared-secret",
     authHeader: "Bearer shared-secret",
-    e2ee: { enabled: true, daemonPublicKeyB64: "daemon-public-key" },
+    e2ee: {
+      enabled: true,
+      daemonPublicKeyB64: exportPublicKey(generateKeyPair().publicKey),
+      upgradeCarrier: false,
+    },
     reconnect: { enabled: false },
     transportFactory: (request) => {
       requests.push(request);
@@ -952,6 +961,39 @@ test("direct E2EE upgrades carry only the E2EE subprotocol, never the password",
     url: "ws://100.64.0.7:6767/ws",
     protocols: ["paseo.e2ee.v1"],
   });
+});
+
+test("direct E2EE upgrades with the msg1 carrier (HS1): E2EE tokens only, never the password", async () => {
+  const mock = createMockTransport();
+  const requests: Array<{
+    url: string;
+    headers?: Record<string, string>;
+    protocols?: string[];
+  }> = [];
+  const client = new DaemonClient({
+    url: "ws://100.64.0.7:6767/ws",
+    clientId: "clsk_direct_e2ee_carrier_unit",
+    password: "shared-secret",
+    authHeader: "Bearer shared-secret",
+    e2ee: {
+      enabled: true,
+      daemonPublicKeyB64: exportPublicKey(generateKeyPair().publicKey),
+    },
+    reconnect: { enabled: false },
+    transportFactory: (request) => {
+      requests.push(request);
+      return mock.transport;
+    },
+  });
+  clients.push(client);
+  void client.connect().catch(() => {});
+  await vi.waitFor(() => expect(requests).toHaveLength(1));
+  expect(requests[0]!.headers).toBeUndefined();
+  const protocols = requests[0]!.protocols!;
+  expect(protocols.slice(0, 2)).toEqual(["paseo.e2ee.v1", "paseo.e2ee.v1.m1"]);
+  expect(protocols).toHaveLength(3);
+  expect(protocols[2]).toMatch(/^paseo\.e2ee\.m1\.[A-Za-z0-9_-]{67}$/);
+  expect(protocols.join(" ")).not.toContain("shared-secret");
 });
 
 test("describeDirectE2eeFailure: refusals stop retrying, network drops do not", () => {
@@ -1151,6 +1193,7 @@ test("advertises client capabilities in hello", async () => {
       compact_provider_snapshots: true,
       custom_mode_icons: true,
       project_updates: true,
+      priority_sync: true,
       provider_subagents: true,
       projected_subagent_timeline: true,
       reasoning_merge_enum: true,
@@ -1159,6 +1202,8 @@ test("advertises client capabilities in hello", async () => {
       plugin_timeline_items: true,
       workspace_setup_blocked: true,
       hello_rejection: true,
+      priority_sync: true,
+      compact_v2: true,
       browser_host: {
         supportedCommands: ["list_tabs"],
         hostKind: "desktop app",
@@ -8313,4 +8358,248 @@ test("closes before admission when a protected-capable daemon is reached in lega
   // Only the application hello reached the daemon; the queued command never did.
   expect(daemonReceived).toHaveLength(1);
   expect(JSON.parse(daemonReceived[0] as string)).toMatchObject({ type: "hello" });
+});
+
+test("fetchAgents forwards slim directory flags and parses slim rows with defaults", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger: createMockLogger(),
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const promise = client.fetchAgents({
+    scope: "active",
+    slim: true,
+    omitIdleDelegated: true,
+  });
+  await vi.waitFor(() => expect(mock.sent).toHaveLength(1));
+  const request = parseSentFrame(mock.sent[0]);
+  expect(request).toMatchObject({ slim: true, omitIdleDelegated: true });
+
+  mock.triggerMessage(
+    JSON.stringify({
+      type: "session",
+      message: {
+        type: "fetch_agents_response",
+        payload: {
+          requestId: request.requestId,
+          entries: [
+            {
+              agent: {
+                id: "a1",
+                provider: "codex",
+                cwd: "/tmp",
+                model: null,
+                createdAt: "2026-01-01T00:00:00.000Z",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+                lastUserMessageAt: null,
+                status: "idle",
+                currentModeId: null,
+                availableModes: [],
+                pendingPermissions: [],
+                title: "slim",
+                labels: {},
+                slim: true,
+              },
+              project: {
+                projectKey: "p",
+                projectName: "p",
+                workspaceName: "w",
+                checkout: {
+                  cwd: "/tmp",
+                  isGit: false,
+                  currentBranch: null,
+                  remoteUrl: null,
+                  worktreeRoot: null,
+                  isPaseoOwnedWorktree: false,
+                  mainRepoRoot: null,
+                },
+              },
+            },
+          ],
+          pageInfo: { nextCursor: null, prevCursor: null, hasMore: false },
+        },
+      },
+    }),
+  );
+  const payload = await promise;
+  expect(payload.entries[0].agent.slim).toBe(true);
+  expect(payload.entries[0].agent.persistence).toBeNull();
+  expect(payload.entries[0].agent.capabilities.supportsStreaming).toBe(false);
+});
+
+describe("compact_v2", () => {
+  const features = { ownedSubscriptions: true, slimDirectory: true };
+
+  test("caches the feature map, presents its hash, and restores a hash-only server_info", async () => {
+    const featureCache = createMemoryFeatureCache();
+    const first = createMockTransport();
+    const a = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_cv2_a",
+      logger: createMockLogger(),
+      reconnect: { enabled: false },
+      transportFactory: () => first.transport,
+      featureCache,
+    });
+    clients.push(a);
+    const connectA = a.connect();
+    first.triggerOpen({
+      preserveSent: true,
+      status: { status: "server_info", serverId: "srv_cv2", cv2: 1, fh: "f00dfeed", features },
+    });
+    await connectA;
+    const helloA = JSON.parse(assertStr(first.sent[0])) as {
+      capabilities: Record<string, unknown>;
+    };
+    expect(helloA.capabilities.compact_v2).toBe(true);
+    expect(helloA.capabilities).not.toHaveProperty("compact_v2_fh");
+    expect(a.getLastServerInfoMessage()?.features).toEqual(features);
+    expect(featureCache.get()).toEqual({ hash: "f00dfeed", features });
+
+    const second = createMockTransport();
+    const b = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_cv2_b",
+      logger: createMockLogger(),
+      reconnect: { enabled: false },
+      transportFactory: () => second.transport,
+      featureCache,
+    });
+    clients.push(b);
+    const connectB = b.connect();
+    second.triggerOpen({
+      preserveSent: true,
+      status: { status: "server_info", serverId: "srv_cv2", cv2: 1, fh: "f00dfeed" },
+    });
+    await connectB;
+    const helloB = JSON.parse(assertStr(second.sent[0])) as {
+      capabilities: Record<string, unknown>;
+    };
+    expect(helloB.capabilities.compact_v2_fh).toBe("f00dfeed");
+    expect(b.getLastServerInfoMessage()?.features).toEqual(features);
+  });
+
+  test("decodes a compact timeline page (in a batch frame) to the full rows", async () => {
+    const mock = createMockTransport();
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_cv2_page",
+      logger: createMockLogger(),
+      reconnect: { enabled: false },
+      transportFactory: () => mock.transport,
+    });
+    clients.push(client);
+    const connected = client.connect();
+    mock.triggerOpen({
+      status: { status: "server_info", serverId: "srv_cv2", cv2: 1, fh: "x", features },
+    });
+    await connected;
+    const pending = client.fetchAgentTimeline("agent-1", {
+      direction: "before",
+      cursor: { epoch: "e", seq: 9 },
+    });
+    const request = parseSentFrame(mock.sent.at(-1));
+    const page = {
+      requestId: request.requestId,
+      agentId: "agent-1",
+      direction: "before",
+      projection: "projected",
+      epoch: "e",
+      window: { minSeq: 1, maxSeq: 9, nextSeq: 10 },
+      startCursor: { epoch: "e", seq: 1 },
+      endCursor: { epoch: "e", seq: 1 },
+      hasOlder: false,
+      provider: "codex",
+      entries: [
+        {
+          item: {
+            type: "tool_call",
+            callId: "c1",
+            name: "execute",
+            detail: { command: "ls" },
+            metadata: { title: "List", paseoCompact: 1 },
+            status: "completed",
+            error: null,
+          },
+          timestamp: Date.parse("2026-11-11T15:50:11.737Z"),
+          seqStart: 1,
+        },
+      ],
+    };
+    mock.triggerMessage(
+      JSON.stringify({
+        type: "batch",
+        m: [{ type: "session", message: { type: "fetch_agent_timeline_response", payload: page } }],
+      }),
+    );
+    const result = await pending;
+    expect(result.agent).toBeNull();
+    expect(result.reset).toBe(false);
+    expect(result.error).toBeNull();
+    expect(result.entries[0]).toEqual({
+      provider: "codex",
+      item: {
+        type: "tool_call",
+        callId: "c1",
+        name: "execute",
+        detail: { type: "shell", command: "ls" },
+        metadata: { kind: "execute", title: "List", paseoCompact: {} },
+        status: "completed",
+        error: null,
+      },
+      timestamp: "2026-11-11T15:50:11.737Z",
+      seqStart: 1,
+      seqEnd: 1,
+      sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }],
+      collapsed: [],
+    });
+  });
+});
+
+describe("B2a setPriorityChat", () => {
+  test("a chat named before the first hello rides in hello.f; afterwards it is refused", async () => {
+    const mock = createMockTransport();
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "priority_chat_unit_test",
+      transportFactory: () => mock.transport,
+      reconnect: { enabled: false },
+    });
+    clients.push(client);
+    expect(client.setPriorityChat({ agentId: "a1", cursor: { epoch: "e", seq: 7 } })).toBe(true);
+    const connectPromise = client.connect();
+    mock.triggerOpen({ preserveSent: true });
+    await connectPromise;
+    const hello = JSON.parse(assertStr(mock.sent[0])) as { f?: { a: string; c?: unknown } };
+    expect(hello.f?.a).toBe("a1");
+    expect(hello.f?.c).toEqual({ epoch: "e", seq: 7 });
+    expect(client.priorityChatPage()).not.toBeNull();
+    expect(client.setPriorityChat({ agentId: "a2" })).toBe(false);
+  });
+
+  test("without a priority chat the hello has no f (old daemons see the same hello)", async () => {
+    const mock = createMockTransport();
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "priority_chat_none_unit_test",
+      transportFactory: () => mock.transport,
+      reconnect: { enabled: false },
+    });
+    clients.push(client);
+    const connectPromise = client.connect();
+    mock.triggerOpen({ preserveSent: true });
+    await connectPromise;
+    const hello = JSON.parse(assertStr(mock.sent[0])) as Record<string, unknown>;
+    expect(hello.f).toBeUndefined();
+    expect(client.priorityChatPage()).toBeNull();
+    expect(client.setPriorityChat({ agentId: "late" })).toBe(false);
+  });
 });

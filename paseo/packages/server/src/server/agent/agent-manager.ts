@@ -1,4 +1,4 @@
-import { projectTimelineRows } from "./timeline-projection.js";
+import { projectTimelineRows, TimelineProjection } from "./timeline-projection.js";
 import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
 import { describeHookAgent, publishAgentStream } from "../plugins/lifecycle/index.js";
 import type { PluginSessionOpenRequest } from "@getpaseo/plugin/server";
@@ -61,7 +61,10 @@ import type { StoredAgentRecord, AgentStorage } from "./agent-storage.js";
 import type { AgentOwner } from "./agent-owner.js";
 import {
   InMemoryAgentTimelineStore,
+  findTimelineBodyRows,
   type SeedAgentTimelineOptions,
+  type TimelineBodyKeys,
+  type TimelineBodyLookup,
 } from "./agent-timeline-store.js";
 import type {
   AgentTimelineFetchOptions,
@@ -1267,6 +1270,25 @@ export class AgentManager {
       }).map((entry) => Object.assign({ seq: entry.seqEnd }, entry));
     }
     return this.timelineStore.getRows(id);
+  }
+
+  /**
+   * PS2 bodies: full rows by seq ranges / callIds. Reads the live timeline when the agent has one,
+   * else the durable store when configured; never loads or resumes an agent. Null = not available.
+   */
+  async findTimelineBodyRows(
+    id: string,
+    keys: TimelineBodyKeys,
+  ): Promise<(TimelineBodyLookup & { epoch: string | null }) | null> {
+    if (this.timelineStore.has(id)) {
+      return { ...this.timelineStore.findRows(id, keys), epoch: this.timelineStore.getEpoch(id) };
+    }
+    if (!this.durableTimelineStore) return null;
+    const rows = await this.durableTimelineStore.getCommittedRows(id);
+    if (rows.length === 0) return null;
+    const projection = new TimelineProjection();
+    for (const row of rows) projection.append(row);
+    return { ...findTimelineBodyRows(projection, keys), epoch: null };
   }
 
   fetchTimeline(id: string, options?: AgentTimelineFetchOptions): AgentTimelineFetchResult {

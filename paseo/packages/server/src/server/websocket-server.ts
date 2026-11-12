@@ -18,6 +18,8 @@ import {
   zstdFramesAvailable,
 } from "@getpaseo/protocol/binary-frames/compressed-json-node";
 import { OrderedFrameSender } from "./ordered-frame-sender.js";
+import { PrioritySendQueue } from "./priority-send-queue.js";
+import { agentDomain, decideLane, NOTIFIED_PUSH_PREFIX } from "./lane-policy.js";
 import {
   AgentMessageQueue,
   isAgentBusyForQueue,
@@ -29,7 +31,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { IncomingMessage, Server as HTTPServer } from "http";
 import { join } from "path";
 import { getHostName } from "./host-name.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import type { AgentManager, AgentMetricsSnapshot } from "./agent/agent-manager.js";
 import type { AgentStorage } from "./agent/agent-storage.js";
@@ -49,6 +51,7 @@ import {
   type WSHelloMessage,
   type WSInboundMessage,
   WSInboundMessageSchema,
+  WSSessionInboundSchema,
   type ServerCapabilityState,
   type ServerCapabilities,
   type WSOutboundMessage,
@@ -119,14 +122,19 @@ import {
   CLIENT_SHUTDOWN_RPC_REASON,
   normalizeClientRestartRpcReason,
 } from "./lifecycle-reasons.js";
-import { CLIENT_CAPS } from "@getpaseo/protocol/client-capabilities";
+import { CLIENT_CAPS, decodeCompactCapabilities } from "@getpaseo/protocol/client-capabilities";
 import {
   SESSION_TOKEN_FILE_NAME,
   SessionTokenStore,
   type SessionTokenBinding,
 } from "./session-tokens.js";
 
-import type { KeyPair, SecurityMode } from "@getpaseo/relay/e2ee";
+import {
+  readUpgradeCarrier,
+  UPGRADE_CARRIER_ACCEPTED_SUBPROTOCOL,
+  type KeyPair,
+  type SecurityMode,
+} from "@getpaseo/relay/e2ee";
 import { DIRECT_E2EE_SUBPROTOCOL } from "@getpaseo/protocol/daemon-endpoints";
 import { admitSecuredRelaySocket } from "./websocket/secure-relay-ingress.js";
 import {
@@ -138,6 +146,11 @@ import {
 import type { BrowserToolsBroker } from "./browser-tools/broker.js";
 import type { DaemonRuntimeConfig } from "./session/daemon/daemon-session.js";
 import { DirectorySyncService } from "./directory-sync/index.js";
+import {
+  COMPACT_V2_FEATURES_HASH_CAP,
+  encodeCompactV2,
+  type CompactV2SocketState,
+} from "@getpaseo/protocol/compact-v2";
 import { OWNER_PERMISSIONS, type DaemonPermission } from "./authorization/index.js";
 import type { WorkspaceLabelService } from "./workspace-labels/index.js";
 import {
@@ -152,6 +165,15 @@ import {
 } from "./websocket/physical-socket.js";
 
 const WS_CLOSE_DAEMON_AUTH_FAILED = 4401;
+
+/** compact_v2 A1: 64-bit hash of the server_info feature map (memoized on its JSON text). */
+let lastFeaturesHash: { json: string; hash: string } | null = null;
+function hashServerFeatures(features: unknown): string {
+  const json = JSON.stringify(features);
+  if (lastFeaturesHash?.json !== json)
+    lastFeaturesHash = { json, hash: createHash("sha256").update(json).digest("hex").slice(0, 16) };
+  return lastFeaturesHash.hash;
+}
 /** A plaintext socket from another machine while PASEO_DIRECT_E2EE=required. */
 const WS_CLOSE_DIRECT_E2EE_REQUIRED = 4426;
 const DIRECT_E2EE_REQUIRED_REASON = DIRECT_E2EE_REQUIRED_MESSAGE;
@@ -616,6 +638,16 @@ export class VoiceAssistantWebSocketServer {
   >();
   /** zstd sockets: compression is asynchronous, so every frame to them goes out through this, in order. */
   private readonly orderedSenders = new WeakMap<WebSocketLike, OrderedFrameSender>();
+  /** priority_sync sockets (PS2): JSON messages wait here in priority lanes before compression. */
+  private readonly priorityQueues = new WeakMap<WebSocketLike, PrioritySendQueue>();
+  /** compact_v2 (CV1): sockets that get the compact wire encoding, with their per-socket state. */
+  private readonly compactV2Sockets = new WeakMap<WebSocketLike, CompactV2SocketState>();
+  /** priority_sync: the open chat last used for lanes on this socket (to promote on change). */
+  private readonly laneFocus = new WeakMap<WebSocketLike, string | null>();
+  /** priority_sync: the chat of this socket's latest tail/after page, used when it sends no focus. */
+  private readonly inferredFocus = new WeakMap<WebSocketLike, string>();
+  /** priority_sync: agents whose current turn already sent its first text on this socket. */
+  private readonly turnTextSent = new WeakMap<WebSocketLike, Set<string>>();
   /** checkedUplink: the client's checked JSON frames (0x21), one decoder per socket. */
   private readonly uplinkDecoders = new WeakMap<WebSocketLike, CheckedJsonFrameDecoder>();
   private unsubscribeAgentQueue: (() => void) | null = null;
@@ -917,6 +949,68 @@ export class VoiceAssistantWebSocketServer {
   }
 
   /**
+   * priority_sync (PS2): lanes, low-watermark sending and batch frames, only for capable clients.
+   * PASEO_PRIORITY_SYNC=0 turns it off. Everyone else keeps one frame per message, in send order.
+   */
+  private negotiatePrioritySync(
+    ws: WebSocketLike,
+    capabilities: Record<string, unknown> | null | undefined,
+  ): void {
+    if (process.env.PASEO_PRIORITY_SYNC === "0") return;
+    if (capabilities?.[CLIENT_CAPS.prioritySync] !== true) return;
+    if (this.priorityQueues.has(ws)) return;
+    const lowWater = Number(process.env.PASEO_PRIORITY_LOW_WATER_BYTES);
+    const lingerMs = Number(process.env.PASEO_PRIORITY_LINGER_MS ?? Number.NaN);
+    this.priorityQueues.set(
+      ws,
+      new PrioritySendQueue({
+        pendingBytes: () =>
+          (ws.bufferedAmount ?? 0) + (this.orderedSenders.get(ws)?.pendingBytes ?? 0),
+        send: (payload) => {
+          if (ws.readyState !== 1) return;
+          this.sendPayloadToSocket(ws, payload, outboundFrameByteLength(payload), () => {});
+        },
+        ...(Number.isFinite(lowWater) && lowWater > 0 ? { lowWaterBytes: lowWater } : {}),
+        ...(Number.isFinite(lingerMs) && lingerMs >= 0 ? { lingerMs } : {}),
+      }),
+    );
+  }
+
+  private laneContextFor(
+    ws: WebSocketLike,
+    queue: PrioritySendQueue,
+  ): { focusedAgentId: string | null } {
+    const focused =
+      this.sessions.get(ws)?.session.getClientActivity(ws)?.focusedAgentId ??
+      this.inferredFocus.get(ws) ??
+      null;
+    if (this.laneFocus.get(ws) !== focused) {
+      this.laneFocus.set(ws, focused);
+      if (focused) queue.promote(agentDomain(focused), 1);
+    }
+    return { focusedAgentId: focused };
+  }
+
+  /**
+   * compact_v2 (CV1): compact wire encoding (protocol/compact-v2) for capable clients.
+   * PASEO_COMPACT_V2=0 turns it off. Everyone else keeps today's bytes.
+   */
+  private negotiateCompactV2(
+    ws: WebSocketLike,
+    capabilities: Record<string, unknown> | null | undefined,
+  ): void {
+    if (process.env.PASEO_COMPACT_V2 === "0") return;
+    if (capabilities?.[CLIENT_CAPS.compactV2] !== true) {
+      this.compactV2Sockets.delete(ws);
+      return;
+    }
+    const presented = capabilities[COMPACT_V2_FEATURES_HASH_CAP];
+    this.compactV2Sockets.set(ws, {
+      knownFeaturesHash: typeof presented === "string" && presented.length <= 64 ? presented : null,
+    });
+  }
+
+  /**
    * Compress JSON frames on this socket when the client accepts them (most useful on weak mobile
    * links). PASEO_COMPRESSED_FRAMES=0 turns it off.
    */
@@ -1076,7 +1170,7 @@ export class VoiceAssistantWebSocketServer {
       path: "/ws",
       handleProtocols: (protocols) =>
         wsConfig.daemonKeyPair && protocols.has(DIRECT_E2EE_SUBPROTOCOL)
-          ? DIRECT_E2EE_SUBPROTOCOL
+          ? selectDirectE2eeProtocol(protocols)
           : selectWebSocketProtocol(protocols, password),
       verifyClient: ({ req }, callback) => {
         this.verifyWsUpgrade(
@@ -1090,6 +1184,12 @@ export class VoiceAssistantWebSocketServer {
     wss.on("connection", (ws, request) => {
       if (wsConfig.daemonKeyPair && ws.protocol === DIRECT_E2EE_SUBPROTOCOL) {
         void this.attachDirectE2eeSocket(ws, request, wsConfig.daemonKeyPair);
+        return;
+      }
+      if (wsConfig.daemonKeyPair && ws.protocol === UPGRADE_CARRIER_ACCEPTED_SUBPROTOCOL) {
+        // Noise msg1 rode in the upgrade (HS1): same handshake, answered as the first frame.
+        const carried = readUpgradeCarrier(offeredWebSocketProtocols(request));
+        void this.attachDirectE2eeSocket(ws, request, wsConfig.daemonKeyPair, carried);
         return;
       }
       const trustLoopback = wsConfig.trustLoopback;
@@ -1201,11 +1301,26 @@ export class VoiceAssistantWebSocketServer {
     ws: WebSocket,
     request: IncomingMessage,
     daemonKeyPair: KeyPair,
+    carried: string | Error | null = null,
   ): Promise<void> {
+    if (carried instanceof Error) {
+      // A present but malformed carrier fails like a malformed in-band hello. Never log msg1.
+      this.logger.warn(
+        {
+          transport: "direct_e2ee",
+          ...extractSocketRequestMetadata(request),
+          err: carried,
+        },
+        "relay_e2ee_handshake_failed",
+      );
+      ws.close(1011, "E2EE handshake failed");
+      return;
+    }
     await admitSecuredRelaySocket(
       ws,
       {
         daemonKeyPair,
+        ...(carried !== null ? { carriedMsg1: carried } : {}),
         logger: this.logger.child({
           transport: "direct_e2ee",
           ...extractSocketRequestMetadata(request),
@@ -1484,41 +1599,143 @@ export class VoiceAssistantWebSocketServer {
       return;
     }
 
-    let payload: string;
-    try {
-      payload = JSON.stringify(message);
-    } catch (err) {
-      this.logger.warn({ err }, "ws_serialize_failed");
-      return;
-    }
+    let sharedPayload: string | null = null;
+    const serialize = (ws: WebSocketLike): string => {
+      const compact = this.compactV2Sockets.get(ws);
+      if (compact)
+        return JSON.stringify(
+          encodeCompactV2(message, { state: compact, hashFeatures: hashServerFeatures }),
+        );
+      sharedPayload ??= JSON.stringify(message);
+      return sharedPayload;
+    };
 
-    const payloadBytes = outboundFrameByteLength(payload);
     for (const ws of writableSockets) {
-      const socketCompressor = this.frameCompressors.get(ws);
-      // Checked sockets sequence every JSON frame, small ones too, so a reset can resend them all.
+      let payload: string;
+      try {
+        payload = serialize(ws);
+      } catch (err) {
+        this.logger.warn({ err }, "ws_serialize_failed");
+        return;
+      }
+      const payloadBytes = outboundFrameByteLength(payload);
       const recordSent = () => {
         this.runtimeMetrics.recordOutboundMessage(message, ws.bufferedAmount);
       };
-      if (socketCompressor instanceof ZstdJsonFrameCompressor) {
-        this.sendFrameToClient(ws, socketCompressor.compress(payload), payloadBytes, recordSent);
+      const queue = this.priorityQueues.get(ws);
+      if (queue) {
+        if (
+          message.type === "session" &&
+          message.message.type === "fetch_agent_timeline_response" &&
+          message.message.payload.direction !== "before" &&
+          !message.message.payload.requestId?.startsWith(NOTIFIED_PUSH_PREFIX)
+        )
+          this.inferredFocus.set(ws, message.message.payload.agentId);
+        const { lane, domain } = decideLane(message, payloadBytes, this.laneContextFor(ws, queue));
+        queue.enqueue(payload, lane, domain, recordSent, this.shouldLinger(ws, message));
         continue;
       }
-      const compressor =
-        socketCompressor instanceof CheckedJsonFrameCompressor ||
-        payload.length >= COMPRESSED_JSON_MIN_BYTES
-          ? socketCompressor
-          : undefined;
-      const frame = compressor ? compressor.compress(payload) : payload;
-      this.sendFrameToClient(
-        ws,
-        frame,
-        compressor ? outboundFrameByteLength(frame) : payloadBytes,
-        recordSent,
-      );
+      this.sendPayloadToSocket(ws, payload, payloadBytes, recordSent);
     }
   }
 
+  /**
+   * priority_sync (PS2d): hello.f names the chat to show first (notification tap). Answer it like a
+   * fetch_agent_timeline_request sent right after the hello, so the page follows server_info in the
+   * same flight instead of one round trip later, ahead of the directory the client asks for next.
+   */
+  private answerHelloPriorityChat(
+    ws: WebSocketLike,
+    connection: SessionConnection,
+    hello: WSHelloMessage,
+  ): void {
+    const f = hello.f;
+    if (!f || !this.priorityQueues.has(ws)) return;
+    this.inferredFocus.set(ws, f.a);
+    const parsed = WSSessionInboundSchema.safeParse({
+      type: "session",
+      message: {
+        type: "fetch_agent_timeline_request",
+        agentId: f.a,
+        requestId: f.r,
+        direction: f.c ? "after" : "tail",
+        ...(f.c ? { cursor: f.c } : {}),
+        limit: 40,
+        projection: "projected",
+      },
+    });
+    if (!parsed.success) return;
+    void this.dispatchSessionMessage(ws, connection, parsed.data).catch((error: unknown) => {
+      connection.connectionLogger.warn({ err: error }, "hello_priority_chat_failed");
+    });
+  }
+
+  /**
+   * priority_sync live coalescing: live rows wait up to LINGER_MS to share a frame. Never delayed:
+   * the first text of a turn (first word), turn end (flushes the rest), permissions and attention.
+   */
+  private shouldLinger(ws: WebSocketLike, message: WSOutboundMessage): boolean {
+    if (message.type !== "session" || message.message.type !== "agent_stream") return false;
+    if (process.env.PASEO_PRIORITY_LINGER_MS === "0") return false;
+    const { agentId, event } = message.message.payload;
+    let sent = this.turnTextSent.get(ws);
+    if (!sent) {
+      sent = new Set();
+      this.turnTextSent.set(ws, sent);
+    }
+    switch (event.type) {
+      case "turn_started":
+        sent.delete(agentId);
+        return true;
+      case "turn_completed":
+      case "turn_failed":
+      case "turn_canceled":
+        sent.delete(agentId);
+        return false;
+      case "timeline":
+        if (event.item.type === "assistant_message" && !sent.has(agentId)) {
+          sent.add(agentId);
+          return false;
+        }
+        return true;
+      case "permission_requested":
+      case "permission_resolved":
+      case "attention_required":
+        return false;
+      default:
+        return true;
+    }
+  }
+
+  private sendPayloadToSocket(
+    ws: WebSocketLike,
+    payload: string,
+    payloadBytes: number,
+    recordSent: () => void,
+  ): void {
+    const socketCompressor = this.frameCompressors.get(ws);
+    // Checked sockets sequence every JSON frame, small ones too, so a reset can resend them all.
+    if (socketCompressor instanceof ZstdJsonFrameCompressor) {
+      this.sendFrameToClient(ws, socketCompressor.compress(payload), payloadBytes, recordSent);
+      return;
+    }
+    const compressor =
+      socketCompressor instanceof CheckedJsonFrameCompressor ||
+      payload.length >= COMPRESSED_JSON_MIN_BYTES
+        ? socketCompressor
+        : undefined;
+    const frame = compressor ? compressor.compress(payload) : payload;
+    this.sendFrameToClient(
+      ws,
+      frame,
+      compressor ? outboundFrameByteLength(frame) : payloadBytes,
+      recordSent,
+    );
+  }
+
   private sendBinaryToClient(ws: WebSocketLike, frame: Uint8Array, reportRejection = true): void {
+    // priority_sync: a binary frame (terminal, file) must not overtake JSON queued before it.
+    this.priorityQueues.get(ws)?.flushAll();
     if (!this.sessions.get(ws)?.session.delivery.permitsBinary(ws, frame)) {
       this.incrementRuntimeCounter("applicationBinaryRejected");
       if (reportRejection)
@@ -1531,6 +1748,7 @@ export class VoiceAssistantWebSocketServer {
   }
 
   private async sendBinaryToClientAndWait(ws: WebSocketLike, frame: Uint8Array): Promise<void> {
+    this.priorityQueues.get(ws)?.flushAll();
     if (!this.sessions.get(ws)?.session.delivery.permitsBinary(ws, frame)) {
       this.incrementRuntimeCounter("applicationBinaryRejected");
       this.logger.warn({ bytes: frame.byteLength }, "ws_application_binary_delivery_denied");
@@ -1995,8 +2213,11 @@ export class VoiceAssistantWebSocketServer {
     }
     pending.identity.sessionId = connection.session.getSessionId();
     this.negotiateFrameCompression(ws, message.capabilities);
+    this.negotiatePrioritySync(ws, message.capabilities);
+    this.negotiateCompactV2(ws, message.capabilities);
     this.sendSessionToken(ws, pending, admitted, connection.lifecycle);
     this.sendToClient(ws, this.createServerInfoMessage(connection.session));
+    this.answerHelloPriorityChat(ws, connection, message);
     connection.connectionLogger.info(
       {
         ...toConnectionLogFields(pending.identity),
@@ -2213,9 +2434,12 @@ export class VoiceAssistantWebSocketServer {
     this.sessions.set(ws, existing);
     pending.identity.sessionId = existing.session.getSessionId();
     this.negotiateFrameCompression(ws, message.capabilities);
+    this.negotiatePrioritySync(ws, message.capabilities);
+    this.negotiateCompactV2(ws, message.capabilities);
     if (pending.admission)
       this.sendSessionToken(ws, pending, pending.admission, existing.lifecycle);
     this.sendToClient(ws, this.createServerInfoMessage(existing.session));
+    this.answerHelloPriorityChat(ws, existing, message);
     pending.connectionLogger.info(
       {
         ...toConnectionLogFields(pending.identity),
@@ -2251,6 +2475,9 @@ export class VoiceAssistantWebSocketServer {
         backgroundWorkspaces: true,
         // COMPAT(directorySync): added in v0.3.x, remove gate after 2027-02-12.
         directorySync: true,
+        // slimDirectory (B3): fetch_agents/fetch_workspaces accept `slim`. Only priority_sync apps
+        // read it, so older apps (builds 3/7) keep byte-identical server_info.
+        ...(session.supports(CLIENT_CAPS.prioritySync) ? { slimDirectory: true } : {}),
         // COMPAT(workspaceLabels): added in v0.5.0, remove after 2027-08-14.
         ...(this.workspaceLabelService ? { workspaceLabels: true } : {}),
         // COMPAT(workspaceSetupRun): added in v0.7.3, remove gate after 2027-09-02.
@@ -2478,6 +2705,7 @@ export class VoiceAssistantWebSocketServer {
       const compressor = this.frameCompressors.get(ws);
       if (compressor instanceof ZstdJsonFrameCompressor) compressor.dispose();
       this.orderedSenders.get(ws)?.close();
+      this.priorityQueues.get(ws)?.close();
       await this.detachSocket(ws, {
         code: typeof code === "number" ? code : undefined,
         reason,
@@ -2813,6 +3041,13 @@ export class VoiceAssistantWebSocketServer {
       }
 
       const message = parsedMessage.data;
+      if (message.type === "hello" && message.cb !== undefined) {
+        // Compact capabilities (HS1): the bits under the explicit map.
+        message.capabilities = {
+          ...decodeCompactCapabilities(message.cb),
+          ...message.capabilities,
+        } as typeof message.capabilities;
+      }
       this.recordInboundMessageType(message.type);
 
       if (message.type === "ping" && activeConnection) {
@@ -3160,7 +3395,38 @@ export class VoiceAssistantWebSocketServer {
       if (message.type === "session" && this.sessions.get(ws)?.session.delivery.isModern(ws))
         this.sessions.get(ws)!.session.publishToSource(ws, message.message);
       else this.sendToClient(ws, message);
+      this.pushNotifiedChat(ws, params.agentId);
     }
+  }
+
+  /**
+   * priority_sync (B1c, design section 4.1): the chat that just notified is the next screen.
+   * Its queued text moves up to lane 1, and a socket that does not follow its timeline gets the
+   * last turn (short rows, tail of 20) unasked, on lane 1, so the reply is on the phone before the
+   * tap. It arrives as a fetch_agent_timeline_response whose requestId starts with "push:".
+   */
+  private pushNotifiedChat(ws: WebSocketLike, agentId: string): void {
+    const queue = this.priorityQueues.get(ws);
+    const connection = this.sessions.get(ws);
+    if (!queue || !connection) return;
+    queue.promote(agentDomain(agentId), 1);
+    if (connection.session.isTimelineSubscribed(agentId, ws)) return;
+    const parsed = WSSessionInboundSchema.safeParse({
+      type: "session",
+      message: {
+        type: "fetch_agent_timeline_request",
+        agentId,
+        requestId: `${NOTIFIED_PUSH_PREFIX}${randomUUID()}`,
+        direction: "tail",
+        limit: 20,
+        projection: "projected",
+        ifLoaded: true,
+      },
+    });
+    if (!parsed.success) return;
+    void this.dispatchSessionMessage(ws, connection, parsed.data).catch((error: unknown) => {
+      connection.connectionLogger.warn({ err: error }, "notified_chat_push_failed");
+    });
   }
 
   private async broadcastTerminalAttention(params: {
@@ -3448,6 +3714,31 @@ export function isWebSocketSameOrigin(
   }
 
   return isLoopbackAlias(originUrl.hostname) && isLoopbackAlias(requestAuthority.hostname);
+}
+
+/**
+ * Direct E2EE upgrade: select the msg1-carrier marker when the client offered it with a
+ * carrier (the daemon then answers e2ee_ready first), else the plain E2EE subprotocol
+ * (client sends msg1 in-band). A malformed carrier is still selected so it fails the
+ * handshake instead of silently falling back.
+ */
+function selectDirectE2eeProtocol(protocols: Set<string>): string {
+  if (
+    protocols.has(UPGRADE_CARRIER_ACCEPTED_SUBPROTOCOL) &&
+    readUpgradeCarrier(protocols) !== null
+  ) {
+    return UPGRADE_CARRIER_ACCEPTED_SUBPROTOCOL;
+  }
+  return DIRECT_E2EE_SUBPROTOCOL;
+}
+
+function offeredWebSocketProtocols(request: IncomingMessage): string[] {
+  const header = request.headers["sec-websocket-protocol"];
+  if (typeof header !== "string") return [];
+  return header
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
 }
 
 function selectWebSocketProtocol(

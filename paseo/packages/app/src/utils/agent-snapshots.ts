@@ -86,6 +86,7 @@ export function projectAgentSnapshot(agent: Agent): AgentSnapshotPayload {
     attentionTimestamp: agent.attentionTimestamp?.toISOString() ?? null,
     archivedAt: agent.archivedAt?.toISOString() ?? null,
     ...(agent.messageQueue ? { messageQueue: agent.messageQueue } : {}),
+    ...(agent.slim ? { slim: true } : {}),
   };
 }
 
@@ -136,5 +137,6 @@ export function normalizeAgentSnapshot(snapshot: AgentSnapshotPayload, serverId:
     parentAgentId,
     labels: snapshot.labels,
     ...(snapshot.messageQueue ? { messageQueue: snapshot.messageQueue } : {}),
+    ...(snapshot.slim ? { slim: true } : {}),
   };
 }

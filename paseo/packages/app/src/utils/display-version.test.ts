@@ -11,13 +11,13 @@ const { resolveFlavour, resolveShownVersion } = require("../../release-flavour.j
 // Option A (Emmet, 4 Nov): DinoBot shows its own version (dinobot-version.js); package.json keeps
 // the engine version that the daemon and plugin compatibility use (report-version-bump.md).
 describe("DinoBot display version", () => {
-  it("TestFlight build 5 reads 0.1.3 (5) in the About row and diagnostics", () => {
+  it("TestFlight build 8 reads 0.1.3 (8) in the About row and diagnostics", () => {
     const pub = resolveFlavour({ PASEO_FLAVOUR: "public" });
     expect(pub.displayVersion).toBe(DINOBOT_VERSION);
     expect(pub.iosBuildNumber).toBe(DINOBOT_IOS_BUILD);
     const shown = pickDisplayVersion(pub.displayVersion, appPackage.version);
-    expect(formatAppVersionLabel(shown, pub.iosBuildNumber)).toBe("0.1.3 (5)");
-    expect(formatDiagnosticAppVersion(shown, pub.iosBuildNumber)).toBe("0.1.3 (5)");
+    expect(formatAppVersionLabel(shown, pub.iosBuildNumber)).toBe("0.1.3 (8)");
+    expect(formatDiagnosticAppVersion(shown, pub.iosBuildNumber)).toBe("0.1.3 (8)");
     // Desktop / web (no native build number).
     expect(formatAppVersionLabel(shown, null)).toBe("v0.1.3");
   });

@@ -1,5 +1,6 @@
 import { useSessionStore } from "@/stores/session-store";
-import { loadFullToolCallDetail } from "@/timeline/compact-tool-call";
+import { loadFullToolCallDetail, readCompactMarker } from "@/timeline/compact-tool-call";
+import { getDurableBodyCache } from "@/runtime/replica-cache/body-cache";
 import type { AgentMessage } from "@getpaseo/protocol/agent-message";
 import { ASSISTANT_IMAGE_DEFAULT_ASPECT_RATIO } from "@/utils/assistant-image-metadata";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -3204,9 +3205,13 @@ export const ToolCall = memo(function ToolCall({
     return async (): Promise<ToolCallDetail | null> => {
       const client = useSessionStore.getState().sessions[compactServerId]?.client;
       if (!client) return null;
-      return loadFullToolCallDetail(client, compactAgentId, compactCallId);
+      return loadFullToolCallDetail(client, compactAgentId, compactCallId, {
+        serverId: compactServerId,
+        marker: readCompactMarker(metadata),
+        bodyCache: getDurableBodyCache(),
+      });
     };
-  }, [compactServerId, compactAgentId, compactCallId]);
+  }, [compactServerId, compactAgentId, compactCallId, metadata]);
 
   const isMobile = useIsCompactFormFactor();
   const shouldRenderInline = !isMobile || forceInline;

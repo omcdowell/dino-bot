@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createDaemonTestContext, type DaemonTestContext } from "../test-utils/index.js";
 import type { SessionOutboundMessage } from "../messages.js";
 
@@ -49,12 +50,12 @@ describe("daemon E2E - persistence", () => {
       expect(afterMessage.final?.persistence).toBeTruthy();
       expect(afterMessage.final?.persistence?.provider).toBe("codex");
       expect(afterMessage.final?.persistence?.sessionId).toBeTruthy();
+      // SI1/D0: session clients no longer get persistence.metadata/nativeHandle (no shipped app or CLI
+      // resumes from a client-held handle); the full handle comes from the daemon here.
+      const handle = ctx.daemon.daemon.agentManager.getAgent(agent.id)!.persistence!;
       expect(
-        (afterMessage.final?.persistence?.metadata as { conversationId?: string } | undefined)
-          ?.conversationId,
+        (handle.metadata as { conversationId?: string } | undefined)?.conversationId,
       ).toBeTruthy();
-
-      const handle = afterMessage.final!.persistence!;
 
       await ctx.client.deleteAgent(agent.id);
 
@@ -73,6 +74,39 @@ describe("daemon E2E - persistence", () => {
 
       await ctx.client.deleteAgent(resumed.id);
     } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("D0 is gated on priority_sync: an old client keeps the full handle and resumes from it", async () => {
+    const cwd = tmpCwd();
+    const old = new DaemonClient({
+      url: `ws://127.0.0.1:${ctx.daemon.port}/ws`,
+      clientId: "d0-old-client",
+      reconnect: { enabled: false },
+      capabilities: { priority_sync: false, compact_v2: false } as never,
+    });
+    try {
+      await old.connect();
+      const agent = await old.createAgent({ provider: "codex", cwd, title: "D0 old client" });
+      await old.sendMessage(agent.id, "Say 'state saved' and nothing else");
+      const finished = await old.waitForFinish(agent.id, 5_000);
+      const handle = finished.final!.persistence!;
+      // Old client: the handle as before D0 (metadata on the wire).
+      expect((handle.metadata as { conversationId?: string } | undefined)?.conversationId).toBeTruthy();
+      // priority_sync client (default caps): D0 trims it to provider + sessionId.
+      const trimmed = (await ctx.client.fetchAgent(agent.id))?.agent.persistence;
+      expect(trimmed).toEqual({ provider: handle.provider, sessionId: handle.sessionId });
+
+      await old.deleteAgent(agent.id);
+      const resumed = await old.resumeAgent(handle);
+      expect(resumed.cwd).toBe(cwd);
+      expect(resumed.persistence?.metadata).toMatchObject({
+        conversationId: (handle.metadata as { conversationId: string }).conversationId,
+      });
+      await old.deleteAgent(resumed.id);
+    } finally {
+      await old.close();
       rmSync(cwd, { recursive: true, force: true });
     }
   }, 30_000);

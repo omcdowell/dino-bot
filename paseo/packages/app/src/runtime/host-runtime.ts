@@ -9,6 +9,7 @@ import {
   type FetchAgentsOptions,
 } from "@getpaseo/client/internal/daemon-client";
 import { getSessionTokenRegistry } from "./session-token-store";
+import { getFeatureCacheRegistry } from "./feature-cache-store";
 import {
   connectionFromListen,
   createRemoteSshHostConnection,
@@ -59,6 +60,7 @@ import {
 import { getDesktopHost } from "@/desktop/host";
 import { readDesktopManagedLocalCredential } from "@/desktop/daemon/local-credential";
 import { CLIENT_CAPS } from "@getpaseo/protocol/client-capabilities";
+import { DurableBodyCache, setDurableBodyCache } from "@/runtime/replica-cache/body-cache";
 import { BROWSER_AUTOMATION_COMMAND_NAMES } from "@getpaseo/protocol/browser-automation/rpc-schemas";
 import {
   selectAgentTimelineState,
@@ -601,6 +603,7 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
         providerSnapshots: "wire",
         ...(host.password ? { password: host.password } : {}),
         sessionTokens: sessionTokensFor(host, connection),
+        featureCache: getFeatureCacheRegistry().cacheFor(host.serverId),
         localCredential: () => readDesktopManagedLocalCredential(connection),
       } satisfies Omit<DaemonClientConfig, "url">;
       if (connection.type === "directSocket" || connection.type === "directPipe") {
@@ -665,6 +668,7 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
         ...(host.serverId ? { serverId: host.serverId } : {}),
         ...(host.password ? { password: host.password } : {}),
         sessionTokens: sessionTokensFor(host, connection),
+        featureCache: getFeatureCacheRegistry().cacheFor(host.serverId),
         localCredential: () => readDesktopManagedLocalCredential(connection),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
         capabilities: appCapabilities,
@@ -690,6 +694,20 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
     },
   };
 }
+
+/** B2a: the chat a notification tap opened, per host, until its first hello carries it. */
+const PRIORITY_CHAT_PENDING_MS = 30_000;
+const pendingPriorityChats = new Map<
+  string,
+  { agentId: string; cursor?: { epoch: string; seq: number } }
+>();
+
+function armPendingPriorityChat(serverId: string, client: DaemonClient): void {
+  if (!pendingPriorityChats.has(serverId)) return;
+  armPriorityChatForHost?.(serverId, client);
+}
+
+let armPriorityChatForHost: ((serverId: string, client: DaemonClient) => void) | null = null;
 
 export class HostRuntimeController {
   private host: HostProfile;
@@ -1378,6 +1396,7 @@ export class HostRuntimeController {
         runtimeGeneration: nextGeneration,
       });
     client.setReconnectEnabled(true);
+    if (!existingClient) armPendingPriorityChat(this.host.serverId, client);
 
     if (!this.isSwitchStillValid(requestVersion, expectedProbeVersion)) {
       await client.close().catch(() => undefined);
@@ -1620,9 +1639,13 @@ export class HostRuntimeStore {
   }) {
     this.deps = input?.deps ?? createDefaultDeps();
     this.storage = input?.storage ?? AsyncStorage;
-    this.replicaCache = new ReplicaCache(input?.replicaRowStore ?? createReplicaRowStore(), {
+    const rowStore = input?.replicaRowStore ?? createReplicaRowStore();
+    this.replicaCache = new ReplicaCache(rowStore, {
       maxBytes: getReplicaCacheMaxBytes(),
     });
+    // B2b: tool bodies by hash, on the same store, own 50 MB LRU budget.
+    setDurableBodyCache(new DurableBodyCache(rowStore));
+    armPriorityChatForHost = (serverId, client) => this.armPriorityChat(serverId, client);
     this.revokePushNotifications = input?.revokePushNotifications ?? revokePushNotifications;
   }
 
@@ -2297,6 +2320,7 @@ export class HostRuntimeStore {
   async removeHost(serverId: string): Promise<void> {
     await this.revokePushNotifications({ client: this.getClient(serverId), serverId });
     getSessionTokenRegistry().forgetServer(serverId);
+    getFeatureCacheRegistry().forgetServer(serverId);
     const remaining = this.hosts.filter((daemon) => daemon.serverId !== serverId);
     this.setHostsAndSync(remaining);
     await this.persistHosts();
@@ -2745,6 +2769,16 @@ export class HostRuntimeStore {
     return directory.refreshAgents(input);
   }
 
+  /** slimDirectory: true while the sidebar has rows left to load on scroll. */
+  hasMoreDirectory(serverId: string): boolean {
+    return this.directorySyncByServer.get(serverId)?.hasMoreAgents() ?? false;
+  }
+
+  /** slimDirectory: load the next sidebar page (agents and workspaces). */
+  async loadMoreDirectory(serverId: string): Promise<void> {
+    await this.directorySyncByServer.get(serverId)?.loadMoreAgents();
+  }
+
   async refreshWorkspaceDirectory(input: { serverId: string; subscribe?: boolean }): Promise<void> {
     const directory = this.directorySyncByServer.get(input.serverId);
     if (!directory) throw new Error(`Unknown host runtime for serverId ${input.serverId}`);
@@ -2781,6 +2815,56 @@ export class HostRuntimeStore {
     const replica = this.timelineReplicaByServer.get(serverId);
     if (!replica) throw new Error(`Unknown host runtime for serverId ${serverId}`);
     await replica.prepare(agentId);
+  }
+
+  /**
+   * B2a provisional open (notification tap, cold start). Paints the chat from disk now, without
+   * waiting for the socket, and names it in the first hello (priority_sync hello.f) so its page
+   * comes in the same flight as server_info. Best effort: once the hello has gone, the viewed
+   * timeline's own catch-up fetches it as before (old daemons ignore hello.f the same way).
+   */
+  openFromNotification(serverId: string, agentId: string): void {
+    const entry = { agentId };
+    pendingPriorityChats.set(serverId, entry);
+    // Only for the cold start this tap caused: a later reconnect never re-sends it.
+    setTimeout(() => {
+      if (pendingPriorityChats.get(serverId) === entry) pendingPriorityChats.delete(serverId);
+    }, PRIORITY_CHAT_PENDING_MS);
+    const client = this.getClient(serverId);
+    if (client) this.armPriorityChat(serverId, client);
+    void this.replicaCache
+      .readTimeline(serverId, agentId)
+      .then((cached) => {
+        const pending = pendingPriorityChats.get(serverId);
+        if (!cached?.range || pending?.agentId !== agentId) return;
+        pending.cursor = { epoch: cached.range.epoch, seq: cached.range.endSeq };
+        const current = this.getClient(serverId);
+        if (current) this.armPriorityChat(serverId, current);
+        return;
+      })
+      .catch(() => undefined);
+    if (this.timelineReplicaByServer.has(serverId)) {
+      void this.prepareAgentTimeline(serverId, agentId).catch(() => undefined);
+    }
+  }
+
+  /** Called for a host's client before it connects (and again if the cursor arrives later). */
+  armPriorityChat(serverId: string, client: DaemonClient): void {
+    const pending = pendingPriorityChats.get(serverId);
+    if (!pending) return;
+    const armed = client.setPriorityChat(
+      { agentId: pending.agentId, ...(pending.cursor ? { cursor: pending.cursor } : {}) },
+      (page) => {
+        if (pendingPriorityChats.get(serverId) === pending) pendingPriorityChats.delete(serverId);
+        const owner = useSessionStore.getState().sessions[serverId]?.viewedTimelineSync;
+        if (!owner) return;
+        owner.flushStreamAgent(pending.agentId);
+        owner.applyTimelineResponse(page);
+      },
+    );
+    if (!armed && pendingPriorityChats.get(serverId) === pending) {
+      pendingPriorityChats.delete(serverId);
+    }
   }
 
   async fetchAgentTimeline(

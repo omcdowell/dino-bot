@@ -1,0 +1,990 @@
+[
+ {
+  "type": "fetch_agents_response",
+  "payload": {
+   "requestId": "sync-agents",
+   "entries": [
+    {
+     "agent": {
+      "id": "recent-1",
+      "provider": "codex",
+      "cwd": "/tmp/slim/0",
+      "workspaceId": "ws-slim-0",
+      "model": null,
+      "thinkingOptionId": null,
+      "effectiveThinkingOptionId": null,
+      "createdAt": "2026-03-01T12:50:00.000Z",
+      "updatedAt": "2026-03-01T12:50:00.000Z",
+      "lastUserMessageAt": null,
+      "status": "idle",
+      "capabilities": {
+       "supportsStreaming": true,
+       "supportsSessionPersistence": true,
+       "supportsDynamicModes": true,
+       "supportsMcpServers": true,
+       "supportsReasoningStream": true,
+       "supportsToolInvocations": true
+      },
+      "currentModeId": null,
+      "availableModes": [],
+      "pendingPermissions": [],
+      "persistence": null,
+      "runtimeInfo": {
+       "provider": "codex",
+       "sessionId": null
+      },
+      "title": null,
+      "labels": {},
+      "requiresAttention": false,
+      "attentionReason": null,
+      "attentionTimestamp": null,
+      "archivedAt": null
+     },
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 0",
+      "checkout": {
+       "cwd": "/tmp/slim/0",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     },
+     "syncSeq": 1
+    },
+    {
+     "agent": {
+      "id": "recent-2",
+      "provider": "codex",
+      "cwd": "/tmp/slim/1",
+      "workspaceId": "ws-slim-1",
+      "model": null,
+      "thinkingOptionId": null,
+      "effectiveThinkingOptionId": null,
+      "createdAt": "2026-03-01T12:49:00.000Z",
+      "updatedAt": "2026-03-01T12:49:00.000Z",
+      "lastUserMessageAt": null,
+      "status": "idle",
+      "capabilities": {
+       "supportsStreaming": true,
+       "supportsSessionPersistence": true,
+       "supportsDynamicModes": true,
+       "supportsMcpServers": true,
+       "supportsReasoningStream": true,
+       "supportsToolInvocations": true
+      },
+      "currentModeId": null,
+      "availableModes": [],
+      "pendingPermissions": [],
+      "persistence": null,
+      "runtimeInfo": {
+       "provider": "codex",
+       "sessionId": null
+      },
+      "title": null,
+      "labels": {},
+      "requiresAttention": false,
+      "attentionReason": null,
+      "attentionTimestamp": null,
+      "archivedAt": null
+     },
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 1",
+      "checkout": {
+       "cwd": "/tmp/slim/1",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     },
+     "syncSeq": 2
+    },
+    {
+     "agent": {
+      "id": "idle-child",
+      "provider": "codex",
+      "cwd": "/tmp/slim/1",
+      "workspaceId": "ws-slim-1",
+      "model": null,
+      "thinkingOptionId": null,
+      "effectiveThinkingOptionId": null,
+      "createdAt": "2026-03-01T12:48:00.000Z",
+      "updatedAt": "2026-03-01T12:48:00.000Z",
+      "lastUserMessageAt": null,
+      "status": "idle",
+      "capabilities": {
+       "supportsStreaming": true,
+       "supportsSessionPersistence": true,
+       "supportsDynamicModes": true,
+       "supportsMcpServers": true,
+       "supportsReasoningStream": true,
+       "supportsToolInvocations": true
+      },
+      "currentModeId": null,
+      "availableModes": [],
+      "pendingPermissions": [],
+      "persistence": null,
+      "runtimeInfo": {
+       "provider": "codex",
+       "sessionId": null
+      },
+      "title": null,
+      "labels": {
+       "paseo.parent-agent-id": "recent-2"
+      },
+      "requiresAttention": false,
+      "attentionReason": null,
+      "attentionTimestamp": null,
+      "archivedAt": null
+     },
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 1",
+      "checkout": {
+       "cwd": "/tmp/slim/1",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     },
+     "syncSeq": 3
+    },
+    {
+     "agent": {
+      "id": "running-child",
+      "provider": "codex",
+      "cwd": "/tmp/slim/2",
+      "workspaceId": "ws-slim-2",
+      "model": null,
+      "thinkingOptionId": null,
+      "effectiveThinkingOptionId": null,
+      "createdAt": "2026-03-01T12:47:00.000Z",
+      "updatedAt": "2026-03-01T12:47:00.000Z",
+      "lastUserMessageAt": null,
+      "status": "running",
+      "capabilities": {
+       "supportsStreaming": true,
+       "supportsSessionPersistence": true,
+       "supportsDynamicModes": true,
+       "supportsMcpServers": true,
+       "supportsReasoningStream": true,
+       "supportsToolInvocations": true
+      },
+      "currentModeId": null,
+      "availableModes": [],
+      "pendingPermissions": [],
+      "persistence": null,
+      "runtimeInfo": {
+       "provider": "codex",
+       "sessionId": null
+      },
+      "title": null,
+      "labels": {
+       "paseo.parent-agent-id": "recent-2"
+      },
+      "requiresAttention": false,
+      "attentionReason": null,
+      "attentionTimestamp": null,
+      "archivedAt": null
+     },
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 2",
+      "checkout": {
+       "cwd": "/tmp/slim/2",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     },
+     "syncSeq": 4
+    },
+    {
+     "agent": {
+      "id": "recent-3",
+      "provider": "codex",
+      "cwd": "/tmp/slim/3",
+      "workspaceId": "ws-slim-3",
+      "model": null,
+      "thinkingOptionId": null,
+      "effectiveThinkingOptionId": null,
+      "createdAt": "2026-03-01T12:46:00.000Z",
+      "updatedAt": "2026-03-01T12:46:00.000Z",
+      "lastUserMessageAt": null,
+      "status": "idle",
+      "capabilities": {
+       "supportsStreaming": true,
+       "supportsSessionPersistence": true,
+       "supportsDynamicModes": true,
+       "supportsMcpServers": true,
+       "supportsReasoningStream": true,
+       "supportsToolInvocations": true
+      },
+      "currentModeId": null,
+      "availableModes": [],
+      "pendingPermissions": [],
+      "persistence": null,
+      "runtimeInfo": {
+       "provider": "codex",
+       "sessionId": null
+      },
+      "title": null,
+      "labels": {},
+      "requiresAttention": false,
+      "attentionReason": null,
+      "attentionTimestamp": null,
+      "archivedAt": null
+     },
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 3",
+      "checkout": {
+       "cwd": "/tmp/slim/3",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     },
+     "syncSeq": 5
+    },
+    {
+     "agent": {
+      "id": "old-running",
+      "provider": "codex",
+      "cwd": "/tmp/slim/3",
+      "workspaceId": "ws-slim-3",
+      "model": null,
+      "thinkingOptionId": null,
+      "effectiveThinkingOptionId": null,
+      "createdAt": "2026-03-01T12:10:00.000Z",
+      "updatedAt": "2026-03-01T12:10:00.000Z",
+      "lastUserMessageAt": null,
+      "status": "running",
+      "capabilities": {
+       "supportsStreaming": true,
+       "supportsSessionPersistence": true,
+       "supportsDynamicModes": true,
+       "supportsMcpServers": true,
+       "supportsReasoningStream": true,
+       "supportsToolInvocations": true
+      },
+      "currentModeId": null,
+      "availableModes": [],
+      "pendingPermissions": [],
+      "persistence": null,
+      "runtimeInfo": {
+       "provider": "codex",
+       "sessionId": null
+      },
+      "title": null,
+      "labels": {},
+      "requiresAttention": false,
+      "attentionReason": null,
+      "attentionTimestamp": null,
+      "archivedAt": null
+     },
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 3",
+      "checkout": {
+       "cwd": "/tmp/slim/3",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     },
+     "syncSeq": 6
+    },
+    {
+     "agent": {
+      "id": "old-needs-input",
+      "provider": "codex",
+      "cwd": "/tmp/slim/4",
+      "workspaceId": "ws-slim-4",
+      "model": null,
+      "thinkingOptionId": null,
+      "effectiveThinkingOptionId": null,
+      "createdAt": "2026-03-01T12:09:00.000Z",
+      "updatedAt": "2026-03-01T12:09:00.000Z",
+      "lastUserMessageAt": null,
+      "status": "idle",
+      "capabilities": {
+       "supportsStreaming": true,
+       "supportsSessionPersistence": true,
+       "supportsDynamicModes": true,
+       "supportsMcpServers": true,
+       "supportsReasoningStream": true,
+       "supportsToolInvocations": true
+      },
+      "currentModeId": null,
+      "availableModes": [],
+      "pendingPermissions": [
+       {
+        "id": "perm-old-needs-input-0",
+        "provider": "codex",
+        "name": "tool",
+        "kind": "tool"
+       }
+      ],
+      "persistence": null,
+      "runtimeInfo": {
+       "provider": "codex",
+       "sessionId": null
+      },
+      "title": null,
+      "labels": {},
+      "requiresAttention": false,
+      "attentionReason": null,
+      "attentionTimestamp": null,
+      "archivedAt": null
+     },
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 4",
+      "checkout": {
+       "cwd": "/tmp/slim/4",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     },
+     "syncSeq": 7
+    },
+    {
+     "agent": {
+      "id": "old-pinned",
+      "provider": "codex",
+      "cwd": "/tmp/slim/5",
+      "workspaceId": "ws-slim-5",
+      "model": null,
+      "thinkingOptionId": null,
+      "effectiveThinkingOptionId": null,
+      "createdAt": "2026-03-01T12:05:00.000Z",
+      "updatedAt": "2026-03-01T12:05:00.000Z",
+      "lastUserMessageAt": null,
+      "status": "idle",
+      "capabilities": {
+       "supportsStreaming": true,
+       "supportsSessionPersistence": true,
+       "supportsDynamicModes": true,
+       "supportsMcpServers": true,
+       "supportsReasoningStream": true,
+       "supportsToolInvocations": true
+      },
+      "currentModeId": null,
+      "availableModes": [],
+      "pendingPermissions": [],
+      "persistence": null,
+      "runtimeInfo": {
+       "provider": "codex",
+       "sessionId": null
+      },
+      "title": null,
+      "labels": {},
+      "requiresAttention": false,
+      "attentionReason": null,
+      "attentionTimestamp": null,
+      "archivedAt": null
+     },
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 5",
+      "checkout": {
+       "cwd": "/tmp/slim/5",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     },
+     "syncSeq": 8
+    },
+    {
+     "agent": {
+      "id": "oldest",
+      "provider": "codex",
+      "cwd": "/tmp/slim/4",
+      "workspaceId": "ws-slim-4",
+      "model": null,
+      "thinkingOptionId": null,
+      "effectiveThinkingOptionId": null,
+      "createdAt": "2026-03-01T12:01:00.000Z",
+      "updatedAt": "2026-03-01T12:01:00.000Z",
+      "lastUserMessageAt": null,
+      "status": "idle",
+      "capabilities": {
+       "supportsStreaming": true,
+       "supportsSessionPersistence": true,
+       "supportsDynamicModes": true,
+       "supportsMcpServers": true,
+       "supportsReasoningStream": true,
+       "supportsToolInvocations": true
+      },
+      "currentModeId": null,
+      "availableModes": [],
+      "pendingPermissions": [],
+      "persistence": null,
+      "runtimeInfo": {
+       "provider": "codex",
+       "sessionId": null
+      },
+      "title": null,
+      "labels": {},
+      "requiresAttention": false,
+      "attentionReason": null,
+      "attentionTimestamp": null,
+      "archivedAt": null
+     },
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 4",
+      "checkout": {
+       "cwd": "/tmp/slim/4",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     },
+     "syncSeq": 9
+    }
+   ],
+   "pageInfo": {
+    "nextCursor": null,
+    "prevCursor": null,
+    "hasMore": false
+   },
+   "sync": {
+    "generation": "gen-0",
+    "headSeq": 9,
+    "mode": "snapshot",
+    "reason": "no_cursor",
+    "removals": []
+   }
+  }
+ },
+ {
+  "type": "fetch_workspaces_response",
+  "payload": {
+   "requestId": "sync-workspaces",
+   "entries": [
+    {
+     "id": "ws-slim-0",
+     "projectId": "proj-slim",
+     "projectDisplayName": "slim",
+     "projectCustomName": null,
+     "projectCustomIconRevision": null,
+     "projectRootPath": "/tmp/slim",
+     "workspaceDirectory": "/tmp/slim/0",
+     "projectKind": "non_git",
+     "workspaceKind": "directory",
+     "name": "slim 0",
+     "title": null,
+     "pinnedAt": null,
+     "background": false,
+     "archivingAt": null,
+     "status": "done",
+     "statusEnteredAt": "<time>",
+     "activityAt": null,
+     "diffStat": null,
+     "scripts": [],
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 0",
+      "checkout": {
+       "cwd": "/tmp/slim/0",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     },
+     "syncSeq": 1
+    },
+    {
+     "id": "ws-slim-1",
+     "projectId": "proj-slim",
+     "projectDisplayName": "slim",
+     "projectCustomName": null,
+     "projectCustomIconRevision": null,
+     "projectRootPath": "/tmp/slim",
+     "workspaceDirectory": "/tmp/slim/1",
+     "projectKind": "non_git",
+     "workspaceKind": "directory",
+     "name": "slim 1",
+     "title": null,
+     "pinnedAt": null,
+     "background": false,
+     "archivingAt": null,
+     "status": "done",
+     "statusEnteredAt": "<time>",
+     "activityAt": null,
+     "diffStat": null,
+     "scripts": [],
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 1",
+      "checkout": {
+       "cwd": "/tmp/slim/1",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     },
+     "syncSeq": 2
+    },
+    {
+     "id": "ws-slim-2",
+     "projectId": "proj-slim",
+     "projectDisplayName": "slim",
+     "projectCustomName": null,
+     "projectCustomIconRevision": null,
+     "projectRootPath": "/tmp/slim",
+     "workspaceDirectory": "/tmp/slim/2",
+     "projectKind": "non_git",
+     "workspaceKind": "directory",
+     "name": "slim 2",
+     "title": null,
+     "pinnedAt": null,
+     "background": false,
+     "archivingAt": null,
+     "status": "running",
+     "statusEnteredAt": "<time>",
+     "activityAt": null,
+     "diffStat": null,
+     "scripts": [],
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 2",
+      "checkout": {
+       "cwd": "/tmp/slim/2",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     },
+     "syncSeq": 3
+    },
+    {
+     "id": "ws-slim-3",
+     "projectId": "proj-slim",
+     "projectDisplayName": "slim",
+     "projectCustomName": null,
+     "projectCustomIconRevision": null,
+     "projectRootPath": "/tmp/slim",
+     "workspaceDirectory": "/tmp/slim/3",
+     "projectKind": "non_git",
+     "workspaceKind": "directory",
+     "name": "slim 3",
+     "title": null,
+     "pinnedAt": null,
+     "background": false,
+     "archivingAt": null,
+     "status": "running",
+     "statusEnteredAt": "<time>",
+     "activityAt": null,
+     "diffStat": null,
+     "scripts": [],
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 3",
+      "checkout": {
+       "cwd": "/tmp/slim/3",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     },
+     "syncSeq": 4
+    },
+    {
+     "id": "ws-slim-4",
+     "projectId": "proj-slim",
+     "projectDisplayName": "slim",
+     "projectCustomName": null,
+     "projectCustomIconRevision": null,
+     "projectRootPath": "/tmp/slim",
+     "workspaceDirectory": "/tmp/slim/4",
+     "projectKind": "non_git",
+     "workspaceKind": "directory",
+     "name": "slim 4",
+     "title": null,
+     "pinnedAt": null,
+     "background": false,
+     "archivingAt": null,
+     "status": "needs_input",
+     "statusEnteredAt": "<time>",
+     "activityAt": null,
+     "diffStat": null,
+     "scripts": [],
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 4",
+      "checkout": {
+       "cwd": "/tmp/slim/4",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     },
+     "syncSeq": 5
+    },
+    {
+     "id": "ws-slim-5",
+     "projectId": "proj-slim",
+     "projectDisplayName": "slim",
+     "projectCustomName": null,
+     "projectCustomIconRevision": null,
+     "projectRootPath": "/tmp/slim",
+     "workspaceDirectory": "/tmp/slim/5",
+     "projectKind": "non_git",
+     "workspaceKind": "directory",
+     "name": "slim 5",
+     "title": null,
+     "pinnedAt": "2026-03-01T13:00:00.000Z",
+     "background": false,
+     "archivingAt": null,
+     "status": "done",
+     "statusEnteredAt": "<time>",
+     "activityAt": null,
+     "diffStat": null,
+     "scripts": [],
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 5",
+      "checkout": {
+       "cwd": "/tmp/slim/5",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     },
+     "syncSeq": 6
+    }
+   ],
+   "emptyProjects": [],
+   "pageInfo": {
+    "nextCursor": null,
+    "prevCursor": null,
+    "hasMore": false
+   },
+   "sync": {
+    "generation": "gen-0",
+    "headSeq": 6,
+    "mode": "snapshot",
+    "reason": "no_cursor",
+    "removals": []
+   }
+  }
+ },
+ {
+  "type": "fetch_agents_response",
+  "payload": {
+   "requestId": "paged-agents-1",
+   "entries": [
+    {
+     "agent": {
+      "id": "recent-1",
+      "provider": "codex",
+      "cwd": "/tmp/slim/0",
+      "workspaceId": "ws-slim-0",
+      "model": null,
+      "thinkingOptionId": null,
+      "effectiveThinkingOptionId": null,
+      "createdAt": "2026-03-01T12:50:00.000Z",
+      "updatedAt": "2026-03-01T12:50:00.000Z",
+      "lastUserMessageAt": null,
+      "status": "idle",
+      "capabilities": {
+       "supportsStreaming": true,
+       "supportsSessionPersistence": true,
+       "supportsDynamicModes": true,
+       "supportsMcpServers": true,
+       "supportsReasoningStream": true,
+       "supportsToolInvocations": true
+      },
+      "currentModeId": null,
+      "availableModes": [],
+      "pendingPermissions": [],
+      "persistence": null,
+      "runtimeInfo": {
+       "provider": "codex",
+       "sessionId": null
+      },
+      "title": null,
+      "labels": {},
+      "requiresAttention": false,
+      "attentionReason": null,
+      "attentionTimestamp": null,
+      "archivedAt": null
+     },
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 0",
+      "checkout": {
+       "cwd": "/tmp/slim/0",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     }
+    },
+    {
+     "agent": {
+      "id": "recent-2",
+      "provider": "codex",
+      "cwd": "/tmp/slim/1",
+      "workspaceId": "ws-slim-1",
+      "model": null,
+      "thinkingOptionId": null,
+      "effectiveThinkingOptionId": null,
+      "createdAt": "2026-03-01T12:49:00.000Z",
+      "updatedAt": "2026-03-01T12:49:00.000Z",
+      "lastUserMessageAt": null,
+      "status": "idle",
+      "capabilities": {
+       "supportsStreaming": true,
+       "supportsSessionPersistence": true,
+       "supportsDynamicModes": true,
+       "supportsMcpServers": true,
+       "supportsReasoningStream": true,
+       "supportsToolInvocations": true
+      },
+      "currentModeId": null,
+      "availableModes": [],
+      "pendingPermissions": [],
+      "persistence": null,
+      "runtimeInfo": {
+       "provider": "codex",
+       "sessionId": null
+      },
+      "title": null,
+      "labels": {},
+      "requiresAttention": false,
+      "attentionReason": null,
+      "attentionTimestamp": null,
+      "archivedAt": null
+     },
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 1",
+      "checkout": {
+       "cwd": "/tmp/slim/1",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     }
+    },
+    {
+     "agent": {
+      "id": "idle-child",
+      "provider": "codex",
+      "cwd": "/tmp/slim/1",
+      "workspaceId": "ws-slim-1",
+      "model": null,
+      "thinkingOptionId": null,
+      "effectiveThinkingOptionId": null,
+      "createdAt": "2026-03-01T12:48:00.000Z",
+      "updatedAt": "2026-03-01T12:48:00.000Z",
+      "lastUserMessageAt": null,
+      "status": "idle",
+      "capabilities": {
+       "supportsStreaming": true,
+       "supportsSessionPersistence": true,
+       "supportsDynamicModes": true,
+       "supportsMcpServers": true,
+       "supportsReasoningStream": true,
+       "supportsToolInvocations": true
+      },
+      "currentModeId": null,
+      "availableModes": [],
+      "pendingPermissions": [],
+      "persistence": null,
+      "runtimeInfo": {
+       "provider": "codex",
+       "sessionId": null
+      },
+      "title": null,
+      "labels": {
+       "paseo.parent-agent-id": "recent-2"
+      },
+      "requiresAttention": false,
+      "attentionReason": null,
+      "attentionTimestamp": null,
+      "archivedAt": null
+     },
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 1",
+      "checkout": {
+       "cwd": "/tmp/slim/1",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     }
+    }
+   ],
+   "pageInfo": {
+    "nextCursor": "eyJzb3J0IjpbeyJrZXkiOiJ1cGRhdGVkX2F0IiwiZGlyZWN0aW9uIjoiZGVzYyJ9XSwidmFsdWVzIjp7InVwZGF0ZWRfYXQiOjE3NzIzNjkyODAwMDB9LCJpZCI6ImlkbGUtY2hpbGQifQ",
+    "prevCursor": null,
+    "hasMore": true
+   }
+  }
+ },
+ {
+  "type": "fetch_workspaces_response",
+  "payload": {
+   "requestId": "paged-workspaces-1",
+   "entries": [
+    {
+     "id": "ws-slim-0",
+     "projectId": "proj-slim",
+     "projectDisplayName": "slim",
+     "projectCustomName": null,
+     "projectCustomIconRevision": null,
+     "projectRootPath": "/tmp/slim",
+     "workspaceDirectory": "/tmp/slim/0",
+     "projectKind": "non_git",
+     "workspaceKind": "directory",
+     "name": "slim 0",
+     "title": null,
+     "pinnedAt": null,
+     "background": false,
+     "archivingAt": null,
+     "status": "done",
+     "statusEnteredAt": "<time>",
+     "activityAt": null,
+     "diffStat": null,
+     "scripts": [],
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 0",
+      "checkout": {
+       "cwd": "/tmp/slim/0",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     }
+    },
+    {
+     "id": "ws-slim-1",
+     "projectId": "proj-slim",
+     "projectDisplayName": "slim",
+     "projectCustomName": null,
+     "projectCustomIconRevision": null,
+     "projectRootPath": "/tmp/slim",
+     "workspaceDirectory": "/tmp/slim/1",
+     "projectKind": "non_git",
+     "workspaceKind": "directory",
+     "name": "slim 1",
+     "title": null,
+     "pinnedAt": null,
+     "background": false,
+     "archivingAt": null,
+     "status": "done",
+     "statusEnteredAt": "<time>",
+     "activityAt": null,
+     "diffStat": null,
+     "scripts": [],
+     "project": {
+      "projectKey": "proj-slim",
+      "projectName": "slim",
+      "workspaceName": "slim 1",
+      "checkout": {
+       "cwd": "/tmp/slim/1",
+       "isGit": false,
+       "currentBranch": null,
+       "remoteUrl": null,
+       "worktreeRoot": null,
+       "isPaseoOwnedWorktree": false,
+       "mainRepoRoot": null
+      }
+     }
+    }
+   ],
+   "emptyProjects": [],
+   "pageInfo": {
+    "nextCursor": "eyJzb3J0IjpbeyJrZXkiOiJhY3Rpdml0eV9hdCIsImRpcmVjdGlvbiI6ImRlc2MifV0sInZhbHVlcyI6eyJhY3Rpdml0eV9hdCI6bnVsbH0sImlkIjoid3Mtc2xpbS0xIn0",
+    "prevCursor": null,
+    "hasMore": true
+   }
+  }
+ }
+]
