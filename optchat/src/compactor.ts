@@ -1,7 +1,7 @@
 import { clampThinkingLevel, type Api, type AssistantMessage, type Message, type Model } from '@earendil-works/pi-ai';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { ModelRegistry } from '@earendil-works/pi-coding-agent';
-import { sharedPrompt } from './prompts.ts';
+import { compactorPrompt } from './prompts.ts';
 import { bytes, end, name, NODE, start, type Compression, type Compressor } from './memory.ts';
 import { cachePayload, markedPrefix, TurnPrefix } from './cache.ts';
 import { IMPORT_GUIDANCE } from './import/guidance.ts';
@@ -78,8 +78,9 @@ function primeFirst() {
 }
 /**
  * The model is asked for 512 bytes; `accepted` is the longest line kept without a retry (the profile's summary size tolerance).
- * On Anthropic, a compaction sends the last turn's system prompt and tools byte for byte (`turn`), so it shares their cache
- * entry; until a turn has been sent it uses `fallback`, the OptChat part of that prompt, with no tools.
+ * On Anthropic, a compaction on the last turn's provider and model sends that turn's system prompt and tools byte for byte
+ * (`turn`), so it shares their cache entry. Any other compaction (another model, whose cache the turn can't share, or no
+ * turn yet) sends `own`, the compaction-only prompt: no tools, cached across the compactor's own calls.
  */
 export function createCompressor(
   registry: ModelRegistry,
@@ -87,7 +88,7 @@ export function createCompressor(
   onUsage: (message: AssistantMessage) => void = () => {},
   accepted = () => DEFAULT_SETTINGS.summaryAcceptBytes,
   turn = new TurnPrefix(),
-  fallback = () => sharedPrompt(DEFAULT_SETTINGS.previousExchange),
+  own = () => compactorPrompt(),
 ): Compressor {
   const gate = primeFirst();
   return async (input, signal) => {
@@ -108,7 +109,10 @@ export function createCompressor(
     ];
     const marked = markedPrefix(input.context);
     const anthropic = model.api === 'anthropic-messages';
-    const prefix = anthropic && marked ? `${model.provider}/${model.id}/${thinking ?? 'off'}\n${turn.key}\n${marked}` : undefined;
+    const shared = anthropic && turn.matches(model.provider, model.id),
+      system = own();
+    const prefix =
+      anthropic && marked ? `${model.provider}/${model.id}/${thinking ?? 'off'}\n${shared ? turn.key : system}\n${marked}` : undefined;
     const tries: string[] = [];
     for (let attempt = 0; attempt < 5; attempt++) {
       const warmed = prefix ? await gate(prefix, signal) : () => {};
@@ -123,7 +127,7 @@ export function createCompressor(
       try {
         const stream = registry.streamSimple(
           model,
-          { systemPrompt: fallback(), messages },
+          { systemPrompt: system, messages },
           {
             reasoning: thinking,
             signal,
@@ -131,7 +135,7 @@ export function createCompressor(
             ...(anthropic ? { fetch } : {}),
             onPayload: payload => {
               if (!anthropic) return payload;
-              turn.apply(model.provider, payload);
+              if (shared) turn.apply(model.provider, model.id, payload);
               return cachePayload(payload);
             },
           },

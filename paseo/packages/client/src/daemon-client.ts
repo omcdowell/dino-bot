@@ -558,6 +558,8 @@ export interface SendMessageOptions {
   activeTurnBehavior?: ActiveTurnBehavior;
   images?: Array<{ data: string; mimeType: string }>;
   attachments?: SendAgentMessageRequest["attachments"];
+  /** The text came (in whole or part) from dictation; the daemon marks it for the agent. */
+  dictated?: boolean;
   /** Called once the daemon has recorded the message durably (daemon feature messageReceivedAck). */
   onReceived?: () => void;
 }
@@ -4157,6 +4159,7 @@ export class DaemonClient {
       ...(options?.activeTurnBehavior ? { activeTurnBehavior: options.activeTurnBehavior } : {}),
       ...(options?.images ? { images: options.images } : {}),
       ...(options?.attachments ? { attachments: options.attachments } : {}),
+      ...(options?.dictated ? { dictated: true } : {}),
     });
     const payload = await this.sendRequest({
       requestId,

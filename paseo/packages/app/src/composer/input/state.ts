@@ -5,6 +5,19 @@ import type { MessageInputKeyboardActionKind } from "@/keyboard/actions";
 
 export type SendBehavior = ActiveTurnBehavior | "queue";
 
+/**
+ * Hands the composer's "some of this was dictated" flag to the message being sent, and clears it:
+ * the next message starts undictated. Returns the payload unchanged when nothing was dictated.
+ */
+export function takeDictation(
+  payload: MessagePayload,
+  dictated: { current: boolean },
+): MessagePayload {
+  const wasDictated = dictated.current;
+  dictated.current = false;
+  return wasDictated ? { ...payload, dictated: true } : payload;
+}
+
 /** Agent label that overrides the send-behaviour setting for one agent (e.g. bot chats queue). */
 export const SEND_BEHAVIOR_LABEL = "paseo.send-behavior";
 

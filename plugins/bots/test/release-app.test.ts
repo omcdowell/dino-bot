@@ -1,12 +1,12 @@
 // release/app: host settings, templates, one-call bot creation and Delete bot.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BotFiles, CREATE_MISSING_STEPS, HomeStateFile, ManageError } from "../server/manage";
 import { parseSettings, readSettingsAt } from "../server/settings";
-import { BLOCK_BEGIN, botDmBlockText, withBotDmBlock } from "../server/bot-dm-block";
+import { stripProfiles, withoutBotDmBlock } from "../server/bot-dm-block";
 import { BOT_TEMPLATES, agentsMdFor, suggestedTemplate, templateById } from "../shared/templates";
 import { botChatConfig } from "../server/bots";
 import { checkAllowed, checkPair } from "../bot-dm/policy";
@@ -66,20 +66,41 @@ test("templates: coordinator suggested for the first bot only; AGENTS.md from te
   assert.equal(agentsMdFor({ name: "Blank", template: "blank" }), "# Blank\n\nBlank: describe what this bot is for in one line.\n");
 });
 
-test("bot-dm block: names the user and the escalation bot; replaced in place, not duplicated", () => {
-  const withFc = botDmBlockText({ user: { name: "Sam" }, escalation: "coordinator" });
-  assert.match(withFc, /escalate \(`--kind escalate`\) only to coordinator/);
-  assert.match(withFc, /never Sam's approval/);
-  const noFc = botDmBlockText({ user: { name: "the user" }, escalation: null });
-  assert.doesNotMatch(noFc, /escalate/);
-  assert.doesNotMatch(noFc, /Sam|the-fat-controller|herdr/);
-  const once = withBotDmBlock("# A\n", noFc);
-  const twice = withBotDmBlock(once, withFc);
-  assert.equal(twice.split(BLOCK_BEGIN).length, 2);
-  assert.match(twice, /only to coordinator/);
+test("bot-dm block: stripped from AGENTS.md with the blank lines before it; text without one is unchanged", () => {
+  const block = "<!-- bot-dm:begin v1 -->\n## Bot-to-bot DMs\n\nrules\n<!-- bot-dm:end -->\n";
+  assert.equal(withoutBotDmBlock(`# A\n\nRole.\n\n${block}`), "# A\n\nRole.\n");
+  assert.equal(withoutBotDmBlock(`# A\n\n${block}\n## Mine\nkept\n`), "# A\n\n## Mine\nkept\n");
+  assert.equal(withoutBotDmBlock("# A\n"), "# A\n");
+  assert.equal(withoutBotDmBlock(block), "");
 });
 
-test("create: template + purpose + bot-dm block + chosen model; no host steps left", async () => {
+test("stripProfiles: backs up, strips once, keeps the mode, leaves other profiles alone", () => {
+  const h = tempHost();
+  try {
+    const prof = (name: string, text: string) => {
+      mkdirSync(join(h.optchatHome, "profiles", name), { recursive: true });
+      writeFileSync(join(h.optchatHome, "profiles", name, "AGENTS.md"), text, { mode: 0o600 });
+    };
+    const original = "# Emmet\n\nRole.\n\n<!-- bot-dm:begin v1 -->\n## Bot-to-bot DMs\n<!-- bot-dm:end -->\n";
+    prof("emmet", original);
+    prof("plain", "# Plain\n");
+    mkdirSync(join(h.optchatHome, "profiles", "empty"), { recursive: true });
+    const done = stripProfiles(h.optchatHome, new Date("2026-11-13T00:00:00Z"));
+    assert.deepEqual(done.map((d) => d.profile), ["emmet"]);
+    const file = join(h.optchatHome, "profiles", "emmet", "AGENTS.md");
+    assert.equal(readFileSync(file, "utf8"), "# Emmet\n\nRole.\n");
+    assert.equal(readFileSync(done[0]!.backup, "utf8"), original);
+    assert.match(done[0]!.backup, /AGENTS\.md\.bak-bot-dm-2026-11-13T00-00-00-000Z$/);
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    assert.equal(readFileSync(join(h.optchatHome, "profiles", "plain", "AGENTS.md"), "utf8"), "# Plain\n");
+    assert.deepEqual(stripProfiles(h.optchatHome), [], "idempotent");
+    assert.deepEqual(stripProfiles(join(h.base, "nowhere")), []);
+  } finally {
+    h.done();
+  }
+});
+
+test("create: template + purpose + chosen model, AGENTS.md without any bot-dm block; no host steps left", async () => {
   const h = tempHost();
   try {
     const files = new BotFiles({ root: h.root, optchatHome: h.optchatHome });
@@ -94,14 +115,14 @@ test("create: template + purpose + bot-dm block + chosen model; no host steps le
     assert.deepEqual(CREATE_MISSING_STEPS, []);
     const md = readFileSync(join(h.optchatHome, "profiles", "margot", "AGENTS.md"), "utf8");
     assert.match(md, /^# Margot\n\nWhat Margot is for: Drafts my posts\n\nMargot drafts and edits/);
-    assert.match(md, /<!-- bot-dm:begin v1 -->[\s\S]*bot-dm user --text[\s\S]*<!-- bot-dm:end -->\n$/);
+    assert.doesNotMatch(md, /bot-dm/);
     const meta = JSON.parse(readFileSync(join(h.root, "margot", ".bot.json"), "utf8"));
     assert.deepEqual(meta.chat, { provider: "optchat/openrouter/z-ai/glm-5.3", thinkingOptionId: "low" });
     assert.deepEqual(await botChatConfig(join(h.root, "margot")), { provider: "optchat/openrouter/z-ai/glm-5.3", thinkingOptionId: "low" });
     // Own AGENTS.md text wins over the template; the block is still added.
     await files.create({ name: "Own", agentsMd: "# Own\nMine.", template: "coder" });
     const own = readFileSync(join(h.optchatHome, "profiles", "own", "AGENTS.md"), "utf8");
-    assert.match(own, /^# Own\nMine.\n\n<!-- bot-dm:begin v1 -->/);
+    assert.match(own, /^# Own\nMine.\n$/);
     await assert.rejects(files.create({ name: "Bad", agentsMd: "", chat: { provider: "claude/opus" } }), ManageError);
   } finally {
     h.done();

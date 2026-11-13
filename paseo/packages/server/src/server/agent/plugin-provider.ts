@@ -1,3 +1,4 @@
+import { stripRetiredVoiceModeNote } from "../voice-config.js";
 import { randomUUID } from "node:crypto";
 import { resolve as resolvePath } from "node:path";
 import type { Logger } from "pino";
@@ -1639,9 +1640,9 @@ function combineSystemPrompts(
   systemPrompt: string | undefined,
   daemonPrompt: string | undefined,
 ): string | undefined {
-  const parts = [systemPrompt, daemonPrompt].filter(
-    (value): value is string => typeof value === "string" && value.trim().length > 0,
-  );
+  const parts = [systemPrompt, daemonPrompt]
+    .map((value) => (value == null ? value : stripRetiredVoiceModeNote(value)))
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
   return parts.length > 0 ? parts.join("\n\n") : undefined;
 }
 

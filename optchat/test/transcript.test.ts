@@ -326,7 +326,7 @@ test('real Pi lifecycle retains one exchange across tool calls and resume, witho
   }
 });
 
-test("main agent keeps Pi's AGENTS.md files and skills, with profile instructions last", async () => {
+test("main agent keeps Pi's AGENTS.md files and the allowed skills, with profile instructions last", async () => {
   const dir = mkdtempSync(join(tmpdir(), 'optchat-prompt-'));
   const agentDir = join(dir, 'agent');
   const oldHome = process.env.OPTCHAT_HOME;
@@ -335,12 +335,26 @@ test("main agent keeps Pi's AGENTS.md files and skills, with profile instruction
   try {
     createProfile('fixture');
     const profile = profilePath('fixture');
-    saveConfig(profile, { ...loadConfig(profile), compactor: { provider: 'fixture', model: 'fixture', thinking: 'off' } });
+    saveConfig(profile, {
+      ...loadConfig(profile),
+      compactor: { provider: 'fixture', model: 'fixture', thinking: 'off' },
+    });
+    // The shared list for every profile (no profile key); 'not-installed' is skipped.
+    writeFileSync(join(dir, 'skills.json'), JSON.stringify({ global: ['herdr', 'demo-skill', 'not-installed'], hide: ['hidden-skill'] }));
     writeFileSync(join(profile, 'AGENTS.md'), 'PROFILE_RULES');
-    mkdirSync(join(agentDir, 'skills', 'demo-skill'), { recursive: true });
-    writeFileSync(join(agentDir, 'skills', 'demo-skill', 'SKILL.md'), '---\nname: demo-skill\ndescription: Demo skill.\n---\nBody');
+    const skill = (root: string, name: string) => {
+      mkdirSync(join(root, name), { recursive: true });
+      writeFileSync(join(root, name, 'SKILL.md'), `---\nname: ${name}\ndescription: The ${name} skill.\n---\nBody`);
+    };
+    skill(join(agentDir, 'skills'), 'demo-skill');
+    skill(join(agentDir, 'skills'), 'other-global');
+    skill(join(agentDir, 'skills'), 'herdr');
+    skill(join(dir, '.agents', 'skills'), 'own-skill');
+    skill(join(dir, '.agents', 'skills'), 'hidden-skill');
     writeFileSync(join(agentDir, 'AGENTS.md'), 'GLOBAL_RULES');
     writeFileSync(join(dir, 'AGENTS.md'), 'REPO_RULES');
+    writeFileSync(join(dir, 'bot-prompt.md'), '# DinoBot bot\nHOST_RULES\n');
+    process.env.OPTCHAT_BOT_PROMPT = join(dir, 'bot-prompt.md');
     const systems: string[] = [];
     const runtime = await ModelRuntime.create({
       authPath: join(dir, 'auth.json'),
@@ -403,13 +417,21 @@ test("main agent keeps Pi's AGENTS.md files and skills, with profile instruction
     await session.bindExtensions({});
     await session.prompt('Hello.');
     const system = systems.at(-1) ?? '';
-    assert.ok(system.includes('demo-skill'), 'skills are listed');
-    const order = ['GLOBAL_RULES', 'REPO_RULES', 'PROFILE_RULES'].map(rule => system.indexOf(rule));
+    assert.ok(system.includes('demo-skill'), 'a global skill on the shared list is listed');
+    assert.ok(system.includes('<name>herdr</name>'), 'herdr is listed');
+    assert.ok(!system.includes('not-installed'), 'a missing listed skill is skipped');
+    assert.ok(!system.includes('other-global'), 'other global skills are not');
+    assert.ok(system.includes('own-skill'), "the bot's own skills are listed");
+    assert.ok(!system.includes('hidden-skill'), 'a hidden bot skill is not');
+    assert.ok(!system.includes('Entries marked Historical'), 'no import guidance without imported history');
+    const order = ['GLOBAL_RULES', 'REPO_RULES', 'HOST_RULES', 'PROFILE_RULES'].map(rule => system.indexOf(rule));
     assert.ok(
       order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1])),
-      'global, then repo AGENTS.md, then profile instructions last',
+      'global, then repo AGENTS.md, then the host bot section, then profile instructions last',
     );
+    assert.match(system, /<bot>\n# DinoBot bot\nHOST_RULES\n<\/bot>/);
   } finally {
+    delete process.env.OPTCHAT_BOT_PROMPT;
     if (session) {
       await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
       session.dispose();

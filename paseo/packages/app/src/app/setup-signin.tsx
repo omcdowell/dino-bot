@@ -24,7 +24,7 @@ import { EditingTextInput, type EditingTextInputHandle } from "@/components/ui/t
 import { BackHeader } from "@/components/headers/back-header";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { APP_DISPLAY_NAME } from "@/constants/flavour";
+import { APP_DISPLAY_NAME, APP_LINK_SCHEME } from "@/constants/flavour";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import {
   badgeIsWarning,
@@ -37,6 +37,8 @@ import { createSignInMemory, pendingSessionId } from "@/onboarding/signin-sessio
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { setupColumnStyle } from "@/constants/layout";
 import { DEVICE_COPY } from "@/constants/device-copy";
+import { providerInviteFromIncoming } from "@/hosts/pair-deep-link";
+import { providerLinkRoute } from "@/onboarding/provider-model";
 
 const ThemedTextInput = withUnistyles(EditingTextInput, (theme: Theme) => ({
   placeholderTextColor: theme.colors.foregroundMuted,
@@ -81,8 +83,12 @@ async function rpc<T>(serverId: string, method: string, input: unknown): Promise
 export default function SetupSignInScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const params = useLocalSearchParams<{ serverId?: string }>();
+  const params = useLocalSearchParams<{ serverId?: string; from?: string; option?: string }>();
   const serverId = typeof params.serverId === "string" ? params.serverId : "";
+  // Opened from Settings → Providers (or after installing a provider from a link), not onboarding:
+  // done goes back there, and `option` starts that sign-in at once.
+  const fromSettings = params.from === "settings";
+  const optionParam = typeof params.option === "string" ? params.option : "";
   // Kept outside the screen so a remount (appearance change) keeps the list and a sign-in going.
   const memory = useSyncExternalStore(
     signInMemory.subscribe,
@@ -107,13 +113,18 @@ export default function SetupSignInScreen() {
 
   const next = useCallback(async () => {
     signInMemory.forget(serverId);
+    if (fromSettings) {
+      if (router.canGoBack()) router.back();
+      else router.replace("/" as Href);
+      return;
+    }
     if (!serverId) {
       router.replace("/" as Href);
       return;
     }
     const route = await routeAfterStep("signin", serverId);
     router.replace(route as Href);
-  }, [router, serverId]);
+  }, [router, serverId, fromSettings]);
   const goNext = useCallback(() => void next(), [next]);
 
   const load = useCallback(async () => {
@@ -200,6 +211,16 @@ export default function SetupSignInScreen() {
   }, [serverId, status, input, setStatus]);
   const handleSubmit = useCallback(() => void submit(), [submit]);
 
+  // From Settings with an option (e.g. right after installing a provider plugin): start that sign-in once.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!optionParam || autoStarted.current || status || !options) return;
+    const option = options.options.find((o) => o.id === optionParam);
+    autoStarted.current = true;
+    if (option) choose(option);
+    else setActionError("That sign-in is not offered by this computer any more. Pick one below.");
+  }, [optionParam, options, status, choose]);
+
   // Back: stops a sign-in in progress; otherwise this is the first step (the pair screen is gone),
   // so it carries on to the next one: Choose models, which is also where its own Back came from.
   const back = useCallback(() => {
@@ -237,7 +258,7 @@ export default function SetupSignInScreen() {
 
   return (
     <View style={styles.container} testID="setup-signin-screen">
-      <BackHeader title="Sign in for your bots" onBack={back} />
+      <BackHeader title={fromSettings ? "Add a sign-in" : "Sign in for your bots"} onBack={back} />
       <ScrollView contentContainerStyle={contentStyle} keyboardShouldPersistTaps="handled">
         {actionError ? (
           <View style={styles.card} testID="setup-signin-action-error">
@@ -255,6 +276,7 @@ export default function SetupSignInScreen() {
               onInput={setInput}
               onSubmit={handleSubmit}
               onContinue={goNext}
+              continueLabel={fromSettings ? "Done" : "Continue"}
               onAnother={another}
               onChooseAgain={chooseAgain}
               onOpenAndCopy={handleOpenAndCopy}
@@ -271,9 +293,11 @@ export default function SetupSignInScreen() {
                 <Text
                   style={styles.ok}
                 >{`✓ Already signed in: ${options.signedIn.join(", ")}`}</Text>
-                <Button variant="default" onPress={goNext} testID="setup-signin-skip">
-                  Continue with this
-                </Button>
+                {fromSettings ? null : (
+                  <Button variant="default" onPress={goNext} testID="setup-signin-skip">
+                    Continue with this
+                  </Button>
+                )}
               </View>
             ) : null}
             <OptionsList
@@ -283,6 +307,7 @@ export default function SetupSignInScreen() {
               onRetry={reload}
               onChoose={choose}
             />
+            {fromSettings && serverId ? <InstallFromLink serverId={serverId} /> : null}
           </>
         )}
       </ScrollView>
@@ -298,6 +323,7 @@ interface SessionBodyProps {
   onInput: (text: string) => void;
   onSubmit: () => void;
   onContinue: () => void;
+  continueLabel: string;
   onAnother: () => void;
   onChooseAgain: () => void;
   onOpenAndCopy: () => void;
@@ -314,7 +340,7 @@ function SessionBody(props: SessionBodyProps) {
           {`✓ Signed in. Your computer keeps the sign-in; ${DEVICE_COPY.thisApp} never stores it.`}
         </Text>
         <Button variant="default" onPress={props.onContinue} testID="setup-signin-continue">
-          Continue
+          {props.continueLabel}
         </Button>
         <Button onPress={props.onAnother} testID="setup-signin-another">
           Add another sign-in
@@ -445,6 +471,46 @@ function OptionsList({
         <SignInOptionRow key={o.id} option={o} disabled={busy} onChoose={onChoose} />
       ))}
     </>
+  );
+}
+
+/**
+ * Settings only: paste a provider invite link (`<scheme>://provider/add?…`) and open it on the
+ * provider-link screen, which asks this computer to install it.
+ */
+function InstallFromLink({ serverId }: { serverId: string }) {
+  const router = useRouter();
+  const [text, setText] = useState("");
+  const invite = providerInviteFromIncoming(text, APP_LINK_SCHEME);
+  const open = useCallback(() => {
+    if (invite) router.push(providerLinkRoute(invite.link, serverId) as Href);
+  }, [invite, router, serverId]);
+  return (
+    <View style={styles.card} testID="setup-signin-install-link">
+      <Text style={styles.title}>Install from a link</Text>
+      <Text style={styles.body}>
+        {`Paste a ${APP_LINK_SCHEME}://provider/add link someone sent you. Your computer installs the provider.`}
+      </Text>
+      <ThemedTextInput
+        onChangeText={setText}
+        autoCapitalize="none"
+        autoCorrect={false}
+        placeholder={`${APP_LINK_SCHEME}://provider/add?…`}
+        style={styles.input}
+        testID="setup-signin-install-link-input"
+      />
+      {text.trim() && !invite ? (
+        <Text style={styles.error}>That is not a provider link.</Text>
+      ) : null}
+      <Button
+        variant="default"
+        onPress={open}
+        disabled={!invite}
+        testID="setup-signin-install-link-open"
+      >
+        Continue
+      </Button>
+    </View>
   );
 }
 

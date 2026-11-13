@@ -183,6 +183,7 @@ interface FakeSendCall {
     activeTurnBehavior?: "interrupt" | "steer" | "queue";
     images: Array<{ data: string; mimeType: string }>;
     attachments: AgentAttachment[];
+    dictated?: boolean;
   };
 }
 
@@ -434,6 +435,22 @@ describe("dispatchComposerAgentMessage", () => {
     });
 
     expect(client.calls[0]?.options.activeTurnBehavior).toBe("steer");
+  });
+
+  it("sends dictated only for a dictated message", async () => {
+    const client = createFakeSendClient();
+    const stream = createFakeStream();
+    const base = { client, agentId: "agent", attachments: [], encodeImages: async () => [] };
+    await dispatchComposerAgentMessage({
+      ...base,
+      text: "spoken",
+      submission: stream,
+      dictated: true,
+    });
+    await dispatchComposerAgentMessage({ ...base, text: "typed", submission: stream });
+
+    expect(client.calls[0]?.options.dictated).toBe(true);
+    expect(client.calls[1]?.options).not.toHaveProperty("dictated");
   });
 
   it("stamps only a steer optimistic row with the daemon active turn ID", async () => {

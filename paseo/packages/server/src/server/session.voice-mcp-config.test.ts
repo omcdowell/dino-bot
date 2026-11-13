@@ -43,7 +43,7 @@ describe("voice mode prompt instructions", () => {
     expect(prompt).toContain("</paseo_voice_mode>");
   });
 
-  test("builds disabled voice instructions and supersedes previous voice block", () => {
+  test("voice mode off adds nothing: the base prompt alone, any voice block removed", () => {
     const existing = [
       "Base system prompt",
       "<paseo_voice_mode>",
@@ -51,13 +51,15 @@ describe("voice mode prompt instructions", () => {
       "</paseo_voice_mode>",
     ].join("\n\n");
 
-    const prompt = buildVoiceModeSystemPrompt(existing, false);
+    expect(buildVoiceModeSystemPrompt(existing, false)).toBe("Base system prompt");
+    expect(buildVoiceModeSystemPrompt(buildVoiceModeSystemPrompt("Base", true), false)).toBe(
+      "Base",
+    );
+  });
 
-    expect(prompt).toContain("Base system prompt");
-    expect(prompt).toContain("Paseo voice mode is now off.");
-    expect(prompt).toContain("Ignore any earlier Paseo voice mode instructions in this thread.");
-    expect(prompt.match(/<paseo_voice_mode>/g)?.length ?? 0).toBe(1);
-    expect(prompt).not.toContain("legacy voice instruction");
+  test("voice mode off with no base prompt gives an empty prompt, which still overrides voice on", () => {
+    expect(buildVoiceModeSystemPrompt(undefined, false)).toBe("");
+    expect(buildVoiceModeSystemPrompt(buildVoiceModeSystemPrompt(undefined, true), false)).toBe("");
   });
 
   test("strips voice blocks from persisted prompt", () => {

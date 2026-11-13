@@ -1,11 +1,12 @@
 // Provider plugins, Claude extra-usage confirm, bot-only extensions, user skills kept out.
 // node --test test/providers.test.mjs  (temp dirs under ./.test-tmp-prov, never /tmp)
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { addProvider, gitTokenEnv, listProviders, parseProviderLink, parseSource, providerLink, readTokens, removeProvider, updateProviders } from "../lib/providers.mjs";
-import { botOnlyExtensionArgs, LOAD_USER_AGENTS_SKILLS, writeDaemonConfig, writePiSetup } from "../lib/config.mjs";
+import { botOnlyExtensionArgs, botSkillArgs, LOAD_USER_AGENTS_SKILLS, refreshOptchatCommand, writeDaemonConfig, writePiSetup } from "../lib/config.mjs";
 import { defaultOption, signIn } from "../lib/signin.mjs";
 import { layout, LINK_SCHEME, Prompter } from "../lib/util.mjs";
 
@@ -132,6 +133,117 @@ describe("pi dir contents", () => {
     assert.deepEqual(cfg.agents.providers.optchat.command.slice(-2), ["-e", dir]);
     // not in settings.json, so herdr workers (plain `pi`) do not load it
     assert.doesNotMatch(readFileSync(writePiSetup(L).settingsPath, "utf8"), /rpiv/);
+  });
+  it("the bots plugin's bundled skills (workers) reach every bot via --skill, not workers' plain pi", () => {
+    const L = layout({ HOME: tmp() });
+    assert.deepEqual(botSkillArgs(L), []);
+    const skills = join(L.app, "bots", "skills");
+    mkdirSync(join(skills, "workers"), { recursive: true });
+    assert.deepEqual(botSkillArgs(L), ["--skill", skills]);
+    // with the worker shortlist: each non-listed skill folder separately, the listed ones left out
+    writeFileSync(join(skills, "workers", "SKILL.md"), "---\nname: workers\n---\n");
+    writeFileSync(join(skills, "workers", "worker-skills.txt"), "# comment\ntdd\n\nherdr  # trailing\n");
+    for (const n of ["tdd", "herdr", "extra"]) {
+      mkdirSync(join(skills, n));
+      writeFileSync(join(skills, n, "SKILL.md"), `---\nname: ${n}\n---\n`);
+    }
+    assert.deepEqual(botSkillArgs(L), ["--skill", join(skills, "extra"), "--skill", join(skills, "workers")]);
+    rmSync(join(skills, "workers", "worker-skills.txt"));
+    const cfg = JSON.parse(readFileSync(writeDaemonConfig(L, { mainModel: null }), "utf8"));
+    assert.deepEqual(cfg.agents.providers.optchat.command.slice(-2), ["--skill", skills]);
+    assert.equal(cfg.agents.providers.optchat.command[0], join(L.bin, "pi"));
+    // not in DinoBot's pi settings.json, so herdr workers and terminal pi do not list it
+    assert.doesNotMatch(readFileSync(writePiSetup(L).settingsPath, "utf8"), /bots[\\/]+skills/);
+  });
+  it("update refreshes only the OptChat command line (skills bundled later reach existing installs)", () => {
+    const L = layout({ HOME: tmp() });
+    assert.equal(refreshOptchatCommand(L), null, "no config yet: nothing written");
+    const path = writeDaemonConfig(L, { mainModel: "prov/model-x", thinking: "low" });
+    const before = JSON.parse(readFileSync(path, "utf8"));
+    assert.ok(!before.agents.providers.optchat.command.includes("--skill"));
+    mkdirSync(join(L.app, "bots", "skills", "workers"), { recursive: true });
+    assert.equal(refreshOptchatCommand(L), path);
+    const after = JSON.parse(readFileSync(path, "utf8"));
+    assert.deepEqual(after.agents.providers.optchat.command.slice(-2), ["--skill", join(L.app, "bots", "skills")]);
+    assert.deepEqual(after.daemon.agentProfiles, before.daemon.agentProfiles, "the bot profile's model is kept");
+    assert.equal(statSync(path).mode & 0o777, 0o600);
+  });
+});
+
+describe("bundled workers skill (plugins/bots/skills/workers)", () => {
+  const dir = join(import.meta.dirname, "..", "plugins", "bots", "skills", "workers");
+  it("has a SKILL.md pi can load (frontmatter name + description) and a launch.sh that parses", () => {
+    const md = readFileSync(join(dir, "SKILL.md"), "utf8");
+    const fm = /^---\n([\s\S]*?)\n---\n/.exec(md)?.[1] ?? "";
+    assert.match(fm, /^name: workers$/m);
+    assert.match(fm, /^description: \S.{20,1024}$/m);
+    assert.match(md, /launch\.sh/);
+    assert.equal(spawnSync("sh", ["-n", join(dir, "launch.sh")]).status, 0);
+    const usage = spawnSync("sh", [join(dir, "launch.sh")], { encoding: "utf8" });
+    assert.equal(usage.status, 2);
+    assert.match(usage.stderr, /usage: launch\.sh <name> <brief-file> <minutes>/);
+  });
+  it("launch.sh starts the worker's pi with --no-skills and the bundled shortlist; WORKER_SKILLS (colon-separated) adds --skill paths, none drops the shortlist", () => {
+    // A stand-in herdr and bot-worker on PATH: herdr logs the `agent start` args and answers like 0.9.
+    const d = tmp();
+    const bin = join(d, "bin");
+    mkdirSync(bin);
+    const log = join(d, "herdr.log");
+    const herdr = `#!/bin/sh
+case "$1 $2" in
+  "agent get") exit 1 ;;
+  "workspace list") echo '{"result":{"workspaces":[]}}' ;;
+  "workspace create") echo '{"result":{"workspace":{"workspace_id":"w1"},"tab":{"tab_id":"w1:t1"},"root_pane":{"pane_id":"w1:p1"}}}' ;;
+  "agent start") printf '%s\\n' "$@" > "${log}"; echo '{"result":{"agent":{"agent_session":{"value":""}}}}' ;;
+  *) echo '{"result":{}}' ;;
+esac
+`;
+    writeFileSync(join(bin, "herdr"), herdr, { mode: 0o755 });
+    writeFileSync(join(bin, "bot-worker"), "#!/bin/sh\necho '{}'\n", { mode: 0o755 });
+    const brief = join(d, "brief.md");
+    writeFileSync(brief, "tiny\n");
+    const launch = (extra = {}) => {
+      const r = spawnSync("sh", [join(dir, "launch.sh"), "w-one", brief, "1", d], {
+        encoding: "utf8",
+        env: { PATH: `${bin}:${process.env.PATH}`, BOT: "testbot", HOME: d, ...extra },
+      });
+      assert.equal(r.status, 0, r.stderr);
+      const args = readFileSync(log, "utf8").trim().split("\n");
+      return args.slice(args.indexOf("--") + 1);
+    };
+    const skillsOf = (args) => args.flatMap((a, i) => (a === "--skill" ? [args[i + 1]] : []));
+    const root = join(dir, "..");
+    const shortlist = ["diagnose", "tdd", "screenshot-app", "herdr"].map((n) => join(root, n));
+    const plain = launch();
+    assert.ok(plain.includes("--no-skills"), plain.join(" "));
+    assert.deepEqual(skillsOf(plain), shortlist, "the bundled worker shortlist by default");
+    const some = launch({ WORKER_SKILLS: "/opt/a::/opt/b c" });
+    assert.ok(some.includes("--no-skills"));
+    assert.deepEqual(skillsOf(some), [...shortlist, "/opt/a", "/opt/b c"]);
+    assert.deepEqual(skillsOf(launch({ WORKER_SKILLS: "none" })), [], "none: no skills at all");
+    assert.deepEqual(skillsOf(launch({ WORKER_SKILLS: "none:/opt/a" })), ["/opt/a"]);
+  });
+  it("bundles the worker shortlist: each listed skill has a SKILL.md pi can load, a LICENSE where it is third-party, no fleet details", () => {
+    const root = join(dir, "..");
+    const names = readFileSync(join(dir, "worker-skills.txt"), "utf8").split("\n").map((l) => l.replace(/#.*/, "").trim()).filter(Boolean);
+    assert.deepEqual(names, ["diagnose", "tdd", "screenshot-app", "herdr"]);
+    for (const n of names) {
+      const md = readFileSync(join(root, n, "SKILL.md"), "utf8");
+      const fm = /^---\n([\s\S]*?)\n---\n/.exec(md)?.[1] ?? "";
+      assert.match(fm, new RegExp(`^name: ${n}$`, "m"), n);
+      assert.match(fm, /^description: \S/m, n);
+    }
+    for (const n of ["diagnose", "tdd", "herdr"]) {
+      assert.ok(statSync(join(root, n, "LICENSE")).size > 0, `${n}/LICENSE`);
+      assert.ok(statSync(join(root, n, "NOTICE")).size > 0, `${n}/NOTICE`);
+    }
+    const herdr = readFileSync(join(root, "herdr", "SKILL.md"), "utf8");
+    assert.doesNotMatch(herdr, /\/home\/|\bnoble\b|bitzer|emmet|ccflare|100\.\d+\.\d+\.\d+/i);
+  });
+  it("ships in the release (build archives HEAD:plugins/bots, which keeps skills/)", () => {
+    const build = readFileSync(join(import.meta.dirname, "..", "build", "build-tarball.sh"), "utf8");
+    assert.match(build, /archive_tree "\$BOTS_REPO" "\$BOTS_REF" "\$STAGE\/bots"/);
+    assert.doesNotMatch(build, /rm -rf "\$STAGE\/bots\/skills"/);
   });
 });
 

@@ -169,8 +169,6 @@ describe("prompts", () => {
 describe("starter bot", () => {
   it("creates the plugin's bot layout, reuses it on re-run, and trashes instead of deleting", async () => {
     const L = fakeLayout();
-    mkdirSync(join(L.app, "bots", "docs"), { recursive: true });
-    writeFileSync(join(L.app, "bots", "docs", "bot-dm-agents-snippet.md"), "## Bot-to-bot DMs\n");
     const models = {
       main: { provider: "openai-codex", model: "gpt-6-sol", thinking: "medium" },
       worker: { provider: "openai-codex", model: "gpt-6-sol", thinking: "medium" },
@@ -181,7 +179,7 @@ describe("starter bot", () => {
     const agents = readFileSync(join(L.optchatHome, "profiles", "juniper", "AGENTS.md"), "utf8");
     assert.match(agents, /^# Juniper/);
     assert.match(agents, /coordinator/);
-    assert.match(agents, /<!-- bot-dm:begin v1 -->\n## Bot-to-bot DMs\n<!-- bot-dm:end -->/);
+    assert.doesNotMatch(agents, /bot-dm:begin|Bot-to-bot/, "AGENTS.md is the role only; the rules are the plugin's prompt section");
     const meta = JSON.parse(readFileSync(join(L.botsRoot, "juniper", ".bot.json"), "utf8"));
     assert.equal(meta.chat.provider, "optchat/openai-codex/gpt-6-sol");
     // The installer's pick is the host default, not the user's: the phone's "Choose models" must move it (paseo-bots onboarding.applyToBots).

@@ -149,18 +149,73 @@ main() {
     http://*) fail "refusing a plain-http download ($U); use https" ;;
   esac
 
-  # fetch <asset name> <dest>: one release file, by whichever route MODE says.
+  # fetch <asset name> <dest> [<headers file>]: one release file, by whichever route MODE says.
+  # With curl, the response headers go to <headers file> as they arrive (the progress bar reads the
+  # size from them: no extra request).
   fetch() {
     case "$MODE" in
       tarball)
         case "$DINOBOT_TARBALL" in
           http://*|https://*) [ "$1" = "$ASSET" ] && u=$DINOBOT_TARBALL || u=$DINOBOT_TARBALL${1#"$ASSET"}
-            if command -v curl >/dev/null 2>&1; then $CURL "$u" -o "$2"; else wget -qO "$2" "$u"; fi ;;
+            get_url "$u" "$2" "${3:-}" ;;
           *) [ "$1" = "$ASSET" ] && cp "$DINOBOT_TARBALL" "$2" || cp "$DINOBOT_TARBALL${1#"$ASSET"}" "$2" ;;
         esac ;;
       file) cp "$BASE/$1" "$2" ;;
-      url) if command -v curl >/dev/null 2>&1; then $CURL "$BASE/$1" -o "$2"; else wget -qO "$2" "$BASE/$1"; fi ;;
+      url) get_url "$BASE/$1" "$2" "${3:-}" ;;
     esac
+  }
+  get_url() {
+    if ! command -v curl >/dev/null 2>&1; then wget -qO "$2" "$1"
+    elif [ -n "$3" ]; then $CURL -D "$3" "$1" -o "$2"
+    else $CURL "$1" -o "$2"; fi
+  }
+
+  # Download progress: bytes in the .part file against the expected size (the source file's size,
+  # or the final Content-Length curl saw; wget: unknown, so MB so far only).
+  TTY=0; [ -t 1 ] && TTY=1
+  dl_expect() { # dl_expect <asset>: expected bytes, or nothing when unknown
+    case "$MODE" in
+      file) _f=$BASE/$1 ;;
+      tarball) case "$DINOBOT_TARBALL" in http://*|https://*) _f= ;; *) _f=$DINOBOT_TARBALL ;; esac ;;
+      *) _f= ;;
+    esac
+    if [ -n "$_f" ]; then [ -f "$_f" ] && wc -c <"$_f" | tr -d ' '; return 0; fi
+    # Redirects write one header block each: the last block's Content-Length is the file's.
+    [ -s "$ROOT/download/$1.hdr" ] && tr -d '\r' <"$ROOT/download/$1.hdr" |
+      awk '/^HTTP\//{n=""} tolower($1)=="content-length:"{n=$2} END{if(n+0>0)print n+0}'
+    return 0
+  }
+  dl_measure() { # dl_measure [done]: sets GOT, TOT (empty: unknown), PC
+    if [ "${1:-}" = done ]; then
+      GOT=$(wc -c <"$ROOT/download/$(cat "$ROOT/download/asset" 2>/dev/null)" 2>/dev/null | tr -d ' '); TOT=${GOT:-}
+    else
+      _a=""
+      for _x in "$NAME.tar.zst" "$ASSET"; do [ -f "$ROOT/download/$_x.part" ] && { _a=$_x; break; }; done
+      GOT=""; TOT=""
+      [ -n "$_a" ] && { GOT=$(wc -c <"$ROOT/download/$_a.part" 2>/dev/null | tr -d ' '); TOT=$(dl_expect "$_a"); }
+    fi
+    GOT=${GOT:-0}; PC=""
+    if [ -n "$TOT" ] && [ "$TOT" -gt 0 ] 2>/dev/null; then
+      PC=$((GOT * 100 / TOT)); [ "$PC" -le 100 ] || PC=100
+    else TOT=""; fi
+  }
+  # Sizes in MB, or KB when the whole file is under 1 MB.
+  dl_amount() {
+    _u=1048576; _n=MB
+    [ "${TOT:-$GOT}" -lt 1048576 ] && { _u=1024; _n=KB; }
+    if [ -n "$TOT" ]; then echo "$((GOT / _u))/$((TOT / _u)) $_n"; else echo "$((GOT / _u)) $_n"; fi
+  }
+  dl_draw() { # dl_draw [done]: terminal: redraw one line; else one plain line
+    _s=$(dl_amount)
+    if [ "$TTY" = 1 ]; then
+      if [ -n "$PC" ]; then
+        _h=$((PC / 5))
+        printf '\rDownloading  [%.'"$_h"'s%.'"$((20 - _h))"'s] %3d%%  %s%s' '####################' '--------------------' "$PC" "$_s" "${1:+, done}"
+      else printf '\rDownloading  %s%s' "$_s" "${1:+, done}"; fi
+      printf '   ' # (clears what a longer line before left)
+      [ -z "${1:-}" ] || echo
+    elif [ -n "${1:-}" ]; then echo "Downloading done ($_s)"
+    else echo "Downloading  $_s${PC:+ ($PC%)}"; fi
   }
 
   echo "Downloading $PRODUCT_NAME ($OS/$ARCH) in the background into $ROOT"
@@ -169,11 +224,11 @@ main() {
   rm -f "$ROOT/download/asset" "$ROOT/download/$NAME".tar.*
   (
     # (The .tar.zst try logs to download-zst.log: download.log is about the archive that decided.)
-    if [ "$MODE" != tarball ] && [ "$ZST" = 1 ] && fetch "$NAME.tar.zst" "$ROOT/download/$NAME.tar.zst.part" 2>"$ROOT/logs/download-zst.log"; then
+    if [ "$MODE" != tarball ] && [ "$ZST" = 1 ] && fetch "$NAME.tar.zst" "$ROOT/download/$NAME.tar.zst.part" "$ROOT/download/$NAME.tar.zst.hdr" 2>"$ROOT/logs/download-zst.log"; then
       mv "$ROOT/download/$NAME.tar.zst.part" "$ROOT/download/$NAME.tar.zst" && echo "$NAME.tar.zst" >"$ROOT/download/asset"
     else
       rm -f "$ROOT/download/$NAME.tar.zst.part"
-      fetch "$ASSET" "$TARBALL.part" && mv "$TARBALL.part" "$TARBALL" && echo "$ASSET" >"$ROOT/download/asset"
+      fetch "$ASSET" "$TARBALL.part" "$TARBALL.hdr" && mv "$TARBALL.part" "$TARBALL" && echo "$ASSET" >"$ROOT/download/asset"
     fi
   ) >"$ROOT/logs/download.log" 2>&1 &
   DL=$!
@@ -257,20 +312,35 @@ main() {
   [ -n "$USER_NAME" ] || USER_NAME=$NAME_DEFAULT
 
   # 3. Wait for the download, check it, unpack (old app kept until the new one is in place).
-  # (Dots from a ticker; `wait` returns the moment the download ends, not at the next second.)
-  printf 'Downloading'
-  ( while sleep 1; do printf '.'; done ) &
-  TICK=$!
+  # (A progress bar from a ticker; `wait` returns the moment the download ends, not at the next
+  # tick. Terminal: one line redrawn twice a second. Otherwise (logs, CI): a line at each quarter,
+  # or every 30 s when the size is unknown. Already finished: just the finished bar.)
+  TICK=""
+  if kill -0 "$DL" 2>/dev/null; then
+    (
+      i=0; q=25
+      if [ "$TTY" = 1 ]; then dl_measure; dl_draw; fi
+      while sleep 0.5 2>/dev/null || sleep 1; do
+        i=$((i + 1)); dl_measure
+        if [ "$TTY" = 1 ]; then dl_draw
+        elif [ -n "$PC" ]; then [ "$PC" -ge "$q" ] && [ "$PC" -lt 100 ] && { dl_draw; q=$(( (PC / 25 + 1) * 25 )); }
+        elif [ $((i % 60)) = 0 ]; then dl_draw; fi
+      done
+    ) &
+    TICK=$!
+  fi
   DLRC=0; wait "$DL" || DLRC=$?
-  kill "$TICK" 2>/dev/null || true; wait "$TICK" 2>/dev/null || true
+  [ -z "$TICK" ] || { kill "$TICK" 2>/dev/null || true; wait "$TICK" 2>/dev/null || true; }
+  rm -f "$ROOT/download/$NAME".tar.*.hdr
   if [ "$DLRC" != 0 ]; then
-    echo; cat "$ROOT/logs/download.log" >&2
+    [ "$TTY" = 1 ] && echo
+    echo "Downloading failed"; cat "$ROOT/logs/download.log" >&2
     # curl -f: "error: 404"; wget: "ERROR 404". A release URL that 404s means nothing is published there.
     [ "$MODE" = url ] && grep -Eq '(error|ERROR):? 404' "$ROOT/logs/download.log" 2>/dev/null &&
       fail "no release has been published yet at $BASE (or it has no $ASSET for this computer). Nothing was installed."
     fail "download of $ASSET failed ($MODE). Nothing was installed."
   fi
-  echo " done"
+  dl_measure done; dl_draw done
   wait "$SIDE" 2>/dev/null || true
   ASSET=$(cat "$ROOT/download/asset")
   TARBALL="$ROOT/download/$ASSET"

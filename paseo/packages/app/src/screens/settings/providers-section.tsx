@@ -22,6 +22,7 @@ import {
   type AcpProviderCatalogItem,
 } from "@/hooks/use-acp-provider-catalog";
 import { ProviderCatalogList } from "@/components/provider-catalog-list";
+import { BotProvidersSection } from "@/screens/settings/bot-providers-section";
 import { useProviderIcon } from "@/components/provider-icons";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Switch } from "@/components/ui/switch";
@@ -415,6 +416,8 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
 
   return (
     <>
+      {/* DinoBot hosts only: bot sign-ins and provider packages (hidden elsewhere / on old daemons). */}
+      {hasServer && isConnected ? <BotProvidersSection serverId={serverId} /> : null}
       <SettingsSection
         title={t("settings.providers.title")}
         testID="host-page-providers-card"

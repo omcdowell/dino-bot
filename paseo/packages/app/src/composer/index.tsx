@@ -123,7 +123,8 @@ import type { MessageInputKeyboardActionKind } from "@/keyboard/actions";
 import { submitAgentInput } from "@/composer/submit";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
 import { enqueueOutboxMessage } from "@/composer/outbox/sender";
-import { consumeOutboxEdit, useOutboxStore } from "@/stores/outbox-store";
+import { mergeEditedIntoDraft } from "@/composer/outbox/edit-handoff";
+import { useOutboxEditRequests } from "@/composer/outbox/use-outbox-edit";
 import { ComposerKeyboardScopeProvider, useComposerKeyboardScope } from "@/composer/keyboard-scope";
 import { useAppSettings } from "@/hooks/use-settings";
 import { RenderProfile } from "@/utils/render-profiler";
@@ -1454,6 +1455,7 @@ function ComposerContentImpl({
         text: string,
         attachments: ComposerAttachment[],
         activeTurnBehavior: ActiveTurnBehavior,
+        dictated?: boolean,
       ) => Promise<void>)
     | null
   >(null);
@@ -1507,7 +1509,7 @@ function ComposerContentImpl({
   }, [focusInput, onFocusInput]);
 
   const submitMessage = useCallback(
-    async (text: string, submitAttachments: ComposerAttachment[]) => {
+    async (text: string, submitAttachments: ComposerAttachment[], dictated?: boolean) => {
       onMessageSent?.();
       if (onSubmitMessageRef.current) {
         await onSubmitMessageRef.current({ text, attachments: submitAttachments, cwd });
@@ -1525,6 +1527,7 @@ function ComposerContentImpl({
           isAgentRunning: isAgentRunningRef.current,
           daemonQueue: supportsDaemonQueue(serverId),
         }),
+        dictated,
       );
     },
     [cwd, onMessageSent, serverId, t],
@@ -1540,6 +1543,7 @@ function ComposerContentImpl({
       text: string,
       sendAttachments: ComposerAttachment[],
       activeTurnBehavior: ActiveTurnBehavior,
+      dictated?: boolean,
     ) => {
       if (supportsOutbox(serverId)) {
         // Saved first, delivered by the outbox sender (also while offline); the pinned bubble
@@ -1557,6 +1561,7 @@ function ComposerContentImpl({
           attachments: wirePayload.attachments,
           composerAttachments: sendAttachments,
           activeTurnBehavior,
+          ...(dictated ? { dictated: true } : {}),
         });
         onAttentionPromptSend?.();
         return;
@@ -1575,6 +1580,7 @@ function ComposerContentImpl({
         encodeImages,
         submission: createMessageSubmissionWriter(serverId),
         activeTurnBehavior,
+        ...(dictated ? { dictated: true } : {}),
         activeTurnId:
           activeTurnBehavior === "steer"
             ? (selectAgentTurnPresentation(
@@ -1629,7 +1635,7 @@ function ComposerContentImpl({
   );
 
   const queueMessage = useCallback(
-    (queuedMessage: string, queuedAttachments: ComposerAttachment[]) => {
+    (queuedMessage: string, queuedAttachments: ComposerAttachment[], dictated?: boolean) => {
       if (supportsDaemonQueue(serverId) && sendAgentMessageRef.current) {
         // The daemon holds it (grey double tick) and hands it over when the agent is idle.
         const send = sendAgentMessageRef.current;
@@ -1637,7 +1643,7 @@ function ComposerContentImpl({
         setSelectedAttachments([]);
         resetSuppression();
         clearSentAttachments(queuedAttachments);
-        void send(agentId, queuedMessage, queuedAttachments, "queue").catch((error) => {
+        void send(agentId, queuedMessage, queuedAttachments, "queue", dictated).catch((error) => {
           console.error("[AgentInput] Failed to queue message:", error);
           replaceUserInput(queuedMessage);
           setSendError(error instanceof Error ? error.message : t("composer.errors.failedToSend"));
@@ -1669,22 +1675,20 @@ function ComposerContentImpl({
     ],
   );
 
-  // A pinned bubble's Edit hands its text back here.
-  const outboxEditRequest = useOutboxStore((state) => state.editRequest);
-  useEffect(() => {
-    if (!outboxEditRequest) return;
-    const request = consumeOutboxEdit(serverId, agentId);
-    if (!request) return;
-    replaceUserInput(request.text);
-    setSelectedAttachments(composerWorkspaceAttachment.userAttachmentsOnly(request.attachments));
-    focusInput();
-  }, [agentId, focusInput, outboxEditRequest, replaceUserInput, serverId, setSelectedAttachments]);
+  // A pinned bubble's Edit put its text into this agent's draft: show it and focus.
+  const showDraftAfterOutboxEdit = useCallback(() => {
+    replaceUserInput(textSource.getSnapshot());
+    if (isNative) messageInputRef.current?.focus();
+    else focusInput();
+  }, [focusInput, replaceUserInput, textSource]);
+  useOutboxEditRequests({ serverId, agentId, onEdit: showDraftAfterOutboxEdit });
 
   const sendMessageWithContent = useCallback(
     async (
       outgoingMessage: string,
       outgoingAttachments: ComposerAttachment[],
       forceSend?: boolean,
+      dictated?: boolean,
     ) => {
       const result = await submitAgentInput({
         message: outgoingMessage,
@@ -1698,13 +1702,13 @@ function ComposerContentImpl({
         // transport is disconnected, because the parent decides the failure mode.
         canSubmit: Boolean(sendAgentMessageRef.current || onSubmitMessageRef.current),
         queueMessage: ({ message: queuedText, attachments: queuedAttachments }) => {
-          queueMessage(queuedText, queuedAttachments);
+          queueMessage(queuedText, queuedAttachments, dictated);
         },
         submitMessage: async ({ message: submitText, attachments: submitAttachments }) => {
           if (submitBehavior !== "preserve-and-lock") {
             beginSubmit(submitAttachments);
           }
-          await submitMessage(submitText, submitAttachments);
+          await submitMessage(submitText, submitAttachments, dictated);
         },
         clearDraft,
         setUserInput: replaceUserInput,
@@ -1759,7 +1763,12 @@ function ComposerContentImpl({
       if (blurOnSubmit) {
         messageInputRef.current?.blur();
       }
-      void sendMessageWithContent(payload.text, outgoingAttachments, payload.forceSend);
+      void sendMessageWithContent(
+        payload.text,
+        outgoingAttachments,
+        payload.forceSend,
+        payload.dictated,
+      );
     },
     [
       attachments,
@@ -1967,10 +1976,15 @@ function ComposerContentImpl({
         queue: queueWriter,
       });
       if (!result) return;
-      replaceUserInput(result.text);
-      setSelectedAttachments(result.attachments);
+      // Whatever is being typed stays; the queued message follows it.
+      const merged = mergeEditedIntoDraft(
+        { text: messageInputRef.current?.getText() ?? textSource.getSnapshot(), attachments },
+        result,
+      );
+      replaceUserInput(merged.text);
+      setSelectedAttachments(merged.attachments);
     },
-    [agentId, queueWriter, replaceUserInput, setSelectedAttachments],
+    [agentId, attachments, queueWriter, replaceUserInput, setSelectedAttachments, textSource],
   );
 
   const handleSendQueuedNow = useCallback(
@@ -2008,7 +2022,7 @@ function ComposerContentImpl({
         commands: pluginClientSlashCommands,
       });
       if (pluginSlashCommand && runPluginClientSlashCommand(pluginSlashCommand)) return;
-      queueMessage(payload.text, outgoingAttachments);
+      queueMessage(payload.text, outgoingAttachments, payload.dictated);
     },
     [
       attachments,

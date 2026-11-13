@@ -109,6 +109,17 @@ It goes out when `bots.workers` is polled, i.e. while a Paseo client shows the b
 `PASEO_BOTS_BOT_DM` overrides the bot-dm binary (default `~/.local/bin/bot-dm`). A stall ends when
 the worker reports, `bot-worker done <name>`, its pane closes, or it is resumed (a new prompt).
 
+**Workers skill** (`skills/workers/`). A pi skill every bot gets: briefing, starting
+(`launch.sh <name> <brief> <minutes> [cwd]`: workspace per project, tab per task, pi on
+`$BOTS_WORKER_MODEL` with a fixed `--session-id`, first prompt, `bot-worker add`), steering,
+cost caps, checking a report, resuming a crashed worker and closing. DinoBot passes the plugin's
+`skills/` folder to the bots' pi with `--skill` (installer `lib/config.mjs` `botSkillArgs`). The
+workers `launch.sh` starts get `--no-skills` plus the worker shortlist: `--skill` for each folder
+named in `skills/workers/worker-skills.txt` (`diagnose`, `tdd`, `screenshot-app`, `herdr`, bundled
+under `skills/`; each folder has its LICENSE and NOTICE). Not this one, not the bot's, not the
+user's global ones. `WORKER_SKILLS=<path>[:<path>]` adds more; an entry `none` drops the shortlist.
+Bots do not get the shortlist: `botSkillArgs` passes each other folder under `skills/` instead.
+
 ## DMs
 
 Bots message each other with `bot-dm`, which appends every DM to `~/bots/<bot>/dm/inbox.jsonl`
@@ -288,12 +299,14 @@ is already taken again (`GET /status?sender=`) or the notice is over 2 h late.
 - **Environment.** `PASEO_BOTS_ROOT` (default `~/bots`), `BOT_DM_FC` (default
   `the-fat-controller`), `BOT_DM_RECIPIENT_PREFIX` (test fence, e.g. `tmp-`), `PASEO_CLI_DIST`.
 
-### Bots' AGENTS.md paragraph
+### The bots' prompt section
 
-The paragraph that tells bots how to use `bot-dm` lives once, in `docs/bot-dm-agents-snippet.md`.
-`bin/bot-dm-snippet-sync` writes it into every OptChat profile's `AGENTS.md` between
-`<!-- bot-dm:begin v1 -->` and `<!-- bot-dm:end -->`, replacing an existing block in place
-(`--dry-run` to preview, `--profiles <dir>` for another OptChat home). Bots pick it up on reload.
+How bots use `bot-dm`, herdr workers (when herdr is installed), group chats (only for a bot with a
+seat) and the house rules are one system-prompt section, rendered by `server/bot-prompt.ts` into
+`<bots root>/.prompts/<bot id>.md` and passed to each bot's OptChat session as `OPTCHAT_BOT_PROMPT`.
+OptChat reads it on every turn and places it just before the bot's own `AGENTS.md`, which holds only
+the bot's own text. The plugin strips the old `<!-- bot-dm:begin … bot-dm:end -->` block from every
+profile's `AGENTS.md` at start, keeping a copy as `AGENTS.md.bak-bot-dm-<time>`.
 
 ### After a Paseo upgrade
 

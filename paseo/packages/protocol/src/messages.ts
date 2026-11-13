@@ -1434,6 +1434,11 @@ export const SendAgentMessageRequestSchema = z.object({
   activeTurnBehavior: ActiveTurnBehaviorSchema.optional(),
   images: z.array(ImageAttachmentSchema).optional(),
   attachments: AgentAttachmentsSchema,
+  /**
+   * The text (or part of it) came from dictation. The daemon starts the agent's text with a short
+   * marker so the model allows for mis-transcribed words. Older daemons drop the field.
+   */
+  dictated: z.boolean().optional(),
 });
 
 export const WaitForFinishRequestSchema = z.object({

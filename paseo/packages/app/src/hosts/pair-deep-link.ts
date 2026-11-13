@@ -40,7 +40,8 @@ export function routeForIncoming(input: string, scheme: string, attempt?: string
 /**
  * A provider invite link (`<scheme>://provider/add?source=…&token=…&name=…`, made by
  * `dinobot provider link` on the owner's computer). The provider is installed on the computer,
- * not the phone, so the app only shows what it is and copies the command to run there.
+ * not the phone: the app asks the computer to install it (bots plugin provider.install, see
+ * app/provider-link.tsx), or, for a daemon too old for that, copies the command to run there.
  * Returns the link as given plus the parts safe to show (never the token), or null.
  */
 export interface ProviderInvite {

@@ -11,6 +11,7 @@ import {
 } from '../node_modules/@earendil-works/pi-coding-agent/dist/core/system-prompt.js';
 import { withoutGlobalContext } from '../src/context-files.ts';
 import { SessionController, type OpenProfile } from '../src/controller.ts';
+import { COMPACTIONS, TURNS, VIEW_DOC } from '../src/prompts.ts';
 
 /** A fake home: a pi agent dir whose AGENTS.md is a symlink, ~/.agents/AGENTS.md, a project and a profile. */
 function world() {
@@ -80,14 +81,34 @@ test('beforeAgentStart: the rendered prompt has the project and profile files bu
     } as BeforeAgentStartEvent;
     const pi = { appendEntry() {} } as unknown as ExtensionAPI;
     const controller = new SessionController(pi);
-    controller.active = { name: 'test', dir: w.profile, config: { previousExchange: false } } as unknown as OpenProfile;
+    let imported = false;
+    controller.active = {
+      name: 'test',
+      dir: w.profile,
+      config: { previousExchange: false },
+      compactor: () => ({ provider: 'anthropic', model: 'claude-sonnet-5-5', thinking: 'off' }),
+      memory: { hasImported: () => imported },
+    } as unknown as OpenProfile;
     controller.beforeAgentStart(event, {} as never);
+    assert.doesNotMatch(buildSystemPrompt(options), /Entries marked Historical/, 'no import guidance without imported history');
+    imported = true;
+    controller.beforeAgentStart(event, {} as never);
+    assert.match(buildSystemPrompt(options), /PROFILE_MARKER[\s\S]*Entries marked Historical/, 'the guidance follows the profile file');
 
     const prompt = buildSystemPrompt(options);
     assert.equal(prompt, event.systemPrompt);
     assert.doesNotMatch(prompt, /GLOBAL_PI_MARKER|Global Pi Instructions|SHARED_AGENTS_MARKER/);
     assert.match(prompt, /PROJECT_MARKER/);
     assert.match(prompt, /PROFILE_MARKER/);
+
+    // The compaction rules stay only when compactions run on the turn's own model and so send this prompt.
+    assert.ok(prompt.includes(COMPACTIONS), 'no turn model known: the rules stay');
+    controller.beforeAgentStart(event, { model: { provider: 'anthropic', id: 'claude-sonnet-5-5' } } as never);
+    assert.ok(buildSystemPrompt(options).includes(COMPACTIONS), 'same model: the rules stay');
+    controller.beforeAgentStart(event, { model: { provider: 'anthropic', id: 'claude-opus-5-5' } } as never);
+    const lean = buildSystemPrompt(options);
+    assert.ok(!lean.includes('# Compactions'), 'another model: the rules go');
+    assert.ok(lean.includes(TURNS) && lean.includes(VIEW_DOC));
   } finally {
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;

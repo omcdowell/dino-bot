@@ -189,6 +189,7 @@ import {
   type WorkspaceRegistry,
 } from "./workspace-registry.js";
 import { wrapSpokenInput } from "./voice-config.js";
+import { markDictated } from "./dictation-marker.js";
 import { isVoicePermissionAllowed } from "./voice-permission-policy.js";
 import {
   ProjectIconReader,
@@ -8771,8 +8772,10 @@ export class Session {
 
     try {
       const agentId = resolved.agentId;
+      // What the agent receives: a dictated message starts with a short marker.
+      const text = markDictated(msg.text, msg.dictated);
 
-      const prompt = buildAgentPrompt(msg.text, msg.images, msg.attachments);
+      const prompt = buildAgentPrompt(text, msg.images, msg.attachments);
       this.sessionLogger.trace(
         {
           agentId,
@@ -8786,7 +8789,7 @@ export class Session {
         if (wantsQueue && msg.messageId && this.agentQueue?.wouldHold(agentId)) {
           await this.agentQueue.enqueue(agentId, {
             messageId: msg.messageId,
-            text: msg.text,
+            text,
             ...(msg.images ? { images: msg.images } : {}),
             ...(msg.attachments ? { attachments: msg.attachments } : {}),
             ...(msg.sourceAgentId ? { sourceAgentId: msg.sourceAgentId } : {}),

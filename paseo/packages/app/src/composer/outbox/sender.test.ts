@@ -1,4 +1,6 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { AttachmentMetadata } from "@/attachments/types";
+import { useDraftStore } from "@/stores/draft-store";
 import {
   addOutboxRecord,
   flushOutbox,
@@ -32,6 +34,7 @@ interface SendCall {
   text: string;
   messageId: string;
   activeTurnBehavior?: string;
+  dictated?: boolean;
   resolve: (value: { disposition?: string }) => void;
   reject: (error: Error) => void;
   received: () => void;
@@ -50,6 +53,7 @@ class FakeDaemon implements OutboxSendClient {
         text,
         messageId: options.messageId,
         activeTurnBehavior: options.activeTurnBehavior,
+        ...("dictated" in options ? { dictated: options.dictated } : {}),
         resolve,
         reject,
         received: () => options.onReceived?.(),
@@ -100,6 +104,7 @@ async function write(text: string, overrides: Partial<OutboxRecord> = {}): Promi
     attachments: [],
     composerAttachments: [],
     activeTurnBehavior: overrides.activeTurnBehavior ?? "queue",
+    ...(overrides.dictated ? { dictated: true } : {}),
     createdAt: now,
   });
 }
@@ -124,6 +129,32 @@ test("a message is on disk before anything is sent", async () => {
   expect(daemon.calls).toHaveLength(0);
   await saved;
   expect(JSON.parse(storage.values.get("paseo-outbox") ?? "{}").records[0].text).toBe("hello");
+});
+
+test("a dictated message is sent as dictated, on disk and on every attempt; a typed one is not", async () => {
+  await write("spoken", { dictated: true });
+  await write("typed", { activeTurnBehavior: "queue" });
+  expect(
+    JSON.parse(storage.values.get("paseo-outbox") ?? "{}").records.map(
+      (record: OutboxRecord) => record.dictated,
+    ),
+  ).toEqual([true, undefined]);
+  await settle();
+  expect(daemon.calls[0]).toMatchObject({ text: "spoken", dictated: true });
+  daemon.calls[0].reject(new Error("Connection lost"));
+  await settle();
+  const wait = (getOutboxRecord("id-spoken")?.nextAttemptAt ?? 0) - now;
+  now += wait;
+  await vi.advanceTimersByTimeAsync(wait);
+  await settle();
+  const spoken = daemon.calls.filter((call) => call.text === "spoken");
+  expect(spoken.length).toBeGreaterThan(1);
+  expect(spoken.every((call) => call.dictated === true)).toBe(true);
+  spoken.at(-1)!.resolve({ disposition: "queued" });
+  await settle();
+  const typed = daemon.calls.find((call) => call.text === "typed");
+  expect(typed).toBeDefined();
+  expect(typed && "dictated" in typed).toBe(false);
 });
 
 test("ticks follow the daemon: clock, single, grey double, then taken", async () => {
@@ -281,4 +312,160 @@ test("error classification", () => {
   expect(classifyOutboxSendError(new Error("Request timed out after 60000ms"))).toBe("transport");
   expect(classifyOutboxSendError(new Error("cancelled"))).toBe("cancelled");
   expect(classifyOutboxSendError(new Error("Agent not found"))).toBe("rejected");
+});
+
+// Edit (EV1): the text goes back into the composer draft before the message is deleted, on
+// every path; if it cannot go back, the message stays.
+
+const DRAFT_KEY = "agent:srv:agent";
+
+function draftText(): string | undefined {
+  return useDraftStore.getState().getDraftInput(DRAFT_KEY)?.text;
+}
+
+const IMAGE: AttachmentMetadata = {
+  id: "img-1",
+  mimeType: "image/png",
+  storageType: "native-file",
+  storageKey: "img-1.png",
+  createdAt: 1,
+};
+
+async function writeWithImage(text: string): Promise<OutboxRecord> {
+  return addOutboxRecord({
+    serverId: "srv",
+    agentId: "agent",
+    clientMessageId: `id-${text}`,
+    text,
+    images: [IMAGE],
+    attachments: [],
+    composerAttachments: [{ kind: "image", metadata: IMAGE }],
+    activeTurnBehavior: "queue",
+    createdAt: now,
+  });
+}
+
+describe("edit", () => {
+  beforeEach(() => {
+    useDraftStore.setState({ drafts: {} });
+  });
+
+  test("an unsent message (offline, clock) goes back to the composer with its image", async () => {
+    online = false;
+    await writeWithImage("unsent");
+    await settle();
+    await sender.edit("id-unsent");
+    await settle();
+    expect(getOutboxRecord("id-unsent")).toBeUndefined();
+    expect(draftText()).toBe("unsent");
+    expect(useDraftStore.getState().getDraftInput(DRAFT_KEY)?.attachments).toEqual([
+      { kind: "image", metadata: IMAGE },
+    ]);
+    expect(useOutboxStore.getState().editRequest).toMatchObject({
+      serverId: "srv",
+      agentId: "agent",
+    });
+  });
+
+  test("a message the daemon queued (grey ticks) goes back and is cancelled through the daemon", async () => {
+    await write("queued");
+    await settle();
+    daemon.calls[0].resolve({ disposition: "queued" });
+    await settle();
+    expect(getOutboxRecord("id-queued")?.state).toBe("queued");
+
+    await sender.edit("id-queued");
+    await settle();
+    expect(draftText()).toBe("queued");
+    expect(daemon.cancels.map((cancel) => cancel.messageId)).toEqual(["id-queued"]);
+    expect(getOutboxRecord("id-queued")).toBeUndefined();
+  });
+
+  test("a message in flight (single tick) goes back; a too-late cancel keeps the text too", async () => {
+    daemon.cancelResult = "too_late";
+    await write("inflight");
+    await settle();
+    daemon.calls[0].received();
+    await settle();
+    await sender.edit("id-inflight");
+    await settle();
+    expect(draftText()).toBe("inflight");
+    expect(getOutboxRecord("id-inflight")?.deletedTooLate).toBe(true);
+  });
+
+  test("a failed message goes back to the composer", async () => {
+    await write("bad");
+    await settle();
+    daemon.calls[0].reject(new Error("agent_request_key_conflict"));
+    await settle();
+    await sender.edit("id-bad");
+    await settle();
+    expect(draftText()).toBe("bad");
+    expect(getOutboxRecord("id-bad")).toBeUndefined();
+  });
+
+  test("an old daemon without a queue: the message goes back and is hidden", async () => {
+    sender.dispose();
+    sender = makeSender({
+      features: () => ({ messageReceivedAck: true, agentMessageQueue: false }),
+    });
+    await write("old");
+    await settle();
+    daemon.calls[0].resolve({ disposition: "queued" });
+    await settle();
+    await sender.edit("id-old");
+    await settle();
+    expect(draftText()).toBe("old");
+    expect(getOutboxRecord("id-old")).toBeUndefined();
+  });
+
+  test("what is already being typed stays; the edited message follows it", async () => {
+    online = false;
+    useDraftStore.getState().saveDraftInput({
+      draftKey: DRAFT_KEY,
+      draft: { text: "half typed", attachments: [] },
+    });
+    await write("pending");
+    await sender.edit("id-pending");
+    await settle();
+    expect(draftText()).toBe("half typed\n\npending");
+  });
+
+  test("the text lands even when no composer for the agent is mounted", async () => {
+    // Nothing subscribes to the edit request here: the draft alone carries the text, and the
+    // composer shows it when the chat opens.
+    online = false;
+    await write("later");
+    await sender.edit("id-later");
+    await settle();
+    expect(draftText()).toBe("later");
+  });
+
+  test("if the text cannot go back, the message is not deleted", async () => {
+    sender.dispose();
+    sender = makeSender({
+      restoreForEdit: async () => {
+        throw new Error("draft unavailable");
+      },
+    });
+    await write("keep");
+    await settle();
+    daemon.calls[0].resolve({ disposition: "queued" });
+    await settle();
+    await expect(sender.edit("id-keep")).rejects.toThrow("draft unavailable");
+    await settle();
+    expect(getOutboxRecord("id-keep")?.state).toBe("queued");
+    expect(daemon.cancels).toHaveLength(0);
+  });
+
+  test("taken and already-cancelling messages are not edited", async () => {
+    await write("gone");
+    await settle();
+    daemon.calls[0].resolve({});
+    await settle();
+    expect(getOutboxRecord("id-gone")?.state).toBe("taken");
+    await sender.edit("id-gone");
+    await settle();
+    expect(draftText()).toBeUndefined();
+  });
 });

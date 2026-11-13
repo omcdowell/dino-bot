@@ -8028,6 +8028,38 @@ test.each([false, true])(
   },
 );
 
+test.each([true, false, undefined])(
+  "sendAgentMessage sends dictated only when the text was dictated (%s)",
+  async (dictated) => {
+    const transport = createMockTransport();
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "dictated",
+      transportFactory: () => transport.transport,
+      reconnect: { enabled: false },
+    });
+    clients.push(client);
+    const connecting = client.connect();
+    transport.triggerOpen({});
+    await connecting;
+    const send = client.sendAgentMessage("agent-1", "hello", {
+      messageId: "m1",
+      ...(dictated === undefined ? {} : { dictated }),
+    });
+    const request = parseSentFrame(transport.sent[0]);
+    expect(request).toMatchObject({ type: "send_agent_message_request", text: "hello" });
+    expect("dictated" in request).toBe(dictated === true);
+    if (dictated) expect(request.dictated).toBe(true);
+    transport.triggerMessage(
+      wrapSessionMessage({
+        type: "send_agent_message_response",
+        payload: { requestId: request.requestId, agentId: "agent-1", accepted: true, error: null },
+      }),
+    );
+    await send;
+  },
+);
+
 describe("dictation Opus / resume feature flags", () => {
   async function connect(features: Record<string, boolean>) {
     const mock = createMockTransport();

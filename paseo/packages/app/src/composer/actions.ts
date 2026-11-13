@@ -53,6 +53,7 @@ export interface ComposerSendClient {
       activeTurnBehavior?: ActiveTurnBehavior;
       images: Array<{ data: string; mimeType: string }>;
       attachments: ReturnType<typeof splitComposerAttachmentsForSubmit>["attachments"];
+      dictated?: boolean;
     },
   ) => Promise<unknown>;
   uploadFile: (input: { fileName: string; mimeType: string; bytes: Uint8Array }) => Promise<{
@@ -196,6 +197,7 @@ export interface DispatchComposerAgentMessageInput {
   submission: MessageSubmissionWriter;
   activeTurnBehavior?: ActiveTurnBehavior;
   activeTurnId?: string;
+  dictated?: boolean;
 }
 
 export async function dispatchComposerAgentMessage(
@@ -223,6 +225,7 @@ export async function dispatchComposerAgentMessage(
       ...(input.activeTurnBehavior ? { activeTurnBehavior: input.activeTurnBehavior } : {}),
       images: imagesData ?? [],
       attachments: wirePayload.attachments,
+      ...(input.dictated ? { dictated: true } : {}),
     });
     input.submission.accept(input.agentId, clientMessageId);
   } catch (error) {

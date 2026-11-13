@@ -82,6 +82,7 @@ import {
   runDefaultSendAction,
   runMessageInputKeyboardAction,
   stopRealtimeVoice,
+  takeDictation,
 } from "./state";
 
 const DEFAULT_SEND_KEYS: ShortcutKey[][] = [["Enter"]];
@@ -1155,7 +1156,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     const {
       value,
       onChangeText,
-      onSubmit,
+      onSubmit: onSubmitProp,
       hasExternalContent,
       allowEmptySubmit,
       submitButtonAccessibilityLabel,
@@ -1184,7 +1185,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       voiceAgentId,
       isAgentRunning,
       defaultSendBehavior,
-      onQueue,
+      onQueue: onQueueProp,
       onSubmitLoadingPress,
       onKeyPressCallback,
       onSelectionChangeCallback,
@@ -1198,6 +1199,20 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       submitLabel,
     } = resolveMessageInputProps(props);
     const mode = resolveComposerInputMode(inputMode);
+    // Set when the dictation button adds text; the next message sent carries it (the daemon marks
+    // the message for the agent), and it clears on send or when the text is emptied.
+    const dictatedRef = useRef(false);
+    const onSubmit = useCallback(
+      (payload: MessagePayload) => onSubmitProp(takeDictation(payload, dictatedRef)),
+      [onSubmitProp],
+    );
+    const onQueue = useMemo(
+      () =>
+        onQueueProp
+          ? (payload: MessagePayload) => onQueueProp(takeDictation(payload, dictatedRef))
+          : undefined,
+      [onQueueProp],
+    );
     const { t } = useTranslation();
     const isCompact = useIsCompactFormFactor();
     const { height: windowHeight } = useWindowDimensions();
@@ -1241,6 +1256,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
 
     const updateLiveTextPresence = useCallback((text: string) => {
       const nextHasLiveText = text.trim().length > 0;
+      if (!nextHasLiveText) dictatedRef.current = false;
       if (hasLiveTextRef.current === nextHasLiveText) return;
       hasLiveTextRef.current = nextHasLiveText;
       setHasLiveText(nextHasLiveText);
@@ -1325,6 +1341,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       (text: string, _meta: { requestId: string }) => {
         const autoSend = sendAfterTranscriptRef.current;
         sendAfterTranscriptRef.current = false;
+        if (text) dictatedRef.current = true;
         applyDictationTranscript(text, {
           value: valueRef.current,
           defaultSendBehavior,

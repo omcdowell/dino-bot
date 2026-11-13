@@ -15,6 +15,7 @@ import {
   saveConfig,
 } from './profiles.ts';
 import { cachePayload, record } from './cache.ts';
+import { searchProviders, slimWebTools } from './web-tools.ts';
 import { memoryTools } from './tools.ts';
 import { exportBrowser } from './browser.ts';
 import { discardImport, pendingImport, prepareImport, runImport } from './import/job.ts';
@@ -24,7 +25,6 @@ import { importModelFor } from './model-defaults.ts';
 import { showUsage } from './usage-page.ts';
 import { showSettings } from './settings-page.ts';
 import { errorText, SessionController } from './controller.ts';
-import { sharedPrompt } from './prompts.ts';
 import room from './room/index.ts';
 
 const binding = 'optchat.profile';
@@ -175,10 +175,13 @@ export default function optchat(pi: ExtensionAPI) {
     return message ? { message } : undefined;
   });
   pi.on('context_with_system', (event, ctx) => session.context(event, ctx));
+  // Read once: the providers web_search and source_check declare (see web-tools.ts).
+  const providers = searchProviders();
   pi.on('before_provider_request', (event, ctx) => {
-    if (ctx.model?.api !== 'anthropic-messages') return event.payload;
-    const payload = cachePayload(event.payload);
-    session.turnPrefix.capture(ctx.model.provider, payload);
+    const slim = slimWebTools(event.payload, providers);
+    if (ctx.model?.api !== 'anthropic-messages') return slim;
+    const payload = cachePayload(slim);
+    session.turnPrefix.capture(ctx.model.provider, payload, ctx.model.id);
     return payload;
   });
   pi.on('cache_warming_decision', () => ({ action: 'stop' }));
@@ -270,7 +273,6 @@ export default function optchat(pi: ExtensionAPI) {
         message => a.usage.compression(message, 'import', ctx.sessionManager.getSessionId()),
         () => a.config.summaryAcceptBytes,
         session.turnPrefix,
-        () => sharedPrompt(a.config.previousExchange),
       );
       const completed = await showProgress(ctx, job, (signal, progress) => runImport(a.dir, compress, signal, progress), signal);
       ctx.ui.notify(

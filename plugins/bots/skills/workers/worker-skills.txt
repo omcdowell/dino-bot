@@ -1,0 +1,6 @@
+# Skills every herdr worker started by launch.sh gets (folders next to workers/).
+# One name per line. Bots do not get these (lib/config.mjs botSkillArgs skips them).
+diagnose
+tdd
+screenshot-app
+herdr

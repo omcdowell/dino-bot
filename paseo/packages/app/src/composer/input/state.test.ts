@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   applyDictationTranscript,
+  takeDictation,
   computeCanStartDictation,
   resolveActiveSendBehavior,
   resolveAgentSendBehavior,
@@ -164,6 +165,21 @@ describe("dictation keyboard behavior", () => {
     keyboard.pressDictationShortcut();
 
     expect(keyboard.actions).toEqual(["start", "start"]);
+  });
+});
+
+describe("takeDictation", () => {
+  const payload = { text: "hi", attachments: [], cwd: "/repo" };
+
+  it("marks the next message dictated once, then clears", () => {
+    const flag = { current: true };
+    expect(takeDictation(payload, flag)).toEqual({ ...payload, dictated: true });
+    expect(flag.current).toBe(false);
+    expect(takeDictation(payload, flag)).toBe(payload);
+  });
+
+  it("leaves a typed message unchanged", () => {
+    expect(takeDictation(payload, { current: false })).toBe(payload);
   });
 });
 

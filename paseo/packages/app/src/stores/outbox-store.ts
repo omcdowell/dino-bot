@@ -40,6 +40,8 @@ export interface OutboxRecord {
   /** Composer form, only used to put the message back into the composer on Edit. */
   composerAttachments: ComposerAttachment[];
   activeTurnBehavior: ActiveTurnBehavior;
+  /** Some of the text was dictated: sent as `dictated` every attempt. */
+  dictated?: boolean;
   createdAt: number;
   sentAt?: number;
   attempts: number;
@@ -52,18 +54,17 @@ export interface OutboxRecord {
   deletedTooLate?: boolean;
 }
 
+/** An Edit put a message back into this agent's composer draft; mounted composers show it. */
 export interface OutboxEditRequest {
   serverId: string;
   agentId: string;
-  text: string;
-  attachments: ComposerAttachment[];
-  requestedAt: number;
+  id: number;
 }
 
 interface OutboxStoreState {
   hydrated: boolean;
   records: OutboxRecord[];
-  /** Text a pinned bubble's Edit handed back to the composer. The composer consumes it. */
+  /** The last Edit that put a pinned bubble's text back in a composer draft. */
   editRequest: OutboxEditRequest | null;
 }
 
@@ -92,6 +93,7 @@ const PersistedOutboxSchema = z.object({
         state: z.enum(["outbox", "received", "queued", "taken", "failed", "unknown", "cancelling"]),
         lastError: z.string().optional(),
         deletedTooLate: z.boolean().optional(),
+        dictated: z.boolean().optional(),
       })
       .passthrough(),
   ),
@@ -258,15 +260,16 @@ export function settleOutboxRecordsSeenInStream(clientMessageIds: Iterable<strin
   void commit(records.filter((record) => !seen.has(record.clientMessageId)));
 }
 
-export function requestOutboxEdit(request: Omit<OutboxEditRequest, "requestedAt">): void {
-  useOutboxStore.setState({ editRequest: { ...request, requestedAt: Date.now() } });
-}
+let editRequestId = 0;
 
-export function consumeOutboxEdit(serverId: string, agentId: string): OutboxEditRequest | null {
-  const request = useOutboxStore.getState().editRequest;
-  if (!request || request.serverId !== serverId || request.agentId !== agentId) return null;
-  useOutboxStore.setState({ editRequest: null });
-  return request;
+/**
+ * Tells every composer mounted for the agent to show its draft again (an Edit wrote to it).
+ * Not consumed: with the same chat mounted twice (a screen under the one on show), the first
+ * composer to look must not take it from the one the user sees.
+ */
+export function requestOutboxEdit(request: Omit<OutboxEditRequest, "id">): void {
+  editRequestId += 1;
+  useOutboxStore.setState({ editRequest: { ...request, id: editRequestId } });
 }
 
 /** Waits for pending writes (tests and shutdown). */

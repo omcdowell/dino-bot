@@ -7,6 +7,7 @@ import { createAssistantMessageEventStream, type AssistantMessage } from '@earen
 import { ModelRegistry, ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { cachePayload, TurnPrefix } from '../src/cache.ts';
 import { createCompressor } from '../src/compactor.ts';
+import { COMPACTIONS, compactorPrompt, sharedPrompt } from '../src/prompts.ts';
 import { Memory, end, start } from '../src/memory.ts';
 import { emptyUsage } from '../src/usage.ts';
 import { CacheModel } from './cache-model.ts';
@@ -16,7 +17,7 @@ const fixture = () => JSON.parse(readFileSync(new URL('./fixtures/anthropic-turn
 type Payload = Record<string, unknown> & { messages: { role: string; content: Record<string, unknown>[] }[] };
 
 /** A compactor on a fake Anthropic provider that builds its payload as pi-ai does and passes it to `onPayload`. */
-async function setup(provider = 'anthropic') {
+async function setup(provider = 'anthropic', own?: () => string) {
   const dir = mkdtempSync(join(tmpdir(), 'optchat-share-'));
   const sent: Payload[] = [];
   const runtime = await ModelRuntime.create({
@@ -80,7 +81,7 @@ async function setup(provider = 'anthropic') {
     undefined,
     undefined,
     turn,
-    () => 'FALLBACK PROMPT',
+    own ?? (() => 'FALLBACK PROMPT'),
   );
   return { dir, sent, turn, compress };
 }
@@ -93,8 +94,10 @@ test('compactions send the last turn’s system prompt and tools byte for byte, 
     await compress({ context: view, source, merge: false, part: { l: 0, i: 1 } }, new AbortController().signal);
     assert.deepEqual(sent[0].system, [{ type: 'text', text: 'FALLBACK PROMPT', cache_control: { type: 'ephemeral' } }]);
     assert.equal(sent[0].tools, undefined, 'no turn yet: no tools');
-    const payload = cachePayload(fixture()) as Payload;
-    turn.capture('anthropic', payload);
+    const turnPayload = fixture();
+    turnPayload.system.push({ type: 'text', text: sharedPrompt(false, {}) });
+    const payload = cachePayload(turnPayload) as Payload;
+    turn.capture('anthropic', payload, 'compactor');
     await compress({ context: view, source, merge: false, part: { l: 0, i: 1 } }, new AbortController().signal);
     assert.equal(JSON.stringify(sent[1].system), JSON.stringify(payload.system));
     assert.equal(JSON.stringify(sent[1].tools), JSON.stringify(payload.tools));
@@ -112,10 +115,60 @@ test('a turn prefix is only captured from a turn, and only reused on the same pr
       messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
     });
     assert.equal(turn.captured, false);
-    turn.capture('anthropic', cachePayload(fixture()));
+    const turnPayload = fixture();
+    turnPayload.system.push({ type: 'text', text: sharedPrompt(false, {}) });
+    const payload = cachePayload(turnPayload) as Payload;
+    turn.capture('anthropic', payload, 'compactor');
     assert.equal(turn.captured, true);
     await compress({ context: view, source, merge: false }, new AbortController().signal);
     assert.match(JSON.stringify(sent[0].system), /FALLBACK PROMPT/, 'another provider keeps its own prompt');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a compaction on another model than the turn sends its own prompt: no tools, one mark, the same bytes every call', async () => {
+  const { dir, sent, turn, compress } = await setup('anthropic', () => compactorPrompt({}));
+  try {
+    const payload = cachePayload(fixture()) as Payload;
+    // The fixture turn ran on claude-opus-5-5; the compactor is 'compactor' on the same provider.
+    turn.capture('anthropic', payload);
+    assert.equal(turn.captured, true);
+    assert.equal(turn.matches('anthropic', 'compactor'), false);
+    for (let k = 0; k < 3; k++)
+      await compress({ context: view, source, merge: false, part: { l: 0, i: 1 + k } }, new AbortController().signal);
+    for (const request of sent) {
+      assert.equal(request.tools, undefined, 'no tool definitions');
+      assert.deepEqual(request.system, [{ type: 'text', text: compactorPrompt({}), cache_control: { type: 'ephemeral' } }]);
+    }
+    assert.equal(new Set(sent.map(r => JSON.stringify(r.system))).size, 1, 'stable across calls');
+    const own = compactorPrompt({});
+    assert.ok(own.includes(COMPACTIONS));
+    assert.doesNotMatch(own, /Tools:|zoom\(id|search_memory|# Turns|<skill|available_skills/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a turn on the compactor’s model is reused only while its prompt holds the compaction rules', async () => {
+  const { dir, sent, turn, compress } = await setup('anthropic', () => compactorPrompt({}));
+  try {
+    const turnPayload = (rules: boolean) => {
+      const payload = cachePayload(fixture()) as Payload;
+      payload.system = [{ type: 'text', text: sharedPrompt(false, {}, rules) }];
+      return payload;
+    };
+    turn.capture('anthropic', turnPayload(true), 'compactor');
+    assert.equal(turn.matches('anthropic', 'compactor'), true);
+    await compress({ context: view, source, merge: false }, new AbortController().signal);
+    assert.ok(sent[0].tools, 'the turn’s tools, byte for byte');
+    assert.match(JSON.stringify(sent[0].system), /# Turns/);
+    // A turn sent while the compactor was on another model has no rules: a compaction must not borrow it.
+    turn.capture('anthropic', turnPayload(false), 'compactor');
+    assert.equal(turn.matches('anthropic', 'compactor'), false);
+    await compress({ context: view, source, merge: false }, new AbortController().signal);
+    assert.equal(sent[1].tools, undefined);
+    assert.equal((sent[1].system as { text: string }[])[0].text, compactorPrompt({}));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

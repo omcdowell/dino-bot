@@ -1,0 +1,7 @@
+herdr skill
+Source: https://github.com/herdrdev/herdr (the herdr authors)
+
+SKILL.md is skills/herdr/SKILL.md from herdr v0.9.3 (the herdr version DinoBot bundles),
+licensed under the Apache License, Version 2.0 (see LICENSE in this folder).
+Modified by DinoBot: the section "Addendum: multi-agent runs" at the end was added.
+Everything above it is unchanged.

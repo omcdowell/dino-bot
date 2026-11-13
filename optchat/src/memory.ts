@@ -319,6 +319,7 @@ export class Tiling {
 /** The log is authoritative. The tree and monotonically coarsening view follow recipe §§2–6. */
 export class Memory {
   readonly root: Entry[] = [];
+  private imported = false;
   readonly tree = new Map<number, Summary>();
   /** The chat's view: 64-128 KB of lines, saved to view.json whenever a batch merges. */
   private readonly chat: Tiling;
@@ -333,6 +334,10 @@ export class Memory {
   private readonly controller = new AbortController();
   private readonly busy = new Map<number, Promise<void>>();
   private readonly retryAt = new Map<number, number>();
+  /** Whether the log holds imported history (entries with an origin, or notes): only then do prompts need the import guidance. */
+  hasImported() {
+    return (this.imported ||= this.root.some(entry => !!entry.origin || entry.kind === 'note'));
+  }
   /** Failed attempts per node since it was last built, by kind; busy answers count only in `all`. */
   private readonly failures = new Map<number, { all: number; transient: number; permanent: number }>();
   /** Nodes the provider kept refusing, with the short reason their fallback line gives. */

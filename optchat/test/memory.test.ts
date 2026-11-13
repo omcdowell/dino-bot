@@ -858,3 +858,18 @@ test('a user message headed by a bot-dm envelope is tagged dm:<from>, never user
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('hasImported is false for plain chat and true once the log holds an imported note', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-imported-'));
+  const memory = new Memory(dir, async input => input.source.slice(0, 50), () => {}, 1500);
+  try {
+    memory.append('user', 'hello');
+    memory.append('talk', 'hi');
+    assert.equal(memory.hasImported(), false);
+    memory.append('note', 'Old memory from before this chat');
+    assert.equal(memory.hasImported(), true);
+  } finally {
+    await memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

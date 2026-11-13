@@ -200,7 +200,7 @@ const PinnedBubble = memo(function PinnedBubble({
     [agentId, id, message.remote, run, sender, serverId],
   );
   const handleEdit = useCallback(
-    () => run(() => sender?.edit(id), "delivery.actions.failedToDelete"),
+    () => run(() => sender?.edit(id), "delivery.actions.failedToEdit"),
     [id, run, sender],
   );
   // A taken message is the agent's already; hiding the bubble only clears this device's copy.

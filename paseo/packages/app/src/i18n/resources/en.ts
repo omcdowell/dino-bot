@@ -3132,6 +3132,7 @@ export const en = {
       hideWarning: "This host cannot cancel messages; the agent may still get it.",
       failedToForce: "Could not send now: {{error}}",
       failedToDelete: "Could not delete: {{error}}",
+      failedToEdit: "Could not edit: {{error}}",
     },
   },
 } as const;

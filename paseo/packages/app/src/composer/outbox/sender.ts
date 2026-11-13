@@ -1,12 +1,12 @@
 import type { ActiveTurnBehavior, AgentAttachment } from "@getpaseo/protocol/messages";
 import type { AttachmentMetadata } from "@/attachments/types";
+import { restoreOutboxRecordToComposer } from "@/composer/outbox/edit-handoff";
 import { generateMessageId } from "@/types/stream";
 import {
   addOutboxRecord,
   getOutboxRecord,
   onOutboxChanged,
   removeOutboxRecord,
-  requestOutboxEdit,
   updateOutboxRecord,
   useOutboxStore,
   type OutboxRecord,
@@ -32,6 +32,7 @@ export interface OutboxSendClient {
       activeTurnBehavior?: ActiveTurnBehavior;
       images: Array<{ data: string; mimeType: string }>;
       attachments: AgentAttachment[];
+      dictated?: boolean;
       onReceived?: () => void;
     },
   ) => Promise<{ disposition?: string } | void>;
@@ -59,6 +60,11 @@ export interface OutboxSenderHost {
   encodeImages: (
     images: AttachmentMetadata[],
   ) => Promise<Array<{ data: string; mimeType: string }> | undefined>;
+  /**
+   * Puts a message's text and images back into its agent's composer draft (Edit). Must throw
+   * when they did not land: the message is deleted only after this resolves.
+   */
+  restoreForEdit?: (record: OutboxRecord) => Promise<void>;
   now?: () => number;
   random?: () => number;
   setTimer?: (callback: () => void, delayMs: number) => unknown;
@@ -106,6 +112,7 @@ export class OutboxSender {
   private readonly random: () => number;
   private readonly setTimer: (callback: () => void, delayMs: number) => unknown;
   private readonly clearTimer: (handle: unknown) => void;
+  private readonly restoreForEdit: (record: OutboxRecord) => Promise<void>;
   private readonly unsubscribe: () => void;
   private disposed = false;
 
@@ -115,6 +122,7 @@ export class OutboxSender {
     this.setTimer = host.setTimer ?? ((callback, delayMs) => setTimeout(callback, delayMs));
     this.clearTimer =
       host.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
+    this.restoreForEdit = host.restoreForEdit ?? restoreOutboxRecordToComposer;
     this.unsubscribe = onOutboxChanged(() => this.kick());
   }
 
@@ -247,6 +255,7 @@ export class OutboxSender {
         activeTurnBehavior: record.activeTurnBehavior,
         images,
         attachments: record.attachments,
+        ...(record.dictated ? { dictated: true } : {}),
         onReceived: () => {
           if (getOutboxRecord(id)?.state === "outbox")
             void updateOutboxRecord(id, { state: "received" });
@@ -342,17 +351,15 @@ export class OutboxSender {
     await updateOutboxRecord(clientMessageId, { state: "cancelling", nextAttemptAt: 0 });
   }
 
-  /** Delete, and hand the text back to the composer. */
+  /**
+   * Hand the text back to the composer, then delete. The text goes back first: if it cannot,
+   * this throws and the message stays (an Edit must never lose what the user wrote).
+   */
   async edit(clientMessageId: string): Promise<void> {
     const record = getOutboxRecord(clientMessageId);
-    if (!record || record.state === "taken") return;
+    if (!record || record.state === "taken" || record.state === "cancelling") return;
+    await this.restoreForEdit(record);
     await this.delete(clientMessageId);
-    requestOutboxEdit({
-      serverId: record.serverId,
-      agentId: record.agentId,
-      text: record.text,
-      attachments: record.composerAttachments,
-    });
   }
 
   /** Send a failed or unknown message again, under a new ID. */
@@ -369,6 +376,7 @@ export class OutboxSender {
       attachments: record.attachments,
       composerAttachments: record.composerAttachments,
       activeTurnBehavior: record.activeTurnBehavior,
+      ...(record.dictated ? { dictated: true } : {}),
       createdAt: record.createdAt,
     });
   }
@@ -418,6 +426,7 @@ export interface EnqueueOutboxMessageInput {
   attachments: AgentAttachment[];
   composerAttachments: OutboxRecord["composerAttachments"];
   activeTurnBehavior: ActiveTurnBehavior;
+  dictated?: boolean;
 }
 
 /** Saves the message to the outbox (resolves once on disk) and wakes the sender. */

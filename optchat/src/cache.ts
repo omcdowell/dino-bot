@@ -1,4 +1,5 @@
 import { isView } from './memory.ts';
+import { COMPACTIONS } from './prompts.ts';
 
 export function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -72,22 +73,28 @@ export function cachePayload(payload: unknown): unknown {
   return payload;
 }
 
+/** The compaction rules as they appear inside a JSON-encoded system prompt. */
+const RULES = JSON.stringify(COMPACTIONS).slice(1, -1);
+
 /**
  * The tools and system prompt of the last OptChat turn sent to Anthropic, kept byte for byte so compactions send the
- * same ones (UniiChat §4) and share their cache prefix. Until a turn has been sent, compactions use their own prompt.
+ * same ones (UniiChat §4) and share their cache prefix. Caches are per model, so only a compaction on the turn's
+ * provider and model reuses them, and only if that prompt holds the compaction rules (a turn whose compactor runs on
+ * another model leaves them out). Every other compaction uses its own prompt.
  */
 export class TurnPrefix {
-  private value?: { provider: string; system?: string; tools?: string; key: string };
+  private value?: { provider: string; model?: string; system?: string; tools?: string; rules: boolean; key: string };
   /** Keeps `payload`'s system prompt and tools if it is a turn: a request whose first user message holds the view. */
-  capture(provider: string, payload: unknown) {
+  capture(provider: string, payload: unknown, modelId?: string) {
     if (!record(payload) || !Array.isArray(payload.messages)) return;
     const first: unknown = payload.messages.find(m => record(m) && m.role === 'user');
     if (!record(first) || !Array.isArray(first.content)) return;
     const head: unknown = first.content[0];
     if (!record(head) || typeof head.text !== 'string' || !isView(head.text)) return;
     const system = payload.system === undefined ? undefined : JSON.stringify(payload.system),
-      tools = payload.tools === undefined ? undefined : JSON.stringify(payload.tools);
-    this.value = { provider, system, tools, key: `${provider}\n${system ?? ''}\n${tools ?? ''}` };
+      tools = payload.tools === undefined ? undefined : JSON.stringify(payload.tools),
+      model = modelId ?? (typeof payload.model === 'string' ? payload.model : undefined);
+    this.value = { provider, model, system, tools, rules: !!system?.includes(RULES), key: `${provider}\n${system ?? ''}\n${tools ?? ''}` };
   }
   get captured() {
     return !!this.value;
@@ -96,10 +103,15 @@ export class TurnPrefix {
   get key() {
     return this.value?.key ?? '';
   }
-  /** Puts the turn's system prompt and tools into a compaction's payload for the same provider. Returns whether it did. */
-  apply(provider: string, payload: unknown) {
+  /** Whether a compaction on `provider`/`model` can send the turn's prefix: same cache, and the rules are in it. */
+  matches(provider: string, model: string) {
     const value = this.value;
-    if (!value || value.provider !== provider || !record(payload)) return false;
+    return !!value && value.provider === provider && value.model === model && value.rules;
+  }
+  /** Puts the turn's system prompt and tools into a compaction's payload for the same provider and model. Returns whether it did. */
+  apply(provider: string, model: string, payload: unknown) {
+    const value = this.value;
+    if (!value || !this.matches(provider, model) || !record(payload)) return false;
     if (value.system === undefined) delete payload.system;
     else payload.system = JSON.parse(value.system);
     if (value.tools === undefined) delete payload.tools;

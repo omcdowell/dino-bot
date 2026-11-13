@@ -5,6 +5,10 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 It is a plugin for Paseo (https://github.com/getpaseo/paseo), Copyright 2025-present
 Mohamed Boudra, Apache-2.0, and runs bots on pi-optchat (MIT) and pi (MIT).
 Bundled dependency: zod (MIT, Copyright (c) 2025 Colin McDonnell).
+Bundled worker skills (each folder under skills/ has its own LICENSE and NOTICE):
+skills/diagnose and skills/tdd from mattpocock/skills (MIT, Copyright (c) 2026 Matt Pocock),
+unmodified; skills/herdr from herdr v0.9.3 (Apache-2.0, the herdr authors), with an added
+section marked in the file.
 
 The DinoBot name and the dino artwork are not licensed under Apache-2.0 (no trademark
 rights are granted, Apache-2.0 section 6).

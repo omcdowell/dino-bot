@@ -24,7 +24,6 @@ import {
 } from "../shared/manage";
 import { BOT_ID_RE } from "../shared/rooms/schema";
 import { agentsMdFor } from "../shared/templates";
-import { botDmBlockText, withBotDmBlock } from "./bot-dm-block";
 import { readSettingsAt, type HostModels, type ModelPick } from "./settings";
 import { AVATAR_PACK, AvatarJsonSchema, parseAvatar, type AvatarJson } from "../shared/avatar";
 import {
@@ -462,8 +461,8 @@ export class BotFiles {
     const avatar = designed ? designed.rendered.pngs[AVATAR_PNG_SIZE] : input.avatar ? decodePng(input.avatar) : null;
     if (input.chat && !input.chat.provider.startsWith("optchat/")) throw new ManageError("Pick an OptChat model.");
     const body = input.agentsMd?.trim() ? input.agentsMd : agentsMdFor({ name, template: input.template, purpose: input.purpose });
-    // The bot-dm block, so the bot knows how to DM other bots and the user (no snippet sync needed).
-    const agentsMd = withBotDmBlock(body.endsWith("\n") ? body : `${body}\n`, botDmBlockText(readSettingsAt(this.root)));
+    // Only the bot's own text: the bot-dm, worker, room and house rules are the "DinoBot bot" prompt section (bot-prompt.ts).
+    const agentsMd = body.endsWith("\n") ? body : `${body}\n`;
     await mkdir(profile, { recursive: true, mode: 0o700 });
     await atomicWrite(join(profile, "AGENTS.md"), agentsMd);
     // The host's compaction and worker models (setup), so a new bot never falls back to a fixed model.

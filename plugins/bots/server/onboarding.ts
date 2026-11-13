@@ -28,7 +28,14 @@ type Installer = {
   recordModels(models: HostModels): void;
   importScan(): Promise<Record<string, unknown>>;
   importStart(): Promise<{ ok: boolean; error?: string }>;
+  /** provider.* (lib/provider-install.mjs); absent in installers older than the RPCs. */
+  providerList?(): Promise<{ packages: Array<{ source: string; bundled: boolean }>; providers: unknown[] }>;
+  providerInstall?(input: { source: string; token?: string | null; name?: string | null }): unknown;
+  providerInstallStatus?(input: { jobId: string }): unknown;
+  providerRemove?(input: { source: string }): Promise<{ removed: string }>;
 };
+
+type ProviderInstaller = Required<Pick<Installer, "providerList" | "providerInstall" | "providerInstallStatus" | "providerRemove">>;
 
 const OPTCHAT = "optchat";
 const PROFILE_FILE = ".optchat-profile";
@@ -75,6 +82,29 @@ export class Onboarding {
     const h = await this.host();
     if (!h) throw new Error("Sign-in from the phone needs DinoBot's host setup (DINOBOT_HOME).");
     return h;
+  }
+
+  /** The installer's provider.* side, or null (plain Paseo host, or an installer without it). */
+  async providerHost(): Promise<ProviderInstaller | null> {
+    const h = await this.host();
+    return h?.providerList && h.providerInstall && h.providerInstallStatus && h.providerRemove ? (h as ProviderInstaller) : null;
+  }
+
+  async needProviders(): Promise<ProviderInstaller> {
+    const h = await this.providerHost();
+    if (!h) throw new Error("Adding providers from the app needs DinoBot's host setup (DINOBOT_HOME).");
+    return h;
+  }
+
+  async providerList() {
+    const h = await this.providerHost();
+    if (!h) return { available: false, packages: [], providers: [], error: null };
+    try {
+      const r = await h.providerList();
+      return { available: true, packages: r.packages, providers: r.providers as never, error: null };
+    } catch (e) {
+      return { available: true, packages: [], providers: [], error: (e as Error).message };
+    }
   }
 
   async options() {

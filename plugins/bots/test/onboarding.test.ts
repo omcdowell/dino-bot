@@ -71,3 +71,57 @@ test("onboarding RPC names are valid plugin method names (Paseo: /^[a-z][a-z0-9.
   const rpcs = await import("../shared/onboarding-rpc");
   for (const r of Object.values(rpcs)) if (r && typeof r === "object" && "name" in r) assert.match(String((r as { name: string }).name), /^[a-z][a-z0-9._-]*$/);
 });
+
+test("provider RPC names are valid plugin method names, and none returns a token field", async () => {
+  const rpcs = await import("../shared/provider-rpc");
+  const names = (Object.values(rpcs) as unknown[])
+    .filter((r): r is { name: string; output: { shape?: Record<string, unknown> } } => Boolean(r && typeof r === "object" && "name" in r))
+    .map((r) => {
+      assert.ok(!("token" in (r.output.shape ?? {})), r.name);
+      return r.name;
+    });
+  for (const n of names) assert.match(n, /^[a-z][a-z0-9._-]*$/);
+  assert.deepEqual(names.sort(), ["provider.install", "provider.install-status", "provider.list", "provider.remove"]);
+});
+
+test("provider.*: not available on a plain Paseo host or with an installer that predates them; passed through to DinoBot's installer otherwise", async () => {
+  const home = mkdtempSync(join(tmpdir(), "onb-prov-"));
+  try {
+    const plain = new Onboarding(parseSettings({}), join(home, "bots"), { HOME: home });
+    assert.deepEqual(await plain.providerList(), { available: false, packages: [], providers: [], error: null });
+    await assert.rejects(plain.needProviders(), /DINOBOT_HOME/);
+
+    const lib = (name: string) => join(home, name, "app", "installer", "lib");
+    // An installer from before provider.* (sign-in only).
+    mkdirSync(lib("old"), { recursive: true });
+    writeFileSync(join(lib("old"), "phone-signin.mjs"), "export function createOnboarding() { return { options: async () => ({ options: [], signedIn: [] }) }; }\n");
+    const old = new Onboarding(parseSettings({}), join(home, "bots"), { HOME: home, DINOBOT_HOME: join(home, "old") });
+    assert.equal((await old.providerList()).available, false);
+    assert.equal((await old.options()).available, true); // sign-in still works
+
+    mkdirSync(lib("new"), { recursive: true });
+    writeFileSync(
+      join(lib("new"), "phone-signin.mjs"),
+      `const calls = [];
+export function createOnboarding() {
+  return {
+    calls,
+    providerList: async () => ({ packages: [{ source: "npm:x", bundled: false }], providers: [] }),
+    providerInstall: (i) => (calls.push(i), { jobId: "j1", source: i.source, name: null, state: "running", step: "installing", error: null, providers: [] }),
+    providerInstallStatus: ({ jobId }) => ({ jobId, source: "npm:x", name: null, state: "done", step: "done", error: null, providers: [] }),
+    providerRemove: async ({ source }) => ({ removed: source }),
+  };
+}
+`,
+    );
+    const ob = new Onboarding(parseSettings({}), join(home, "bots"), { HOME: home, DINOBOT_HOME: join(home, "new") });
+    assert.deepEqual(await ob.providerList(), { available: true, packages: [{ source: "npm:x", bundled: false }], providers: [], error: null });
+    const h = await ob.needProviders();
+    const started = h.providerInstall({ source: "npm:x", token: null }) as { jobId: string };
+    assert.equal(started.jobId, "j1");
+    assert.equal((h.providerInstallStatus({ jobId: "j1" }) as { state: string }).state, "done");
+    assert.deepEqual(await h.providerRemove({ source: "npm:x" }), { removed: "npm:x" });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});

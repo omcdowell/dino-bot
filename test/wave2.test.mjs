@@ -38,7 +38,7 @@ describe("product names (one place)", () => {
     assert.equal(PRODUCT, "DinoBot");
     assert.equal(PRODUCT_ID, p.id);
     assert.match(VERSION, /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
-    assert.equal(VERSION, "0.1.5");
+    assert.equal(VERSION, "0.1.6");
     // Self-builders sign the app with their own Apple account: the id is a build setting (5 Nov).
     assert.equal(p.bundleId, undefined);
     assert.doesNotMatch(readFileSync(join(HERE, "lib", "product.json"), "utf8"), /com\.dinobot\./);

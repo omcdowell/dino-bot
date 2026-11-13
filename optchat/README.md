@@ -100,6 +100,16 @@ Compression and subagents make extra model requests with your provider credentia
 
 Numbers must be whole numbers of at least 1 (512 for the summary size tolerance). Missing keys in an older `config.json` take their defaults.
 
+Skills: of the user's global skills (`~/.pi/agent/skills`, `~/.agents/skills`), every profile lists only `herdr` by default. To share another list with every profile, write it to `~/.optchat/skills.json` (under `OPTCHAT_HOME`); `hide` drops any skill, a bot's own folder's included. A name that is not installed is skipped. Edit the file; the next message uses it:
+
+```json
+{ "global": ["herdr", "diagnose"], "hide": ["an-old-local-skill"] }
+```
+
+One profile can override either key in its `config.json`, as `"skills": { "global": [...] }`.
+
+With the Paseo bots plugin, each bot's prompt also has the plugin's section (bot DMs, workers, group chats, house rules), read from the file in `OPTCHAT_BOT_PROMPT` just before the profile's `AGENTS.md`. Without it there is no such section.
+
 **Upgrading from 0.6.x:** subagent levels used to be fixed at 3 and now default to 1, so subagents no longer start their own subagents until you set Subagent levels to 2 or 3.
 
 ![Settings page](docs/screenshots/settings.png)

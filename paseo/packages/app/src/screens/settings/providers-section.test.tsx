@@ -242,6 +242,10 @@ vi.mock("@/stores/provider-settings-store", () => ({
     selector({ open: openProviderSettingsMock }),
 }));
 
+vi.mock("@/screens/settings/bot-providers-section", () => ({
+  BotProvidersSection: () => null,
+}));
+
 vi.mock("@/components/provider-catalog-list", () => ({
   ProviderCatalogList: () => null,
 }));

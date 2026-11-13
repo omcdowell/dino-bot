@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.1.6
+
+### Bots
+
+- **Workers for every bot.** A bundled `workers` skill shows each bot how to hand a self-contained
+  job to a helper agent in a terminal tab (brief, launch, steer, check, resume, close). Workers
+  it starts get a short bundled skill list (`diagnose`, `tdd`, `screenshot-app`, `herdr`) and no
+  other skills; `WORKER_SKILLS=<path>[:<path>]` adds some, `WORKER_SKILLS=none` drops the list.
+  Third-party skills ship with their licences (see `plugins/bots/NOTICE`).
+- **One shared bot prompt.** The how-to-act text (bot-dm, workers, rooms, house rules) is now one
+  "DinoBot bot" section rendered per bot at run time. A bot's AGENTS.md holds only its own text:
+  the old bot-dm block is removed at start (a backup is kept next to the file).
+- **Skills per bot.** Bots see only the skills you allow: one shared list in
+  `~/.optchat/skills.json` (default: `herdr` and `workers`), overridable per bot; any skill can be hidden.
+- **Smaller prompts.** Web tool declarations are slimmer, imported-history guidance is sent only
+  when memory holds imported history, and a compaction on another model sends its own short prompt.
+
+### App
+
+- **Add providers from the phone.** Settings → Providers lists, installs and removes providers on
+  your computer; a provider link opens there. Installing a provider runs its code on your
+  computer, so only add providers from people you trust.
+- **Edit on a pending message keeps its text.**
+- **Dictation.** Messages typed with the dictation button are marked as dictated for the bot.
+  Voice mode off adds nothing.
+
+### Install and sign-in
+
+- **Sign-in asks once.** Picking a provider no longer shows the menu again;
+  `dinobot signin [provider]` and `dinobot signin --list`.
+- **Readable setup QR code** (pure black and white, plus a PNG on a Mac, removed after sign-in).
+- **Download progress bar** in the installer.
+
 ## v0.1.5
 
 ### Faster, much smaller sync

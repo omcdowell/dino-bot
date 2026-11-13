@@ -62,6 +62,31 @@ test("Hub execute can steer ordinary agents while unrelated administration stays
   expect(hub.serverInfoPermissions()).toEqual([["hub.execute"]]);
 });
 
+test("a dictated message reaches the agent with the dictation marker; a typed one without", async () => {
+  const hub = await launchRelationship();
+  const agentId = await hub.createUnrelatedLocalAgent();
+  for (const [requestId, text, dictated] of [
+    ["typed", "typed words", undefined],
+    ["spoken", "spoken words", true],
+  ] as const) {
+    expect(
+      await hub.requestOrdinary({
+        type: "send_agent_message_request",
+        requestId,
+        agentId,
+        text,
+        messageId: requestId,
+        activeTurnBehavior: "steer",
+        ...(dictated ? { dictated } : {}),
+      }),
+    ).toMatchObject({ type: "send_agent_message_response", payload: { accepted: true } });
+  }
+  const prompts = hub.providerPromptTexts();
+  expect(prompts).toContain("typed words");
+  expect(prompts).toContain("[dictated] spoken words");
+  expect(prompts.filter((text) => text.includes("[dictated]"))).toHaveLength(1);
+});
+
 test("Hub execute can title the workspace created with an agent", async () => {
   const hub = await launchRelationship();
   const created = await hub.requestOrdinary({

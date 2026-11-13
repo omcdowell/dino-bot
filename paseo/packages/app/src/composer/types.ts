@@ -7,6 +7,8 @@ export interface MessagePayload {
   attachments: ComposerAttachment[];
   cwd: string;
   forceSend?: boolean;
+  /** Some of the text came from the dictation button; the daemon marks the message for the agent. */
+  dictated?: boolean;
 }
 
 export interface TextReplacement {

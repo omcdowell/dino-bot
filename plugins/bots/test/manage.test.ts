@@ -126,7 +126,7 @@ test("create bot: files only, shows up in discovery, refuses a taken id", async 
     });
     assert.ok(readFileSync(join(dir, "avatar.png")).equals(PNG));
     assert.ok(existsSync(join(dir, "dm")));
-    assert.equal(readFileSync(join(host.optchatHome, "profiles", "tweety-bird", "AGENTS.md"), "utf8").split("\n\n<!-- bot-dm:begin")[0], "# Tweety"); // + the bot-dm block
+    assert.equal(readFileSync(join(host.optchatHome, "profiles", "tweety-bird", "AGENTS.md"), "utf8"), "# Tweety\n"); // only the bot's own text
     const bots = await discoverBots(host.root, noProjects);
     assert.deepEqual(bots.map((b) => [b.id, b.name]).sort(), [["peggy", "Peggy"], ["tweety-bird", "Tweety Bird"]]);
     await assert.rejects(files.create({ name: "peggy", agentsMd: "" }), ManageError);

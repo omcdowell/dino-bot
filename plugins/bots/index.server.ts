@@ -7,6 +7,8 @@ import { WorkersService } from "./server/workers";
 import { botDmSender } from "./server/bot-dm-send";
 import { Extensions } from "./server/extensions";
 import { HerdrInstance } from "./server/herdr-instance";
+import { BotPrompts, onPath } from "./server/bot-prompt";
+import { stripProfiles } from "./server/bot-dm-block";
 import { botEnv, loadSettings, readSettingsAt, writeRoomFullTools } from "./server/settings";
 import { isUserParty, setUserName } from "./shared/party";
 import { OPTCHAT_PROVIDER } from "./shared/rpc";
@@ -59,6 +61,7 @@ import {
   signinStatusRpc,
   signinSubmitRpc,
 } from "./shared/onboarding-rpc";
+import { providerInstallRpc, providerInstallStatusRpc, providerListRpc, providerRemoveRpc } from "./shared/provider-rpc";
 import {
   ROOMS_EVENT,
   roomsBotPostRpc,
@@ -264,6 +267,12 @@ export default function contribute(server: PluginServerContext) {
   server.handle(setupModelsRpc, ({ refresh }) => onboarding.models(refresh) as never);
   server.handle(setupImportScanRpc, () => onboarding.importScan() as never);
   server.handle(setupApplyRpc, (input) => onboarding.apply(input as never));
+  // Providers from the app after setup (shared/provider-rpc.ts). The token in provider.install's
+  // input is never logged or returned.
+  server.handle(providerListRpc, () => onboarding.providerList() as never);
+  server.handle(providerInstallRpc, async (input) => (await onboarding.needProviders()).providerInstall(input) as never);
+  server.handle(providerInstallStatusRpc, async (input) => (await onboarding.needProviders()).providerInstallStatus(input) as never);
+  server.handle(providerRemoveRpc, async (input) => (await onboarding.needProviders()).providerRemove(input));
 
   // A bot refused a push to the user (per-bot 10-min limit) gets one system DM when its slot
   // reopens. Pending notices live in push-slots.jsonl (written by bot-dm), so a reload loses none.
@@ -291,6 +300,28 @@ export default function contribute(server: PluginServerContext) {
     onError: (error) => console.warn(`[bots] room handover: ${error instanceof Error ? error.message : String(error)}`),
   });
   const groupsFile = new GroupsFile(root);
+  // The "DinoBot bot" system-prompt section, one file per bot, given to each bot's OptChat session (server/bot-prompt.ts).
+  const botPrompts = new BotPrompts({
+    root,
+    settings,
+    herdr: () => onPath(process.env.PASEO_BOTS_HERDR ?? "herdr"),
+    seated: () => {
+      try {
+        return new Set(groupsFile.list().flatMap((group) => group.members));
+      } catch {
+        return new Set<string>();
+      }
+    },
+  });
+  const warn = (message: string) => console.warn(message);
+  botPrompts.refreshAll(warn);
+  // Once the section is in place, the old bot-dm block comes out of every profile's AGENTS.md (backed up first; idempotent).
+  try {
+    for (const { profile, backup } of stripProfiles(process.env.OPTCHAT_HOME ?? join(homedir(), ".optchat")))
+      console.warn(`[bots] removed the bot-dm block from ${profile}'s AGENTS.md (backup ${backup})`);
+  } catch (error) {
+    warn(`[bots] bot-dm block migration: ${error instanceof Error ? error.message : String(error)}`);
+  }
   const rooms = new RoomsService({
     groups: groupsFile,
     sessions: roomSessions,
@@ -312,7 +343,10 @@ export default function contribute(server: PluginServerContext) {
     }),
     // bot-room post: the caller's agent must be a chat of a bot (room sessions are labelled room=, never bot=).
     ownerOf: async (api, agentId) => (await service.listWithOwners(sdk(api))).ownerOf(agentId),
-    onChange: (groupId) => emit?.(ROOMS_EVENT, { rev: ++roomsRev, data: { groupId } }),
+    onChange: (groupId) => {
+      botPrompts.refreshAll(warn);
+      emit?.(ROOMS_EVENT, { rev: ++roomsRev, data: { groupId } });
+    },
     onError: () => {},
   });
   server.handle(roomsListRpc, (_input, { paseo }) => rooms.list(roomsSdk(paseo)));
@@ -420,6 +454,7 @@ export default function contribute(server: PluginServerContext) {
   });
   server.handle(roomsCreateRpc, ({ name, members, leads }) => {
     const group = createGroup(groupsFile, root, { id: groupIdFor(name), name, members, leads });
+    botPrompts.refreshAll(warn);
     emit?.(ROOMS_EVENT, { rev: ++roomsRev, data: { groupId: group.id } });
     return { groupId: group.id };
   });
@@ -437,7 +472,9 @@ export default function contribute(server: PluginServerContext) {
     const roomed = rooms.sessionOpen(request);
     if (request.provider !== OPTCHAT_PROVIDER) return roomed;
     const base = roomed ?? request;
-    return { ...base, env: { ...base.env, ...botEnv(settings), ...(await herdr.agentEnv()) } };
+    // A bot's main chat (not a room session) also gets its "DinoBot bot" prompt section.
+    const prompt = roomed ? null : botPrompts.envFor(request.cwd);
+    return { ...base, env: { ...base.env, ...botEnv(settings), ...(await herdr.agentEnv()), ...(prompt ?? {}) } };
   });
   on?.("agent.turn_started", (event) => {
     rooms.turnStarted(event.agent.id);

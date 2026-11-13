@@ -12,9 +12,11 @@ import {
 import { join } from 'node:path';
 import { COMPACTOR_ERRORS, Memory } from './memory.ts';
 import { withoutGlobalContext } from './context-files.ts';
-import { createCompressor } from './compactor.ts';
+import { createCompressor, type ModelChoice } from './compactor.ts';
 import { instructions, liveCompactor, loadConfig, lockProfile, profilePath, rememberProfile, type ProfileConfig } from './profiles.ts';
 import { sharedPrompt } from './prompts.ts';
+import { botSection } from './bot-prompt.ts';
+import { allowedSkills, skillPolicy } from './skills.ts';
 import { TurnPrefix } from './cache.ts';
 import { parseFailure } from './provider-error.ts';
 import { asUser, boundedMessage, buildContext, previousExchange, RUN_BOUNDARY, RunLog, textContent, typedText } from './transcript.ts';
@@ -54,6 +56,8 @@ export interface OpenProfile {
   name: string;
   dir: string;
   config: ProfileConfig;
+  /** The compactor model as config.json has it now. */
+  compactor: () => ModelChoice;
   memory: Memory;
   inbox: Inbox;
   usage: UsageLedger;
@@ -147,16 +151,16 @@ export class SessionController {
       const sessionId = ctx.sessionManager.getSessionId();
       const usage = new UsageLedger(dir);
       usage.backfill(ctx.sessionManager.getEntries(), sessionId);
+      const liveChoice = liveCompactor(dir, config);
       const compress = createCompressor(
         ctx.modelRegistry,
-        liveCompactor(dir, config),
+        liveChoice,
         message => {
           usage.compression(message, 'compactor', sessionId);
           this.status(ctx);
         },
         () => config.summaryAcceptBytes,
         this.turnPrefix,
-        () => sharedPrompt(config.previousExchange),
       );
       memory = new Memory(
         memoryDirectory(dir),
@@ -174,7 +178,7 @@ export class SessionController {
       if (recovered)
         ctx.ui.notify(`Recovered ${recovered} unanswered inputs into ${name}'s memory. Ask to continue them when ready.`, 'info');
       rememberProfile(name);
-      this.active = { name, dir, config, memory, inbox, usage, unlock };
+      this.active = { name, dir, config, compactor: liveChoice, memory, inbox, usage, unlock };
       this.fault = undefined;
       this.showTitle(ctx);
       this.status(ctx);
@@ -253,11 +257,21 @@ export class SessionController {
   beforeAgentStart(event: BeforeAgentStartEvent, ctx: ExtensionContext) {
     this.startRun(ctx);
     const a = this.required();
-    // Pi's own prompt sections (project AGENTS.md files, skills, cwd) stay; the profile's instructions go last.
+    // Pi's own prompt sections (project AGENTS.md files, the bot's skills, cwd) stay; the profile's instructions go last.
     // The user's global AGENTS.md files are for interactive sessions, not bots, so they are dropped.
     event.systemPromptOptions.contextFiles = withoutGlobalContext(event.systemPromptOptions.contextFiles, getAgentDir());
-    event.systemPromptOptions.customPrompt = sharedPrompt(a.config.previousExchange);
-    event.systemPromptOptions.sections.instructions = `${instructions(a.dir)}\n\n${IMPORT_GUIDANCE}`;
+    // Likewise the user's global skills, except those the profile lists; the profile may also hide any skill (skills.ts).
+    event.systemPromptOptions.skills = allowedSkills(event.systemPromptOptions.skills, skillPolicy(a.dir));
+    // The compaction rules only serve compactions that send this prompt: those on the turn's own provider and model.
+    const c = a.compactor();
+    const compactions = !ctx.model || (c.provider === ctx.model.provider && c.model === ctx.model.id);
+    event.systemPromptOptions.customPrompt = sharedPrompt(a.config.previousExchange, process.env, compactions);
+    // A bot's host rules (bots plugin), before its own AGENTS.md, which changes more often and so stays last.
+    const host = botSection();
+    delete event.systemPromptOptions.sections.instructions;
+    if (host) event.systemPromptOptions.sections.bot = host;
+    // The import guidance only matters once the memory holds imported history.
+    event.systemPromptOptions.sections.instructions = a.memory.hasImported() ? `${instructions(a.dir)}\n\n${IMPORT_GUIDANCE}` : instructions(a.dir);
     this.prompt = event.systemPrompt;
   }
 
