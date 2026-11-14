@@ -5846,7 +5846,7 @@
     },
     {
       "name": "react-native-reanimated",
-      "version": "4.3.1",
+      "version": "4.3.4",
       "licence": "MIT",
       "copyright": ["Copyright (c) 2016 Software Mansion <swmansion.com>"],
       "textId": "fae65a19b9"

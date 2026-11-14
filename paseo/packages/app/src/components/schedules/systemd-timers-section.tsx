@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ALL_HOSTS_OPTION_ID } from "@/components/hosts/host-picker";
+import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useFetchQuery } from "@/data/query";
 import { useTimeAgo } from "@/hooks/use-time-ago";
@@ -23,6 +24,8 @@ import {
   setSystemdTimerPaused,
   timerBadge,
   timerMeta,
+  timerTitle,
+  visibleTimers,
   type SystemdTimer,
   type TimersHost,
 } from "@/schedules/systemd-timers";
@@ -69,28 +72,47 @@ export function useSystemdTimers(selectedHost: string): SystemdTimer[] {
   );
 }
 
-/** Read-only card of systemd timers, under the Paseo schedules. */
+/** Card of systemd timers, under the Paseo schedules. System (vendor/distro) timers are hidden
+ * until "Show all" in the header. */
 export function SystemdTimersSection(props: {
   timers: SystemdTimer[];
   showHost: boolean;
 }): ReactElement | null {
   const { timers, showHost } = props;
+  const [showAll, setShowAll] = useState(false);
+  const toggleShowAll = useCallback(() => setShowAll((value) => !value), []);
+  const { shown, system } = visibleTimers(timers, showAll);
   if (timers.length === 0) return null;
   return (
     <View style={styles.section} testID="systemd-timers">
       <View style={settingsStyles.sectionHeader}>
         <Text style={settingsStyles.sectionHeaderTitle}>Systemd timers · no model</Text>
+        {system > 0 ? (
+          <Button
+            variant="ghost"
+            size="xs"
+            textStyle={settingsStyles.sectionHeaderLinkText}
+            style={settingsStyles.sectionHeaderLink}
+            onPress={toggleShowAll}
+            accessibilityLabel={showAll ? "Hide system timers" : "Show all timers, system ones too"}
+            testID="systemd-timers-show-all"
+          >
+            {showAll ? "Hide system" : `Show all (+${system} system)`}
+          </Button>
+        ) : null}
       </View>
-      <View style={settingsStyles.card}>
-        {timers.map((timer, index) => (
-          <TimerRow
-            key={`${timer.serverId}:${timer.unit}`}
-            timer={timer}
-            isFirst={index === 0}
-            showHost={showHost}
-          />
-        ))}
-      </View>
+      {shown.length > 0 ? (
+        <View style={settingsStyles.card}>
+          {shown.map((timer, index) => (
+            <TimerRow
+              key={`${timer.serverId}:${timer.unit}`}
+              timer={timer}
+              isFirst={index === 0}
+              showHost={showHost}
+            />
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -98,8 +120,15 @@ export function SystemdTimersSection(props: {
 function TimerRow(props: { timer: SystemdTimer; isFirst: boolean; showHost: boolean }) {
   const { timer, isFirst, showHost } = props;
   const lastRunAgo = useTimeAgo(timer.lastRunAt ? new Date(timer.lastRunAt) : null);
-  const meta = timerMeta(timer, { lastRunAgo, nextRun: formatNextRun(timer.nextRunAt), showHost });
+  const meta = timerMeta(timer, {
+    lastRunAgo,
+    nextRun: formatNextRun(timer.nextRunAt),
+    showHost,
+  });
   const badge = timerBadge(timer);
+  const { title, subtitle: unitLine } = timerTitle(timer);
+  // A system timer says so under its title (they only show after "Show all").
+  const subtitle = [unitLine, timer.system ? "system timer" : null].filter(Boolean).join(" · ");
   const queryClient = useQueryClient();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -122,12 +151,16 @@ function TimerRow(props: { timer: SystemdTimer; isFirst: boolean; showHost: bool
       testID={`systemd-timer-${timer.name}`}
     >
       <View style={styles.text}>
-        <Text style={settingsStyles.rowTitle} numberOfLines={1}>
-          {timer.name}
+        <Text
+          style={settingsStyles.rowTitle}
+          numberOfLines={1}
+          testID={`systemd-timer-title-${timer.name}`}
+        >
+          {title}
         </Text>
-        {timer.description ? (
+        {subtitle ? (
           <Text style={styles.description} numberOfLines={1}>
-            {timer.description}
+            {subtitle}
           </Text>
         ) : null}
         <Text style={settingsStyles.rowHint} numberOfLines={2}>

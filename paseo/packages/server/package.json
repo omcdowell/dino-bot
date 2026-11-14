@@ -142,7 +142,7 @@
     "qrcode": "^1.5.4",
     "rotating-file-stream": "^3.2.9",
     "semver": "^7.8.5",
-    "sherpa-onnx-node": "1.12.28",
+    "sherpa-onnx-node": "2.0.1",
     "strip-ansi": "^7.1.2",
     "tree-kill": "^1.2.2",
     "typescript": "^5.9.3",

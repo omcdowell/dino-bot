@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 
 import type { StreamingTranscriptionSession } from "../../../speech-provider.js";
 import { pcm16lePeakAbs, pcm16leToFloat32 } from "../../../audio.js";
+import { decodeWithEmptyRetry, sherpaResultText } from "./parakeet-decode.js";
 import { SherpaOfflineRecognizerEngine } from "./sherpa-offline-recognizer.js";
 
 export class SherpaParakeetRealtimeTranscriptionSession
@@ -141,23 +142,9 @@ export class SherpaParakeetRealtimeTranscriptionSession
     const gain =
       peakFloat > 0 && peakFloat < targetPeak ? Math.min(maxGain, targetPeak / peakFloat) : 1;
 
-    const stream = this.engine.createStream();
-    try {
-      const floatSamples = pcm16leToFloat32(this.pcm16, gain);
-      this.engine.acceptWaveform(stream, this.engine.sampleRate, floatSamples);
-      this.engine.decode(stream);
-      const result = this.engine.getResult(stream);
-      return String(
-        (typeof result === "object" && result && "text" in result ? result.text : undefined) ??
-          result ??
-          "",
-      ).trim();
-    } finally {
-      try {
-        stream.free?.();
-      } catch {
-        // ignore
-      }
-    }
+    const floatSamples = pcm16leToFloat32(this.pcm16, gain);
+    return sherpaResultText(
+      decodeWithEmptyRetry(this.engine, this.engine.sampleRate, floatSamples),
+    );
   }
 }

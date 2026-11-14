@@ -36,7 +36,7 @@ is up (20 minute limit).
 
 ## Commands
 
-`dinobot pair [--link] | status | doctor [--json] | update [--check] [--tarball F|--url U] | start | stop | uninstall [--purge] | import-status | herdr-gc | claude-code install`
+`dinobot pair [--link] | status | doctor [--json] | update [--check] [--tarball F|--url U] | start | stop | uninstall [--purge [--yes]] | import-status | herdr-gc | claude-code install`
 
 On Windows (WSL 2, [untested](windows.md)) also `wsl-autostart [--off]`.
 

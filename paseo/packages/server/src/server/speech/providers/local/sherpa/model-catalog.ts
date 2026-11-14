@@ -9,6 +9,11 @@ interface SherpaOnnxCatalogEntry {
   archiveUrl: string;
   extractedDir: string;
   requiredFiles: string[];
+  /**
+   * Single files fetched next to the extracted archive (e.g. a lexicon published
+   * separately). Missing ones are fetched without re-downloading the archive.
+   */
+  extraFiles?: ReadonlyArray<{ file: string; url: string }>;
   description: string;
   defaultFor?: DefaultModelRole;
 }
@@ -37,7 +42,15 @@ export const SHERPA_ONNX_MODEL_CATALOG = {
     archiveUrl:
       "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-en-v0_19.tar.bz2",
     extractedDir: "kokoro-en-v0_19",
-    requiredFiles: ["model.onnx", "voices.bin", "tokens.txt", "espeak-ng-data"],
+    // sherpa-onnx >= 2.0 dropped espeak-ng (k2-fsa/sherpa-onnx#3731): the archive's
+    // espeak-ng-data is ignored and English text goes through this lexicon instead.
+    requiredFiles: ["model.onnx", "voices.bin", "tokens.txt"],
+    extraFiles: [
+      {
+        file: "lexicon-en-us.txt",
+        url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/lexicon-en-us.txt",
+      },
+    ],
     description: "Kokoro TTS (higher quality; larger).",
     defaultFor: "tts",
   },

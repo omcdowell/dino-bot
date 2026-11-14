@@ -112,11 +112,12 @@ Ubuntu's address changes at every restart, and DinoBot would have to listen outs
 ## Removing DinoBot
 
 ```
-~/.dinobot/bin/dinobot wsl-autostart --off
 ~/.dinobot/bin/dinobot uninstall --purge
 ```
 
-What `uninstall` leaves on purpose is listed in [Linux: Uninstall](linux.md#uninstall). To remove
+This deletes DinoBot, your sign-ins, bots and memories (type `DELETE` when asked) and undoes
+`wsl-autostart`. Plain `uninstall` keeps your bots and memories; see
+[Linux: Uninstall](linux.md#uninstall) for exactly what each form removes. To remove
 Ubuntu completely, run
 `wsl --unregister Ubuntu-24.04` in PowerShell. This deletes everything inside it.
 

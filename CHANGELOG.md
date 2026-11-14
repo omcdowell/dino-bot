@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.1.7
+
+### Uninstall (changed, read this before you run it)
+
+- **`dinobot uninstall` now also removes your sign-ins.** It stops and removes the services and
+  deletes all of `~/.dinobot`, including `pi/auth.json` (what `--purge` did before). Your bots and
+  their memories (`~/bots`, `~/.optchat`, bot rooms) are kept, and it prints the command to
+  delete them by hand.
+- **`dinobot uninstall --purge` now deletes your bots and their memories too.** It is a full wipe:
+  `~/.dinobot`, `~/bots`, `~/.optchat`, bot rooms, worker messages and herdr's state. It lists
+  every path with its size and asks you to type `DELETE` (`--yes` skips the question; with no
+  terminal and no `--yes` it refuses). It never deletes your home folder or anything above it,
+  and never follows symlinks. Your own `~/.pi` and `~/.claude` are not touched.
+- Both modes also remove the Windows start-up entry on WSL. `--purge` turns systemd linger off
+  only if DinoBot's setup turned it on.
+
+### App
+
+- **Sign-in page.** Settings → Providers shows two engines: the pi card (each sign-in, ready or
+  not, API keys shown only as prefix…last 4; sign in, sign in again, sign out) and the Claude
+  Code card (login, plan, version, which bots use it; log in and log out).
+- **Only OptChat providers.** On a DinoBot computer Paseo's own agent providers are turned off
+  and the app shows only Bot sign-ins there. A provider a schedule still uses is left on.
+- **Schedules: systemd timers work.** The timers section lists your user timers (with their
+  description as the title) and can pause or resume one. System timers hide behind
+  "Show all (+N system)".
+- **Crash fix.** react-native-reanimated 4.3.4 fixes an iOS crash seen in TestFlight builds.
+- **Folder links open as folders.** Tapping a `~/` folder link (`~/bots`) opens it in Files, or
+  lists the folder in the tab, instead of "Requested path is not a file".
+
+### Workers
+
+- **Workers use the bots' pi sign-ins.** A pi worker gets the same pi folder as the bots, so a
+  sign-in on the Providers page reaches workers too.
+- **Claude Code workers.** `launch.sh --engine cc` starts a worker in Claude Code with a slim
+  tool set and the workers' skill shortlist. The worker's budget is advisory, as for pi: the
+  status line shows what it spent (and the budget, if the brief gives one); nothing blocks it.
+
+### Voice
+
+- **sherpa-onnx 2.0.1.** Kokoro reads with its lexicon (no espeak-ng); Parakeet retries once
+  when it returns nothing for clear speech.
+
 ## v0.1.6
 
 ### Bots

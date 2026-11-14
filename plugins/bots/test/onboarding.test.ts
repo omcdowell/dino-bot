@@ -125,3 +125,57 @@ export function createOnboarding() {
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("engines RPC names are valid plugin method names, and no output has a key or token field", async () => {
+  const rpcs = await import("../shared/engines-rpc");
+  const names = (Object.values(rpcs) as unknown[])
+    .filter((r): r is { name: string; output: unknown } => Boolean(r && typeof r === "object" && "name" in r))
+    .map((r) => {
+      assert.doesNotMatch(JSON.stringify(r.output), /"(key|token|accessToken|refreshToken)"/, r.name);
+      return r.name;
+    });
+  for (const n of names) assert.match(n, /^[a-z][a-z0-9._-]*$/);
+  assert.deepEqual(names.sort(), ["engines.claude-logout", "engines.pi-sign-out", "engines.status"]);
+});
+
+test("engines.*: not available on a plain Paseo host or an older installer; passed through to DinoBot's installer otherwise", async () => {
+  const home = mkdtempSync(join(tmpdir(), "onb-eng-"));
+  try {
+    const plain = new Onboarding(parseSettings({}), join(home, "bots"), { HOME: home });
+    assert.deepEqual(await plain.engines(), { available: false, pi: null, claudeCode: null, error: null });
+    await assert.rejects(plain.needEngines(), /DINOBOT_HOME/);
+
+    const lib = (name: string) => join(home, name, "app", "installer", "lib");
+    mkdirSync(lib("old"), { recursive: true });
+    writeFileSync(join(lib("old"), "phone-signin.mjs"), "export function createOnboarding() { return { providerList: async () => ({ packages: [], providers: [] }) }; }\n");
+    const old = new Onboarding(parseSettings({}), join(home, "bots"), { HOME: home, DINOBOT_HOME: join(home, "old") });
+    assert.equal((await old.engines()).available, false);
+
+    mkdirSync(lib("new"), { recursive: true });
+    writeFileSync(
+      join(lib("new"), "phone-signin.mjs"),
+      `export function createOnboarding() {
+  let n = 0;
+  return {
+    enginesStatus: async () => {
+      if (n++ === 1) throw new Error("pi broke");
+      return { pi: { ready: true, readyCount: 1, isDefault: true, signins: [], packages: [] }, claudeCode: { installed: false } };
+    },
+    piSignOut: ({ provider }) => ({ removed: provider }),
+    claudeLogout: async () => ({ ok: true }),
+  };
+}
+`,
+    );
+    const ob = new Onboarding(parseSettings({}), join(home, "bots"), { HOME: home, DINOBOT_HOME: join(home, "new") });
+    const r = await ob.engines();
+    assert.equal(r.available, true);
+    assert.equal((r.pi as unknown as { ready: boolean }).ready, true);
+    assert.deepEqual(await ob.engines(), { available: true, pi: null, claudeCode: null, error: "pi broke" });
+    const h = await ob.needEngines();
+    assert.deepEqual(h.piSignOut({ provider: "openrouter" }), { removed: "openrouter" });
+    assert.deepEqual(await h.claudeLogout(), { ok: true });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});

@@ -39,6 +39,7 @@ import { setupColumnStyle } from "@/constants/layout";
 import { DEVICE_COPY } from "@/constants/device-copy";
 import { providerInviteFromIncoming } from "@/hosts/pair-deep-link";
 import { providerLinkRoute } from "@/onboarding/provider-model";
+import { CLAUDE_CODE_OPTION_ID } from "@/onboarding/engines-model";
 
 const ThemedTextInput = withUnistyles(EditingTextInput, (theme: Theme) => ({
   placeholderTextColor: theme.colors.foregroundMuted,
@@ -54,6 +55,14 @@ interface Options {
   signedIn: string[];
   error: string | null;
 }
+
+/** Settings › Providers › Claude Code › Log in: Claude Code's own login, run by the host. */
+const CLAUDE_CODE_OPTION: SignInOption = {
+  id: CLAUDE_CODE_OPTION_ID,
+  provider: "claude-code",
+  label: "Claude Code",
+  method: "paste-code",
+};
 
 /** Survives the screen being mounted again (appearance change); see signin-session-store.ts. */
 const signInMemory = createSignInMemory<Options>();
@@ -83,12 +92,19 @@ async function rpc<T>(serverId: string, method: string, input: unknown): Promise
 export default function SetupSignInScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const params = useLocalSearchParams<{ serverId?: string; from?: string; option?: string }>();
+  const params = useLocalSearchParams<{
+    serverId?: string;
+    from?: string;
+    option?: string;
+    add?: string;
+  }>();
   const serverId = typeof params.serverId === "string" ? params.serverId : "";
   // Opened from Settings → Providers (or after installing a provider from a link), not onboarding:
   // done goes back there, and `option` starts that sign-in at once.
   const fromSettings = params.from === "settings";
   const optionParam = typeof params.option === "string" ? params.option : "";
+  // Settings › Providers › "Add a provider package": only the install-from-a-link card.
+  const packageOnly = fromSettings && params.add === "package";
   // Kept outside the screen so a remount (appearance change) keeps the list and a sign-in going.
   const memory = useSyncExternalStore(
     signInMemory.subscribe,
@@ -215,7 +231,11 @@ export default function SetupSignInScreen() {
   const autoStarted = useRef(false);
   useEffect(() => {
     if (!optionParam || autoStarted.current || status || !options) return;
-    const option = options.options.find((o) => o.id === optionParam);
+    // The Claude Code login is not one of pi's options: the host runs `claude auth login`.
+    const option =
+      optionParam === CLAUDE_CODE_OPTION_ID
+        ? CLAUDE_CODE_OPTION
+        : options.options.find((o) => o.id === optionParam);
     autoStarted.current = true;
     if (option) choose(option);
     else setActionError("That sign-in is not offered by this computer any more. Pick one below.");
@@ -258,14 +278,27 @@ export default function SetupSignInScreen() {
 
   return (
     <View style={styles.container} testID="setup-signin-screen">
-      <BackHeader title={fromSettings ? "Add a sign-in" : "Sign in for your bots"} onBack={back} />
+      <BackHeader
+        title={
+          packageOnly
+            ? "Add a provider package"
+            : optionParam === CLAUDE_CODE_OPTION_ID
+              ? "Log in to Claude Code"
+              : fromSettings
+                ? "Add a sign-in"
+                : "Sign in for your bots"
+        }
+        onBack={back}
+      />
       <ScrollView contentContainerStyle={contentStyle} keyboardShouldPersistTaps="handled">
         {actionError ? (
           <View style={styles.card} testID="setup-signin-action-error">
             <Text style={styles.error}>{actionError}</Text>
           </View>
         ) : null}
-        {status ? (
+        {packageOnly && serverId ? (
+          <InstallFromLink serverId={serverId} />
+        ) : status ? (
           <View style={styles.card} testID="setup-signin-session">
             <Text style={styles.title}>{status.label}</Text>
             <SessionBody

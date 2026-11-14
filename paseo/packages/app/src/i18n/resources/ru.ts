@@ -1947,6 +1947,8 @@ export const ru: TranslationResources = {
       tooLargeToDisplay: "Этот файл слишком велик для отображения",
       failedToLoad: "Не удалось загрузить файл",
       failedToLoadPreview: "Не удалось загрузить предварительный просмотр файла.",
+      failedToLoadFolder: "Не удалось загрузить папку",
+      folderEmpty: "Эта папка пуста",
       editor: {
         fileSize: "Размер файла {{size}}",
         lines: "Строк: {{count}}",

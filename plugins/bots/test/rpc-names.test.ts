@@ -9,12 +9,13 @@ import * as workersRpc from "../shared/workers-rpc";
 import * as roomsRpc from "../shared/rooms/rpc";
 import * as manageRpc from "../shared/manage-rpc";
 import * as avatarRpc from "../shared/avatar-rpc";
+import * as timersRpc from "../shared/timers-rpc";
 
 // The daemon refuses to load a plugin whose RPC method breaks this rule (plugin-process.ts).
 const METHOD_RE = /^[a-z][a-z0-9._-]*$/;
 
 test("every RPC method name is one the daemon accepts", () => {
-  const contracts = [dmRpc, homeRpc, pushRpc, quotaRpc, rpc, workersRpc, roomsRpc, manageRpc, avatarRpc].flatMap((module) =>
+  const contracts = [dmRpc, homeRpc, pushRpc, quotaRpc, rpc, workersRpc, roomsRpc, manageRpc, avatarRpc, timersRpc].flatMap((module) =>
     Object.values(module).filter(
       (value): value is { name: string } =>
         typeof value === "object" && value !== null && "name" in value && "input" in value,

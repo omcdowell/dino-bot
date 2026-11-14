@@ -9,6 +9,8 @@ description = "Known test fixtures, not secrets"
 regexes = [
   # optchat/test/room-mode.test.ts: a fake OpenAI key the room-mode redaction test must catch
   '''sk-proj-0123456789abcdefghij''',
+  # test/engines.test.mjs: a made-up OpenRouter key the Providers page masks to prefix…last 4
+  '''sk-or-v1-0123456789abcdef0123456789abcdef4f2a''',
   # paseo/packages/app/src/utils/direct-e2ee.test.ts: base64 of "daemon-public-key-for-tests-0123456"
   '''ZGFlbW9uLXB1YmxpYy1rZXktZm9yLXRlc3RzLTAxMjM0NTY=''',
   # paseo/packages/relay/src/crypto.test.ts (upstream): published X25519 low-order points

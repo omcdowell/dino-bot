@@ -5,6 +5,8 @@ import {
   setSystemdTimerPaused,
   timerBadge,
   timerMeta,
+  timerTitle,
+  visibleTimers,
   TIMERS_METHOD,
   TIMERS_PLUGIN_ID,
   TIMERS_SET_METHOD,
@@ -46,8 +48,9 @@ describe("systemd timers", () => {
         },
       },
     ]);
-    expect(calls).toEqual([[TIMERS_PLUGIN_ID, TIMERS_METHOD, {}]]);
-    expect(timers).toEqual([{ ...row(), serverId: "box", serverName: "box" }]);
+    // includeAll: system timers come too; the card hides them until "Show all".
+    expect(calls).toEqual([[TIMERS_PLUGIN_ID, TIMERS_METHOD, { includeAll: true }]]);
+    expect(timers).toEqual([{ ...row(), system: false, serverId: "box", serverName: "box" }]);
   });
 
   it("a host without the plugin (or failing) contributes nothing, others still show", async () => {
@@ -121,5 +124,51 @@ describe("systemd timers", () => {
     await expect(setSystemdTimerPaused(refused, "x.timer", true)).rejects.toThrow(
       "not one of our timers",
     );
+  });
+
+  it("system flag: only a literal true counts (an older plugin without the field = yours)", () => {
+    expect(timer({ system: true }).system).toBe(true);
+    expect(timer().system).toBe(false);
+    expect(timer({ system: "true" }).system).toBe(false);
+  });
+
+  it("Show all: system timers hidden by default, listed in order once on", () => {
+    const timers = parseTimers(
+      {
+        timers: [
+          row({ unit: "a.timer", name: "a" }),
+          row({ unit: "snap.x.timer", name: "snap.x", system: true }),
+          row({ unit: "b.timer", name: "b" }),
+          row({
+            unit: "ubuntu-insights-upload.timer",
+            name: "ubuntu-insights-upload",
+            system: true,
+          }),
+        ],
+      },
+      HOST,
+    );
+    const mine = visibleTimers(timers, false);
+    expect(mine.shown.map((t) => t.name)).toEqual(["a", "b"]);
+    expect([mine.hidden, mine.system]).toEqual([2, 2]);
+    const all = visibleTimers(timers, true);
+    expect(all.shown.map((t) => t.name)).toEqual(["a", "snap.x", "b", "ubuntu-insights-upload"]);
+    expect([all.hidden, all.system]).toEqual([0, 2]);
+    expect(visibleTimers([], false)).toEqual({ shown: [], hidden: 0, system: 0 });
+  });
+
+  it("title is the Description= line when present, the unit name otherwise", () => {
+    expect(timerTitle(timer())).toEqual({
+      title: "FC daily standup, 06:00 Asia/Singapore",
+      subtitle: "fc-daily-standup",
+    });
+    expect(timerTitle(timer({ description: null }))).toEqual({
+      title: "fc-daily-standup",
+      subtitle: null,
+    });
+    expect(timerTitle(timer({ description: "  " }))).toEqual({
+      title: "fc-daily-standup",
+      subtitle: null,
+    });
   });
 });

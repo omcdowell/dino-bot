@@ -22,7 +22,7 @@ import {
   type AcpProviderCatalogItem,
 } from "@/hooks/use-acp-provider-catalog";
 import { ProviderCatalogList } from "@/components/provider-catalog-list";
-import { BotProvidersSection } from "@/screens/settings/bot-providers-section";
+import { EnginesSection } from "@/screens/settings/engines-section";
 import { useProviderIcon } from "@/components/provider-icons";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Switch } from "@/components/ui/switch";
@@ -335,6 +335,11 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
   const [removingProviderId, setRemovingProviderId] = useState<string | null>(null);
   const removingProviderIdRef = useRef<string | null>(null);
   const [installingProviderId, setInstallingProviderId] = useState<string | null>(null);
+  // DinoBot host (bots plugin answers): Bot sign-ins only; Paseo's own provider list and catalogue
+  // stay hidden (providers redesign, stage 0: the daemon runs OptChat only). null = not known yet,
+  // also hidden so a DinoBot host never flashes them. Other hosts: upstream behaviour.
+  const [isDinoBotHost, setIsDinoBotHost] = useState<boolean | null>(null);
+  const showPaseoProviders = isDinoBotHost === false;
 
   const providerDefinitions = useMemo(() => buildProviderDefinitions(entries), [entries]);
   const hasServer = serverId.length > 0;
@@ -416,50 +421,54 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
 
   return (
     <>
-      {/* DinoBot hosts only: bot sign-ins and provider packages (hidden elsewhere / on old daemons). */}
-      {hasServer && isConnected ? <BotProvidersSection serverId={serverId} /> : null}
-      <SettingsSection
-        title={t("settings.providers.title")}
-        testID="host-page-providers-card"
-        style={styles.sectionSpacing}
-      >
-        {!hasServer || !isConnected ? (
-          <View style={[settingsStyles.card, styles.emptyCard]}>
-            <Text style={styles.emptyText}>{t("settings.providers.unavailable")}</Text>
-          </View>
-        ) : null}
-        {hasServer && isConnected && isLoading ? (
-          <View style={[settingsStyles.card, styles.emptyCard]}>
-            <Text style={styles.emptyText}>{t("settings.providers.loading")}</Text>
-          </View>
-        ) : null}
-        {hasServer && isConnected && !isLoading && providerDefinitions.length > 0 ? (
-          <View style={settingsStyles.card}>
-            {providerDefinitions.map((def, index) => {
-              const entry = entries?.find((candidate) => candidate.provider === def.id);
-              if (!entry) return null;
-              return (
-                <ProviderRow
-                  key={def.id}
-                  serverId={serverId}
-                  def={def}
-                  entry={entry}
-                  enabled={entry.enabled ?? true}
-                  isToggling={pendingProviderId === def.id}
-                  isRemoving={removingProviderId === def.id}
-                  canRemove={supportsProviderRemoval && entry.source === "custom"}
-                  isFirst={index === 0}
-                  onPress={handleOpenProviderSettings}
-                  onToggleEnabled={handleToggleEnabled}
-                  onRemove={handleRemoveProvider}
-                />
-              );
-            })}
-          </View>
-        ) : null}
-      </SettingsSection>
-
+      {/* DinoBot hosts only: the pi and Claude Code cards (older daemons: Bot sign-ins; hidden elsewhere). */}
       {hasServer && isConnected ? (
+        <EnginesSection serverId={serverId} onAvailabilityChange={setIsDinoBotHost} />
+      ) : null}
+      {showPaseoProviders || !hasServer || !isConnected ? (
+        <SettingsSection
+          title={t("settings.providers.title")}
+          testID="host-page-providers-card"
+          style={styles.sectionSpacing}
+        >
+          {!hasServer || !isConnected ? (
+            <View style={[settingsStyles.card, styles.emptyCard]}>
+              <Text style={styles.emptyText}>{t("settings.providers.unavailable")}</Text>
+            </View>
+          ) : null}
+          {hasServer && isConnected && isLoading ? (
+            <View style={[settingsStyles.card, styles.emptyCard]}>
+              <Text style={styles.emptyText}>{t("settings.providers.loading")}</Text>
+            </View>
+          ) : null}
+          {hasServer && isConnected && !isLoading && providerDefinitions.length > 0 ? (
+            <View style={settingsStyles.card}>
+              {providerDefinitions.map((def, index) => {
+                const entry = entries?.find((candidate) => candidate.provider === def.id);
+                if (!entry) return null;
+                return (
+                  <ProviderRow
+                    key={def.id}
+                    serverId={serverId}
+                    def={def}
+                    entry={entry}
+                    enabled={entry.enabled ?? true}
+                    isToggling={pendingProviderId === def.id}
+                    isRemoving={removingProviderId === def.id}
+                    canRemove={supportsProviderRemoval && entry.source === "custom"}
+                    isFirst={index === 0}
+                    onPress={handleOpenProviderSettings}
+                    onToggleEnabled={handleToggleEnabled}
+                    onRemove={handleRemoveProvider}
+                  />
+                );
+              })}
+            </View>
+          ) : null}
+        </SettingsSection>
+      ) : null}
+
+      {hasServer && isConnected && showPaseoProviders ? (
         <SettingsSection
           title={t("settings.providers.addProvider")}
           testID="host-page-add-provider-card"

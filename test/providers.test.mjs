@@ -2,11 +2,11 @@
 // node --test test/providers.test.mjs  (temp dirs under ./.test-tmp-prov, never /tmp)
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { addProvider, gitTokenEnv, listProviders, parseProviderLink, parseSource, providerLink, readTokens, removeProvider, updateProviders } from "../lib/providers.mjs";
-import { botOnlyExtensionArgs, botSkillArgs, LOAD_USER_AGENTS_SKILLS, refreshOptchatCommand, writeDaemonConfig, writePiSetup } from "../lib/config.mjs";
+import { applyProviderDefaults, botOnlyExtensionArgs, scheduledProviders, botSkillArgs, DISABLED_PASEO_PROVIDERS, LOAD_USER_AGENTS_SKILLS, refreshOptchatCommand, writeDaemonConfig, writePiSetup } from "../lib/config.mjs";
 import { defaultOption, signIn } from "../lib/signin.mjs";
 import { layout, LINK_SCHEME, Prompter } from "../lib/util.mjs";
 
@@ -170,6 +170,96 @@ describe("pi dir contents", () => {
   });
 });
 
+describe("stage 0: Paseo's own providers off, only OptChat", () => {
+  const OFF = ["claude", "codex", "copilot", "opencode", "omp", "pi", "antigravity", "muse"];
+  it("a new config has every built-in Paseo provider disabled and OptChat on", () => {
+    const L = layout({ HOME: tmp() });
+    const cfg = JSON.parse(readFileSync(writeDaemonConfig(L, { mainModel: null }), "utf8"));
+    for (const id of OFF) assert.equal(cfg.agents.providers[id]?.enabled, false, id);
+    assert.deepEqual([...DISABLED_PASEO_PROVIDERS].sort(), [...OFF].sort());
+    assert.notEqual(cfg.agents.providers.optchat.enabled, false);
+    assert.equal(cfg.agents.providers.optchat.extends, "pi");
+  });
+  it("an existing config: providers switched off on the next write, everything else kept", () => {
+    const L = layout({ HOME: tmp() });
+    mkdirSync(L.paseoHome, { recursive: true });
+    const skills = join(L.app, "bots", "skills");
+    mkdirSync(join(skills, "workers"), { recursive: true });
+    const existing = {
+      version: 1,
+      daemon: { listen: "127.0.0.1:6767", terminalProfiles: [{ id: "codex", name: "Codex", command: "codex", args: [] }], auth: { password: "x" } },
+      plugins: { apns: { source: "directory", path: "/x/apns", enabled: true } },
+      agents: {
+        providers: {
+          codex: { enabled: true, command: ["codex", "app-server"] },
+          claude: { env: { A: "1" } },
+          kimi: { extends: "acp", label: "Kimi", command: ["kimi", "acp"] },
+          zai: { extends: "claude", label: "Z.AI" },
+          mypi: { extends: "pi", label: "My pi" },
+          muse: { enabled: false },
+          someplugin: { order: 3 },
+          optchat: { extends: "pi", label: "OptChat", command: ["old"], options: { rpcTimeoutMs: 1 }, models: [{ id: "m", label: "M" }] },
+        },
+        metadataGeneration: { providers: [{ provider: "optchat", model: "anthropic/claude-sonnet-5-5" }] },
+      },
+    };
+    writeFileSync(join(L.paseoHome, "config.json"), JSON.stringify(existing));
+    const cfg = JSON.parse(readFileSync(writeDaemonConfig(L, { mainModel: null }), "utf8"));
+    const p = cfg.agents.providers;
+    for (const id of OFF) assert.equal(p[id].enabled, false, id);
+    for (const id of ["kimi", "zai", "mypi"]) assert.equal(p[id].enabled, false, `custom ${id}`);
+    assert.deepEqual(p.codex.command, ["codex", "app-server"], "settings of a disabled provider kept");
+    assert.deepEqual(p.claude.env, { A: "1" });
+    assert.deepEqual(p.kimi.command, ["kimi", "acp"]);
+    assert.deepEqual(p.muse, { enabled: false });
+    assert.deepEqual(p.someplugin, { order: 3 }, "plugin overrides (no extends) untouched");
+    assert.notEqual(p.optchat.enabled, false);
+    assert.deepEqual(p.optchat.command.slice(-2), ["--skill", skills]);
+    assert.deepEqual(p.optchat.models, [{ id: "m", label: "M" }]);
+    assert.deepEqual(cfg.agents.metadataGeneration, existing.agents.metadataGeneration);
+    assert.deepEqual(cfg.daemon.terminalProfiles, existing.daemon.terminalProfiles, "terminal agents stay");
+    assert.equal(cfg.daemon.auth.password, "x");
+    assert.deepEqual(cfg.plugins.apns, existing.plugins.apns);
+  });
+  it("dinobot update (refreshOptchatCommand) switches them off too, and is idempotent", () => {
+    const L = layout({ HOME: tmp() });
+    const path = writeDaemonConfig(L, { mainModel: "prov/m", thinking: "low" });
+    const cfg = JSON.parse(readFileSync(path, "utf8"));
+    cfg.agents.providers.codex = { enabled: true };
+    delete cfg.agents.providers.pi;
+    writeFileSync(path, JSON.stringify(cfg));
+    assert.equal(refreshOptchatCommand(L), path);
+    const once = JSON.parse(readFileSync(path, "utf8"));
+    assert.equal(once.agents.providers.codex.enabled, false);
+    assert.equal(once.agents.providers.pi.enabled, false);
+    assert.deepEqual(once.daemon.agentProfiles, cfg.daemon.agentProfiles);
+    refreshOptchatCommand(L);
+    assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), once);
+  });
+  it("a provider a Paseo schedule still runs on is left as it is (no broken scheduled runs)", () => {
+    const L = layout({ HOME: tmp() });
+    const dir = join(L.paseoHome, "schedules");
+    mkdirSync(dir, { recursive: true });
+    const schedule = (id, provider, status) => ({ id, status, target: { type: "new-agent", config: { provider, cwd: "/x" } } });
+    writeFileSync(join(dir, "a.json"), JSON.stringify(schedule("a", "pi", "active")));
+    writeFileSync(join(dir, "b.json"), JSON.stringify(schedule("b", "codex", "paused")));
+    writeFileSync(join(dir, "c.json"), JSON.stringify(schedule("c", "claude", "completed")));
+    writeFileSync(join(dir, "d.json"), JSON.stringify({ id: "d", status: "active", target: { type: "agent", agentId: "x" } }));
+    writeFileSync(join(dir, "junk.json"), "{");
+    assert.deepEqual([...scheduledProviders(L.paseoHome)].sort(), ["codex", "pi"]);
+    const cfg = JSON.parse(readFileSync(writeDaemonConfig(L, { mainModel: null }), "utf8"));
+    assert.equal(cfg.agents.providers.pi?.enabled, undefined, "pi: an active schedule uses it");
+    assert.equal(cfg.agents.providers.codex?.enabled, undefined, "codex: a paused schedule may be resumed");
+    assert.equal(cfg.agents.providers.claude.enabled, false, "a finished schedule does not count");
+    assert.deepEqual(scheduledProviders(join(L.paseoHome, "nope")), new Set());
+  });
+  it("applyProviderDefaults works on a bare object (deploy script for a hand-made ~/.paseo)", () => {
+    const cfg = applyProviderDefaults({});
+    for (const id of OFF) assert.equal(cfg.agents.providers[id].enabled, false);
+    assert.equal(cfg.agents.providers.optchat, undefined, "does not invent an OptChat entry");
+  });
+});
+
 describe("bundled workers skill (plugins/bots/skills/workers)", () => {
   const dir = join(import.meta.dirname, "..", "plugins", "bots", "skills", "workers");
   it("has a SKILL.md pi can load (frontmatter name + description) and a launch.sh that parses", () => {
@@ -222,6 +312,202 @@ esac
     assert.deepEqual(skillsOf(some), [...shortlist, "/opt/a", "/opt/b c"]);
     assert.deepEqual(skillsOf(launch({ WORKER_SKILLS: "none" })), [], "none: no skills at all");
     assert.deepEqual(skillsOf(launch({ WORKER_SKILLS: "none:/opt/a" })), ["/opt/a"]);
+  });
+  // --engine cc: the same stand-in herdr; the worker is Claude Code (herdr's claude kind) and the pi path is unchanged.
+  const standIn = () => {
+    const d = tmp();
+    const bin = join(d, "bin");
+    mkdirSync(bin);
+    const log = join(d, "herdr.log");
+    writeFileSync(
+      join(bin, "herdr"),
+      `#!/bin/sh
+case "$1 $2" in
+  "agent get") exit 1 ;;
+  "workspace list") echo '{"result":{"workspaces":[]}}' ;;
+  "workspace create") echo '{"result":{"workspace":{"workspace_id":"w1"},"tab":{"tab_id":"w1:t1"},"root_pane":{"pane_id":"w1:p1"}}}' ;;
+  "agent start") printf '%s\\n' "$@" > "${log}"; echo '{"result":{"agent":{"agent_session":{"value":""}}}}' ;;
+  *) echo '{"result":{}}' ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    writeFileSync(join(bin, "bot-worker"), "#!/bin/sh\necho '{}'\n", { mode: 0o755 });
+    writeFileSync(join(bin, "claude"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const brief = join(d, "brief.md");
+    writeFileSync(brief, "tiny\nBudget: US$3.50, about 5 min.\n");
+    const run = (args, extra = {}) =>
+      spawnSync("sh", [join(dir, "launch.sh"), ...args, "w-one", brief, "1", d], {
+        encoding: "utf8",
+        env: { PATH: `${bin}:${process.env.PATH}`, BOT: "testbot", HOME: d, ...extra },
+      });
+    const started = () => readFileSync(log, "utf8").trim().split("\n");
+    return { d, brief, run, started };
+  };
+  it("launch.sh --engine pi (and no --engine) starts pi with exactly the arguments it always had", () => {
+    const { d, run, started } = standIn();
+    const root = join(dir, "..");
+    for (const args of [[], ["--engine", "pi"]]) {
+      const r = run(args, { WORKER_MODEL: "anthropic/claude-sonnet-5:high" });
+      assert.equal(r.status, 0, r.stderr);
+      const a = started();
+      const sid = a[a.indexOf("--session-id") + 1];
+      assert.match(sid, /^w-one-\d{8}-\d{6}$/);
+      assert.deepEqual(a, [
+        "agent", "start", "w-one", "--kind", "pi", "--pane", "w1:p1", "--timeout", "60000", "--",
+        "--model", "anthropic/claude-sonnet-5:high", "--no-skills", "--session-id", sid, "--name", "w-one",
+        ...["diagnose", "tdd", "screenshot-app", "herdr"].flatMap((n) => ["--skill", join(root, n)]),
+      ]);
+      const info = JSON.parse(r.stdout);
+      assert.equal(info.engine, undefined, "no engine field for pi: the launch JSON is as before");
+    }
+    assert.equal(run(["--engine", "codex"]).status, 2);
+    void d;
+  });
+  it("launch.sh (pi): the worker's pi uses the bots' pi dir (PI_CODING_AGENT_DIR, else DinoBot's own) when it exists; else nothing is set, as before", () => {
+    const d = tmp();
+    const bin = join(d, "bin");
+    mkdirSync(bin);
+    const calls = join(d, "calls.log");
+    // Stand-in herdr: every call, one line each (args joined by |).
+    writeFileSync(
+      join(bin, "herdr"),
+      `#!/bin/sh
+IFS='|'; printf '%s\\n' "$*" >> "${calls}"
+case "$1 $2" in
+  "agent get") exit 1 ;;
+  "workspace list") echo '{"result":{"workspaces":[]}}' ;;
+  "workspace create") echo '{"result":{"workspace":{"workspace_id":"w1"},"tab":{"tab_id":"w1:t1"},"root_pane":{"pane_id":"w1:p1"}}}' ;;
+  "agent start") echo '{"result":{"agent":{"agent_session":{"value":""}}}}' ;;
+  *) echo '{"result":{}}' ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    writeFileSync(join(bin, "bot-worker"), "#!/bin/sh\necho '{}'\n", { mode: 0o755 });
+    const brief = join(d, "brief.md");
+    writeFileSync(brief, "tiny\n");
+    const launch = (extra) => {
+      writeFileSync(calls, "");
+      const r = spawnSync("sh", [join(dir, "launch.sh"), "w-one", brief, "1", d], {
+        encoding: "utf8",
+        env: { PATH: `${bin}:${process.env.PATH}`, BOT: "testbot", HOME: d, ...extra },
+      });
+      assert.equal(r.status, 0, r.stderr);
+      const lines = readFileSync(calls, "utf8").trim().split("\n");
+      const start = lines.findIndex((l) => l.startsWith("agent|start|"));
+      const runs = lines.filter((l) => l.startsWith("pane|run|"));
+      assert.ok(start >= 0);
+      for (const l of runs) assert.ok(lines.indexOf(l) < start, "set before pi starts");
+      return runs.map((l) => l.split("|").slice(2));
+    };
+    const bots = join(d, "dinobot", "pi");
+    const odd = join(d, "it's pi");
+    mkdirSync(bots, { recursive: true });
+    mkdirSync(odd);
+    // Fresh DinoBot install: the daemon (so the bot's shell) has PI_CODING_AGENT_DIR = DinoBot's pi dir.
+    assert.deepEqual(launch({ PI_CODING_AGENT_DIR: bots, DINOBOT_HOME: join(d, "dinobot") }), [["w1:p1", `export PI_CODING_AGENT_DIR='${bots}'`]]);
+    // Only DINOBOT_HOME (or DINOBOT_PI_DIR): the dir the Providers page writes (lib/util.mjs layout).
+    assert.deepEqual(launch({ DINOBOT_HOME: join(d, "dinobot") }), [["w1:p1", `export PI_CODING_AGENT_DIR='${bots}'`]]);
+    assert.deepEqual(launch({ DINOBOT_HOME: join(d, "nowhere"), DINOBOT_PI_DIR: odd }), [["w1:p1", `export PI_CODING_AGENT_DIR='${d}/it'\\''s pi'`]]);
+    assert.deepEqual(launch({ PI_CODING_AGENT_DIR: "~/dinobot/pi" }), [["w1:p1", `export PI_CODING_AGENT_DIR='${bots}'`]], "~ is the home folder");
+    // Missing folder, or nothing set (a plain host such as noble's, where bots use ~/.pi/agent): no export.
+    assert.deepEqual(launch({ PI_CODING_AGENT_DIR: join(d, "missing") }), []);
+    assert.deepEqual(launch({ DINOBOT_HOME: join(d, "nowhere") }), []);
+    assert.deepEqual(launch({}), []);
+    // cc workers: no pi export; DINOBOT_CLAUDE_CONFIG_DIR (the Claude Code card's login) comes before CC_WORKER_CONFIG_DIR.
+    writeFileSync(join(bin, "claude"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const cc = (extra) => launch({ WORKER_ENGINE: "cc", PI_CODING_AGENT_DIR: bots, ...extra });
+    assert.deepEqual(cc({}), []);
+    const card = join(d, "card-claude");
+    assert.deepEqual(cc({ DINOBOT_CLAUDE_CONFIG_DIR: card, CC_WORKER_CONFIG_DIR: join(d, "w") }), [["w1:p1", `unset -f claude 2>/dev/null; export CLAUDE_CONFIG_DIR='${card}'`]]);
+    assert.deepEqual(cc({ CC_WORKER_CONFIG_DIR: join(d, "w") }), [["w1:p1", `unset -f claude 2>/dev/null; export CLAUDE_CONFIG_DIR='${join(d, "w")}'`]]);
+  });
+  it("launch.sh --engine cc starts claude with a UUID session, the shortlist as a session plugin, the spend status line, no blocking hook, and the model", () => {
+    const { d, brief, run, started } = standIn();
+    const root = join(dir, "..");
+    const r = run(["--engine", "cc"], { BOTS_WORKER_MODEL: "anthropic/claude-sonnet-5:high", WORKER_SKILLS: join(root, "workers") });
+    assert.equal(r.status, 0, r.stderr);
+    const a = started();
+    assert.deepEqual(a.slice(0, 10), ["agent", "start", "w-one", "--kind", "claude", "--pane", "w1:p1", "--timeout", "60000", "--"]);
+    const arg = (k) => a[a.indexOf(k) + 1];
+    assert.equal(arg("--model"), "claude-sonnet-5");
+    assert.equal(arg("--effort"), "high");
+    assert.match(arg("--session-id"), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    assert.equal(arg("--name"), "w-one");
+    assert.equal(arg("--setting-sources"), "project,local");
+    assert.ok(!a.includes("--no-skills") && !a.includes("-p") && !a.includes("--print"), "interactive TUI, no pi flags");
+    const cc = join(d, "brief.cc");
+    assert.equal(arg("--plugin-dir"), join(cc, "plugin"));
+    const skills = readdirSync(join(cc, "plugin", "skills")).sort();
+    assert.deepEqual(skills, ["diagnose", "herdr", "screenshot-app", "tdd", "workers"]);
+    assert.equal(readFileSync(join(cc, "plugin", "skills", "tdd", "SKILL.md"), "utf8"), readFileSync(join(root, "tdd", "SKILL.md"), "utf8"));
+    assert.equal(JSON.parse(readFileSync(join(cc, "plugin", ".claude-plugin", "plugin.json"), "utf8")).name, "worker");
+    assert.equal(readFileSync(join(cc, "budget"), "utf8").trim(), "3.50", "the budget comes from the brief's US$ figure");
+    const settings = JSON.parse(readFileSync(arg("--settings"), "utf8"));
+    assert.match(settings.statusLine.command, /cc-status\.mjs' '/);
+    assert.equal(settings.hooks, undefined, "no PreToolUse hook: nothing blocks a tool call (advisory budget, as pi)");
+    assert.equal(settings.env.DISABLE_AUTOUPDATER, "1");
+    assert.equal(settings.env.ANTHROPIC_BASE_URL, undefined, "no proxy unless CC_WORKER_BASE_URL");
+    // token trim: worker tool set, no MCP, no side calls, no built-in skills, no home CLAUDE.md, no attribution note
+    assert.equal(arg("--tools"), "Bash,Read,Edit,Write,Glob,Grep,Skill");
+    assert.ok(a.includes("--strict-mcp-config") && a.includes("--exclude-dynamic-system-prompt-sections"));
+    assert.ok(!a.includes("--disable-slash-commands"), "slash commands stay on: they carry the skill shortlist");
+    assert.equal(settings.env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION, "false");
+    for (const k of ["CLAUDE_CODE_DISABLE_TERMINAL_TITLE", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_DISABLE_BUNDLED_SKILLS", "CLAUDE_CODE_DISABLE_AUTO_MEMORY"])
+      assert.equal(settings.env[k], "1", k);
+    assert.ok(settings.claudeMdExcludes.includes(join(d, ".claude", "**")), "HOME is d in the stand-in");
+    assert.deepEqual(settings.attribution, { commit: "", pr: "" });
+    assert.equal(settings.autoMemoryEnabled, false);
+    const info = JSON.parse(r.stdout);
+    assert.equal(info.engine, "cc");
+    assert.equal(info.model, "claude-sonnet-5");
+    assert.equal(info.session_file, join(d, ".claude", "projects", d.replace(/[^A-Za-z0-9]/g, "-"), `${arg("--session-id")}.jsonl`));
+    // none drops the shortlist; WORKER_BUDGET_USD wins over the brief; a proxy goes in settings env; a non-Claude model is not passed
+    const r2 = run(["--engine", "cc"], { WORKER_SKILLS: "none", WORKER_BUDGET_USD: "7", CC_WORKER_BASE_URL: "http://proxy.invalid/x", WORKER_MODEL: "openai/gpt-9" });
+    assert.equal(r2.status, 0, r2.stderr);
+    assert.deepEqual(readdirSync(join(cc, "plugin", "skills")), []);
+    assert.equal(readFileSync(join(cc, "budget"), "utf8").trim(), "7");
+    assert.deepEqual(JSON.parse(readFileSync(join(cc, "settings.json"), "utf8")).env.ANTHROPIC_BASE_URL, "http://proxy.invalid/x");
+    assert.ok(!started().includes("--model"));
+    assert.match(r2.stderr, /not a Claude model/);
+    // WORKER_ENGINE=cc is the same as --engine cc
+    assert.equal(run([], { WORKER_ENGINE: "cc" }).status, 0);
+    assert.ok(started().includes("claude"));
+    // a proxy token in settings.json: only the owner can read it
+    run(["--engine", "cc"], { CC_WORKER_BASE_URL: "http://proxy.invalid/x", CC_WORKER_AUTH_TOKEN: "t0k" });
+    assert.equal(statSync(join(cc, "settings.json")).mode & 0o077, 0, "settings.json is 0600");
+    // a brief without a budget still launches: the budget is optional, as for pi
+    writeFileSync(brief, "tiny, no budget\n");
+    const r3 = run(["--engine", "cc"]);
+    assert.equal(r3.status, 0, r3.stderr);
+    assert.equal(readFileSync(join(cc, "budget"), "utf8").trim(), "");
+  });
+  it("launch.sh --engine cc without claude on PATH: a clear error before any herdr tab is made", (t) => {
+    const { d, run } = standIn();
+    if (spawnSync("sh", ["-c", "command -v claude"], { env: { PATH: "/usr/bin:/bin" } }).status === 0) return t.skip("claude in /usr/bin");
+    const bin = join(d, "bin");
+    rmSync(join(bin, "claude"));
+    symlinkSync(process.execPath, join(bin, "node"));
+    const r = run(["--engine", "cc"], { PATH: `${bin}:/usr/bin:/bin` });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /claude \(Claude Code\) is not on PATH/);
+    assert.ok(!statSync(join(d, "herdr.log"), { throwIfNoEntry: false }), "no claude started");
+  });
+  it("cc-status.mjs: the status line shows the spend (kept across a restart) and the budget when there is one; never blocks", () => {
+    const d = tmp();
+    const status = (usd) => spawnSync("node", [join(dir, "cc-status.mjs"), d], { encoding: "utf8", input: JSON.stringify({ session_id: "s1", model: { display_name: "Haiku" }, cost: { total_cost_usd: usd } }) });
+    assert.equal(status(0.4).stdout, "$0.40 · Haiku", "no budget file: spend only");
+    writeFileSync(join(d, "budget"), "\n");
+    assert.equal(status(0.5).stdout, "$0.50 · Haiku", "empty budget: spend only");
+    writeFileSync(join(d, "budget"), "1\n");
+    assert.equal(status(0.8).stdout, "$0.80 / budget $1.00 · Haiku");
+    const r = status(0.3);
+    assert.equal(r.stdout, "$1.10 / budget $1.00 OVER BUDGET · Haiku", "a restarted process starts at 0: the old figure is banked");
+    assert.equal(r.status, 0);
+    assert.equal(JSON.parse(readFileSync(join(d, "cost.json"), "utf8")).base, 0.8);
+    assert.equal(spawnSync("node", [join(dir, "cc-status.mjs"), d], { encoding: "utf8", input: "not json" }).stdout, "$1.10 / budget $1.00 OVER BUDGET");
+    assert.ok(!readdirSync(dir).includes("cc-cap.mjs"), "the blocking cap hook is gone");
   });
   it("bundles the worker shortlist: each listed skill has a SKILL.md pi can load, a LICENSE where it is third-party, no fleet details", () => {
     const root = join(dir, "..");

@@ -25,6 +25,8 @@ import { avatarJsonHash, packGzip } from "./server/avatar-store";
 import { AVATAR_PACK_JSON, AVATAR_PACK_VERSION } from "./shared/avatar";
 import { botsAvatarJsonRpc, botsAvatarPackRpc, botsAvatarPackVersionRpc, botsAvatarSaveRpc } from "./shared/avatar-rpc";
 import { quotaRpc } from "./shared/quota-rpc";
+import { botsTimersRpc, botsTimersSetRpc } from "./shared/timers-rpc";
+import { setTimerPaused, timersAnswer } from "./server/systemd-timers";
 import { INTRO_PROMPT } from "./shared/templates";
 import { botsRevRpc, type PushKind } from "./shared/push-rpc";
 import { BotsPush, type Emit } from "./server/push";
@@ -61,6 +63,7 @@ import {
   signinStatusRpc,
   signinSubmitRpc,
 } from "./shared/onboarding-rpc";
+import { enginesClaudeLogoutRpc, enginesPiSignOutRpc, enginesStatusRpc } from "./shared/engines-rpc";
 import { providerInstallRpc, providerInstallStatusRpc, providerListRpc, providerRemoveRpc } from "./shared/provider-rpc";
 import {
   ROOMS_EVENT,
@@ -256,6 +259,10 @@ export default function contribute(server: PluginServerContext) {
   });
   // Rate-limit card's "Resets …": the add-on's usage source, if any (none in the public build).
   server.handle(quotaRpc, () => extensions.quota());
+  // Schedules screen: the host's systemd user timers (system ones only with includeAll, the app's
+  // "Show all"); pause/resume one (systemctl --user).
+  server.handle(botsTimersRpc, ({ includeAll }) => timersAnswer(undefined, { includeAll }));
+  server.handle(botsTimersSetRpc, ({ unit, paused, includeAll }) => setTimerPaused(unit, paused, undefined, { includeAll }));
 
   // Onboarding on the phone (DinoBot): sign-in, models, optional import. pi does the work.
   const onboarding = new Onboarding(settings, root);
@@ -273,6 +280,10 @@ export default function contribute(server: PluginServerContext) {
   server.handle(providerInstallRpc, async (input) => (await onboarding.needProviders()).providerInstall(input) as never);
   server.handle(providerInstallStatusRpc, async (input) => (await onboarding.needProviders()).providerInstallStatus(input) as never);
   server.handle(providerRemoveRpc, async (input) => (await onboarding.needProviders()).providerRemove(input));
+  // Settings › Providers, "Two engines" (shared/engines-rpc.ts): the pi card and the Claude Code card.
+  server.handle(enginesStatusRpc, () => onboarding.engines());
+  server.handle(enginesPiSignOutRpc, async (input) => (await onboarding.needEngines()).piSignOut(input));
+  server.handle(enginesClaudeLogoutRpc, async () => (await onboarding.needEngines()).claudeLogout());
 
   // A bot refused a push to the user (per-bot 10-min limit) gets one system DM when its slot
   // reopens. Pending notices live in push-slots.jsonl (written by bot-dm), so a reload loses none.

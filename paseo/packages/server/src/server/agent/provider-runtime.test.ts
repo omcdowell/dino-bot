@@ -35,6 +35,20 @@ describe("agent provider runtime", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
+  test("does not start the OpenCode bridge when opencode is disabled", async () => {
+    const start = vi.spyOn(OpenCodeBridge.prototype, "start").mockResolvedValue();
+    const runtime = await createAgentProviderRuntime({
+      paseoHome: "/tmp/paseo-provider-runtime-test",
+      logger: createTestLogger(),
+      snapshotManager: { providerOverrides: { opencode: { enabled: false } } },
+    });
+
+    expect(start).not.toHaveBeenCalled();
+    expect(runtime.snapshotManager.getAgentManagerProviderState().clients.opencode).toBeUndefined();
+    runtime.setPaseoToolCatalog(emptyCatalog());
+    await runtime.shutdown();
+  });
+
   test("closes the bridge when startup fails", async () => {
     vi.spyOn(OpenCodeBridge.prototype, "start").mockRejectedValue(new Error("startup failed"));
     const close = vi.spyOn(OpenCodeBridge.prototype, "close").mockResolvedValue();

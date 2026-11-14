@@ -14,6 +14,7 @@ import {
   pcm16lePeakAbs,
   pcm16leToFloat32,
 } from "../../../audio.js";
+import { decodeWithEmptyRetry, sherpaResultText } from "./parakeet-decode.js";
 import { SherpaOfflineRecognizerEngine } from "./sherpa-offline-recognizer.js";
 
 export interface SherpaParakeetSttConfig {
@@ -145,26 +146,11 @@ export class SherpaOnnxParakeetSTT implements SpeechToTextProvider {
     const gain =
       peakFloat > 0 && peakFloat < targetPeak ? Math.min(maxGain, targetPeak / peakFloat) : 1;
 
-    const stream = this.engine.createStream();
-    try {
-      const floatSamples = pcm16leToFloat32(pcmForModel, gain);
-      this.engine.acceptWaveform(stream, inputRate, floatSamples);
-      this.engine.decode(stream);
-      const result = this.engine.getResult(stream);
-      const text = String(
-        (typeof result === "object" && result && "text" in result ? result.text : undefined) ??
-          result ??
-          "",
-      ).trim();
-      const duration = Date.now() - start;
-      this.logger.debug({ duration, textLength: text.length }, "Parakeet transcription complete");
-      return { text, duration, ...(text.length === 0 ? { isLowConfidence: true } : {}) };
-    } finally {
-      try {
-        stream.free?.();
-      } catch {
-        // ignore
-      }
-    }
+    const floatSamples = pcm16leToFloat32(pcmForModel, gain);
+    const result = decodeWithEmptyRetry(this.engine, inputRate, floatSamples);
+    const text = sherpaResultText(result);
+    const duration = Date.now() - start;
+    this.logger.debug({ duration, textLength: text.length }, "Parakeet transcription complete");
+    return { text, duration, ...(text.length === 0 ? { isLowConfidence: true } : {}) };
   }
 }

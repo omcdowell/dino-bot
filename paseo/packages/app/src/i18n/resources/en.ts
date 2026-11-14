@@ -1940,6 +1940,8 @@ export const en = {
       tooLargeToDisplay: "This file is too large to display",
       failedToLoad: "Failed to load file",
       failedToLoadPreview: "Failed to load file preview",
+      failedToLoadFolder: "Failed to load folder",
+      folderEmpty: "This folder is empty",
       editor: {
         fileSize: "File size {{size}}",
         lines: "{{count}} lines",

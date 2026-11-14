@@ -1893,6 +1893,8 @@ export const zhCN: TranslationResources = {
       tooLargeToDisplay: "此文件过大，无法显示",
       failedToLoad: "加载文件失败",
       failedToLoadPreview: "加载文件预览失败",
+      failedToLoadFolder: "加载文件夹失败",
+      folderEmpty: "此文件夹为空",
       editor: {
         fileSize: "文件大小 {{size}}",
         lines: "{{count}} 行",

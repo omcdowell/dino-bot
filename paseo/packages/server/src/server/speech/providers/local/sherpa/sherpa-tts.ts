@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import type { SpeechStreamResult, TextToSpeechProvider } from "../../../speech-provider.js";
 import { chunkBuffer, float32ToPcm16le } from "../../../audio.js";
 import { loadSherpaOnnxNode } from "./sherpa-onnx-node-loader.js";
+import { normalizeTextForLexiconTts } from "./tts-text-normalize.js";
 
 export type SherpaTtsPreset = "kokoro-en-v0_19";
 
@@ -62,12 +63,14 @@ export class SherpaOnnxTTS implements TextToSpeechProvider {
     const modelPath = `${config.modelDir}/model.onnx`;
     const voicesPath = `${config.modelDir}/voices.bin`;
     const tokensPath = `${config.modelDir}/tokens.txt`;
-    const dataDir = `${config.modelDir}/espeak-ng-data`;
+    // sherpa-onnx >= 2.0 has no espeak-ng: text is phonemized via this lexicon only.
+    // Words missing from it (digits, unknown names) are skipped by the native frontend.
+    const lexiconPath = `${config.modelDir}/lexicon-en-us.txt`;
 
     assertFileExists(modelPath, "TTS model");
     assertFileExists(voicesPath, "TTS voices");
     assertFileExists(tokensPath, "TTS tokens");
-    assertFileExists(dataDir, "TTS espeak-ng dataDir");
+    assertFileExists(lexiconPath, "TTS lexicon");
 
     const modelConfig = {
       // The native parser reads these under model, despite the upstream JS typedef.
@@ -77,7 +80,7 @@ export class SherpaOnnxTTS implements TextToSpeechProvider {
         model: modelPath,
         voices: voicesPath,
         tokens: tokensPath,
-        dataDir,
+        lexicon: lexiconPath,
         lengthScale: config.lengthScale ?? 1.0,
       },
     };
@@ -117,7 +120,7 @@ export class SherpaOnnxTTS implements TextToSpeechProvider {
       throw new Error("TTS provider closed");
     }
     const audio = await this.tts.generateAsync({
-      text,
+      text: normalizeTextForLexiconTts(text),
       sid: this.speakerId,
       speed: this.speed,
       // Electron rejects native external-backed typed arrays. Request a copied buffer

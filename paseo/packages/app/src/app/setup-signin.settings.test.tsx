@@ -238,4 +238,48 @@ describe("sign-in from Settings (outside onboarding)", () => {
     expect(byId("setup-signin-install-link")).toBeNull();
     expect(byId("setup-signin-skip")).not.toBeNull();
   });
+
+  it("Claude Code (Settings › Providers): Claude Code's own login starts at once, no confirm sheet; the pasted code goes to the computer", async () => {
+    h.params = { serverId: "srvD", from: "settings", option: "claude-code:login" };
+    const ccSession = (state: string) => ({
+      ...session(state),
+      provider: "claude-code",
+      label: "Claude Code",
+    });
+    h.invoke.mockImplementation(
+      async (_p: string, method: string, input: { optionId?: string; text?: string }) => {
+        if (method === "signin.options") return OPTIONS;
+        if (method === "signin.start") {
+          expect(input).toEqual({ optionId: "claude-code:login", confirmed: false });
+          return ccSession("needs-input");
+        }
+        if (method === "signin.submit") {
+          expect(input).toEqual({ sessionId: "s1", text: "abc#def" });
+          return ccSession("done");
+        }
+        throw new Error(method);
+      },
+    );
+    await render();
+    expect(container!.textContent).toContain("Log in to Claude Code");
+    expect(h.confirm).not.toHaveBeenCalled();
+    expect(byId("setup-signin-action-error")).toBeNull();
+    expect(byId("setup-signin-session")!.textContent).toContain("Claude Code");
+    await act(async () => h.inputs.get("setup-signin-input")!("abc#def"));
+    const submit = [...container!.querySelectorAll("button")].find(
+      (b) => b.textContent === "Continue",
+    )!;
+    await act(async () => submit.click());
+    await flush();
+    expect(byId("setup-signin-done")).not.toBeNull();
+  });
+
+  it("Add a provider package (Settings › Providers): only the install-from-a-link card", async () => {
+    h.params = { serverId: "srvE", from: "settings", add: "package" };
+    h.invoke.mockResolvedValue(OPTIONS);
+    await render();
+    expect(container!.textContent).toContain("Add a provider package");
+    expect(byId("setup-signin-install-link")).not.toBeNull();
+    expect(byId("setup-signin-openai-codex:oauth:0")).toBeNull();
+  });
 });

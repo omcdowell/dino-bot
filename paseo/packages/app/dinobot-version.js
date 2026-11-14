@@ -20,7 +20,7 @@ const path = require("node:path");
 
 const DINOBOT_VERSION = "0.1.3";
 /** iOS CFBundleVersion of the next TestFlight build; must keep rising (App Store Connect). */
-const DINOBOT_IOS_BUILD = "9";
+const DINOBOT_IOS_BUILD = "11";
 
 /**
  * The DinoBot release version, read from the repo's lib/product.json (the one place it lives; tag

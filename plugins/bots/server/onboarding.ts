@@ -33,7 +33,13 @@ type Installer = {
   providerInstall?(input: { source: string; token?: string | null; name?: string | null }): unknown;
   providerInstallStatus?(input: { jobId: string }): unknown;
   providerRemove?(input: { source: string }): Promise<{ removed: string }>;
+  /** engines.* (lib/engines.mjs); absent in installers older than the RPCs. */
+  enginesStatus?(): Promise<{ pi: unknown; claudeCode: unknown }>;
+  piSignOut?(input: { provider: string }): { removed: string };
+  claudeLogout?(): Promise<{ ok: boolean }>;
 };
+
+type EngineInstaller = Required<Pick<Installer, "enginesStatus" | "piSignOut" | "claudeLogout">>;
 
 type ProviderInstaller = Required<Pick<Installer, "providerList" | "providerInstall" | "providerInstallStatus" | "providerRemove">>;
 
@@ -104,6 +110,29 @@ export class Onboarding {
       return { available: true, packages: r.packages, providers: r.providers as never, error: null };
     } catch (e) {
       return { available: true, packages: [], providers: [], error: (e as Error).message };
+    }
+  }
+
+  /** The installer's engines.* side, or null (plain Paseo host, or an installer without it). */
+  async engineHost(): Promise<EngineInstaller | null> {
+    const h = await this.host();
+    return h?.enginesStatus && h.piSignOut && h.claudeLogout ? (h as EngineInstaller) : null;
+  }
+
+  async needEngines(): Promise<EngineInstaller> {
+    const h = await this.engineHost();
+    if (!h) throw new Error("Sign-ins from the app need DinoBot's host setup (DINOBOT_HOME).");
+    return h;
+  }
+
+  async engines() {
+    const h = await this.engineHost();
+    if (!h) return { available: false, pi: null, claudeCode: null, error: null };
+    try {
+      const r = await h.enginesStatus();
+      return { available: true, pi: r.pi as never, claudeCode: r.claudeCode as never, error: null };
+    } catch (e) {
+      return { available: true, pi: null, claudeCode: null, error: (e as Error).message };
     }
   }
 

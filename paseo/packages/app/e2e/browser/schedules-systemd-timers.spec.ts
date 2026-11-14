@@ -11,19 +11,19 @@ const sharedSource = `import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 export const botsTimersRpc = defineRpc({
   name: "bots.timers",
-  input: z.object({}),
+  input: z.object({ includeAll: z.boolean().optional() }),
   output: z.object({ timers: z.array(z.any()), error: z.string().nullable() }),
 });
 export const botsTimersSetRpc = defineRpc({
   name: "bots.timers.set",
-  input: z.object({ unit: z.string(), paused: z.boolean() }),
+  input: z.object({ unit: z.string(), paused: z.boolean(), includeAll: z.boolean().optional() }),
   output: z.object({ timers: z.array(z.any()), error: z.string().nullable() }),
 });`;
 
 const serverSource = `import { botsTimersRpc, botsTimersSetRpc } from "./shared/rpc";
 const at = (minutes) => new Date(Date.now() + minutes * 60_000).toISOString();
 const paused = new Set();
-const list = () => ({
+const list = (includeAll) => ({
     error: null,
     timers: [
       { unit: "oauth-watch.timer", name: "oauth-watch", description: "Run oauth-watch every 5 minutes",
@@ -32,13 +32,15 @@ const list = () => ({
         schedule: "daily 06:00 Asia/Singapore", nextRunAt: at(600), lastRunAt: null, timerState: "active", lastResult: "never", resultDetail: null },
       { unit: "herdrapp-testbed.timer", name: "herdrapp-testbed", description: "herdr-app nightly TUI-conformance testbed",
         schedule: "daily 03:30", nextRunAt: at(1080), lastRunAt: at(-360), timerState: "active", lastResult: "failed", resultDetail: "exit 203" },
-    ].map((t) => (paused.has(t.unit) ? { ...t, timerState: "paused", nextRunAt: null } : t)),
+      { unit: "ubuntu-insights-upload.timer", name: "ubuntu-insights-upload", description: "Run Ubuntu-Insights upload",
+        schedule: "weekly", nextRunAt: at(2000), lastRunAt: null, timerState: "active", lastResult: "never", resultDetail: null, system: true },
+    ].filter((t) => includeAll || !t.system).map((t) => (paused.has(t.unit) ? { ...t, timerState: "paused", nextRunAt: null } : t)),
 });
 export default function contribute(server) {
-  server.handle(botsTimersRpc, async () => list());
-  server.handle(botsTimersSetRpc, async ({ unit, paused: pause }) => {
+  server.handle(botsTimersRpc, async ({ includeAll }) => list(includeAll));
+  server.handle(botsTimersSetRpc, async ({ unit, paused: pause, includeAll }) => {
     if (pause) paused.add(unit); else paused.delete(unit);
-    return list();
+    return list(includeAll);
   });
   return () => {};
 }`;
@@ -50,7 +52,9 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: path.join(directory, `${name}.png`) });
 }
 
-test("Schedules lists the host's systemd timers read-only, marked no model", async ({ page }) => {
+test("Schedules lists the host's systemd timers, marked no model; system ones behind Show all", async ({
+  page,
+}) => {
   const client = await connectNewWorkspaceDaemonClient({ ownProjects: false });
   const previous = await client.getDaemonConfig();
   const directory = await mkdtemp(path.join(tmpdir(), "paseo-bots-timers-"));
@@ -78,11 +82,34 @@ test("Schedules lists the host's systemd timers read-only, marked no model", asy
     await expect(oauth).toContainText("every 5min · Last run 2m ago");
     await expect(oauth).toContainText("Next run in 3m");
     await expect(oauth).toContainText("Active");
+    // Description= is the row title; the unit name sits under it.
+    await expect(page.getByTestId("systemd-timer-title-oauth-watch")).toHaveText(
+      "Run oauth-watch every 5 minutes",
+    );
+    await expect(oauth).toContainText("oauth-watch");
     await expect(page.getByTestId("systemd-timer-fc-daily-standup")).toContainText("Never run");
     const failed = page.getByTestId("systemd-timer-herdrapp-testbed");
     await expect(failed).toContainText("failed (exit 203)");
     await expect(failed).toContainText("Failed");
+    // System (vendor) timers are hidden until "Show all".
+    const system = page.getByTestId("systemd-timer-ubuntu-insights-upload");
+    await expect(system).toHaveCount(0);
+    const showAll = page.getByTestId("systemd-timers-show-all");
+    await expect(showAll).toHaveText("Show all (+1 system)");
     await shot(page, "timers-wide");
+    await showAll.click();
+    await expect(system).toContainText("ubuntu-insights-upload · system timer");
+    await expect(showAll).toHaveText("Hide system");
+    await shot(page, "timers-show-all");
+    // Pause/resume of a system timer: only from the list, once shown.
+    await page.getByTestId("systemd-timer-kebab-ubuntu-insights-upload").click();
+    await page.getByTestId("systemd-timer-pause-ubuntu-insights-upload").click();
+    await expect(system).toContainText("Paused");
+    await page.getByTestId("systemd-timer-kebab-ubuntu-insights-upload").click();
+    await page.getByTestId("systemd-timer-resume-ubuntu-insights-upload").click();
+    await expect(system).toContainText("Active");
+    await showAll.click();
+    await expect(system).toHaveCount(0);
 
     // Pause, then resume, from the row menu.
     await page.getByTestId("systemd-timer-kebab-oauth-watch").click();

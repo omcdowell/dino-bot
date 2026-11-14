@@ -7,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderSnapshotEntry } from "@getpaseo/protocol/agent-types";
 import type { MutableDaemonConfig } from "@getpaseo/protocol/messages";
 
-const { theme, snapshotState, configState, patchConfigMock, openProviderSettingsMock } = vi.hoisted(
-  () => ({
+const { theme, snapshotState, configState, botHost, patchConfigMock, openProviderSettingsMock } =
+  vi.hoisted(() => ({
     theme: {
       spacing: { 1: 4, "1.5": 6, 2: 8, 3: 12, 4: 16, 6: 24 },
       iconSize: { sm: 14, md: 20 },
@@ -38,10 +38,11 @@ const { theme, snapshotState, configState, patchConfigMock, openProviderSettings
     configState: {
       config: null as MutableDaemonConfig | null,
     },
+    // What the (mocked) DinoBot section reports: true = DinoBot host, null = not answered yet.
+    botHost: { available: false as boolean | null },
     patchConfigMock: vi.fn(async () => undefined),
     openProviderSettingsMock: vi.fn(),
-  }),
-);
+  }));
 
 vi.mock("react-native", () => ({
   Platform: { OS: "web" },
@@ -243,7 +244,31 @@ vi.mock("@/stores/provider-settings-store", () => ({
 }));
 
 vi.mock("@/screens/settings/bot-providers-section", () => ({
-  BotProvidersSection: () => null,
+  BotProvidersSection: ({
+    onAvailabilityChange,
+  }: {
+    onAvailabilityChange?: (available: boolean) => void;
+  }) => {
+    React.useEffect(() => {
+      if (botHost.available !== null) onAvailabilityChange?.(botHost.available);
+    }, [onAvailabilityChange]);
+    return React.createElement("div", { "data-testid": "bot-providers-section" });
+  },
+}));
+
+// The DinoBot section on a DinoBot host (engines-section.tsx; it falls back to Bot sign-ins on an
+// older daemon): reports whether the host is a DinoBot host, like Bot sign-ins did.
+vi.mock("@/screens/settings/engines-section", () => ({
+  EnginesSection: ({
+    onAvailabilityChange,
+  }: {
+    onAvailabilityChange?: (available: boolean) => void;
+  }) => {
+    React.useEffect(() => {
+      if (botHost.available !== null) onAvailabilityChange?.(botHost.available);
+    }, [onAvailabilityChange]);
+    return React.createElement("div", { "data-testid": "bot-providers-section" });
+  },
 }));
 
 vi.mock("@/components/provider-catalog-list", () => ({
@@ -351,6 +376,7 @@ describe("ProvidersSection", () => {
     snapshotState.isLoading = false;
     snapshotState.isRefreshing = false;
     configState.config = null;
+    botHost.available = false;
     patchConfigMock.mockReset();
     patchConfigMock.mockResolvedValue(undefined);
     openProviderSettingsMock.mockReset();
@@ -381,6 +407,40 @@ describe("ProvidersSection", () => {
     if (!row) throw new Error(`Expected row with aria-label "${accessibilityLabel}"`);
     return row;
   }
+
+  it("on a DinoBot host shows only Bot sign-ins: no Paseo Providers list, no Add provider", () => {
+    snapshotState.entries = [claudeEntry, disabledCodexEntry];
+    configState.config = makeConfig();
+    botHost.available = true;
+
+    render();
+
+    expect(container?.querySelector('[data-testid="bot-providers-section"]')).not.toBeNull();
+    expect(container?.querySelector('[data-testid="host-page-providers-card"]')).toBeNull();
+    expect(container?.querySelector('[data-testid="host-page-add-provider-card"]')).toBeNull();
+    expect(container?.querySelector('[aria-label="Claude provider details"]')).toBeNull();
+  });
+
+  it("hides the Paseo lists until the DinoBot check answers (no flash on a DinoBot host)", () => {
+    snapshotState.entries = [claudeEntry];
+    configState.config = makeConfig();
+    botHost.available = null;
+
+    render();
+
+    expect(container?.querySelector('[data-testid="host-page-providers-card"]')).toBeNull();
+    expect(container?.querySelector('[data-testid="host-page-add-provider-card"]')).toBeNull();
+  });
+
+  it("on a host without DinoBot keeps Paseo's Providers and Add provider", () => {
+    snapshotState.entries = [claudeEntry];
+    configState.config = makeConfig();
+
+    render();
+
+    expect(container?.querySelector('[data-testid="host-page-providers-card"]')).not.toBeNull();
+    expect(container?.querySelector('[data-testid="host-page-add-provider-card"]')).not.toBeNull();
+  });
 
   it("renders the disabled provider with its server-provided label in snapshot order", () => {
     snapshotState.entries = [claudeEntry, disabledCodexEntry];

@@ -1,0 +1,437 @@
+Id=battery-watch.service
+Description=battery-watch: note power adapter unplug/replug events (one pass)
+ActiveState=inactive
+FragmentPath=/home/alice/.config/systemd/user/battery-watch.service
+UnitFileState=static
+Result=success
+ExecMainStartTimestamp=@1794634395
+ExecMainStatus=0
+
+Id=claude-sync-push.service
+Description=claude-sync push (upload Claude session history)
+ActiveState=inactive
+FragmentPath=/home/alice/.config/systemd/user/claude-sync-push.service
+UnitFileState=static
+Result=success
+ExecMainStartTimestamp=@1794633915
+ExecMainStatus=0
+
+Id=notes-site-build.service
+Description=Rebuild the notes site if the notes changed (no-op otherwise)
+ActiveState=inactive
+FragmentPath=/home/alice/.config/systemd/user/notes-site-build.service
+UnitFileState=linked
+Result=success
+ExecMainStartTimestamp=@1794634399
+ExecMainStatus=0
+
+Id=study-reminders.service
+Description=Study reminder push (bot-dm)
+ActiveState=inactive
+FragmentPath=/home/alice/.config/systemd/user/study-reminders.service
+UnitFileState=linked
+Result=success
+ExecMainStartTimestamp=@1794617400
+ExecMainStatus=0
+
+Id=fc-daily-standup.service
+Description=FC daily standup trigger (no model)
+ActiveState=inactive
+FragmentPath=/home/alice/.config/systemd/user/fc-daily-standup.service
+UnitFileState=static
+Result=success
+ExecMainStartTimestamp=@1794607205
+ExecMainStatus=0
+
+Id=fc-emmet-checkin.service
+Description=FC 12-hourly Emmet check-in (no model)
+ActiveState=inactive
+FragmentPath=/home/alice/.config/systemd/user/fc-emmet-checkin.service
+UnitFileState=static
+Result=success
+ExecMainStartTimestamp=
+ExecMainStatus=0
+
+Id=herdr-gc-stale.service
+Description=Clear Herdr bot workers older than 48h
+ActiveState=inactive
+FragmentPath=/home/alice/.config/systemd/user/herdr-gc-stale.service
+UnitFileState=static
+Result=success
+ExecMainStartTimestamp=
+ExecMainStatus=0
+
+Id=launchpadlib-cache-clean.service
+Description=Clean up old files in the Launchpadlib cache
+ActiveState=inactive
+FragmentPath=/usr/lib/systemd/user/launchpadlib-cache-clean.service
+UnitFileState=static
+Result=success
+ExecMainStartTimestamp=
+ExecMainStatus=0
+
+Id=matilda-mail-summary-check.service
+Description=Matilda mail summary watchdog (alerts Matilda if today's summary is missing)
+ActiveState=inactive
+FragmentPath=/home/alice/.config/systemd/user/matilda-mail-summary-check.service
+UnitFileState=static
+Result=success
+ExecMainStartTimestamp=
+ExecMainStatus=0
+
+Id=matilda-mailtriage.service
+Description=Matilda weekday mail triage (read-only)
+ActiveState=inactive
+FragmentPath=/home/alice/.config/systemd/user/matilda-mailtriage.service
+UnitFileState=static
+Result=success
+ExecMainStartTimestamp=
+ExecMainStatus=0
+
+Id=oauth-watch.service
+Description=oauth-watch: pre-emptive pi OAuth refresher + credential watcher (one pass)
+ActiveState=inactive
+FragmentPath=/home/alice/.config/systemd/user/oauth-watch.service
+UnitFileState=static
+Result=success
+ExecMainStartTimestamp=@1794634205
+ExecMainStatus=0
+
+Id=pi-sync-push.service
+Description=pi-sync push (back up pi session history)
+ActiveState=inactive
+FragmentPath=/home/alice/.config/systemd/user/pi-sync-push.service
+UnitFileState=static
+Result=success
+ExecMainStartTimestamp=@1794633917
+ExecMainStatus=0
+
+Id=ratelimit-watchdog.service
+Description=Resume pi workers and OptChat bots stopped by a rate limit or a connection error (live, --apply)
+ActiveState=inactive
+FragmentPath=/home/alice/.config/systemd/user/ratelimit-watchdog.service
+UnitFileState=static
+Result=success
+ExecMainStartTimestamp=@1794634370
+ExecMainStatus=0
+
+Id=rebuild-phone-mirror.service
+Description=Rebuild the phone mirror for Syncthing
+ActiveState=inactive
+FragmentPath=/home/alice/.config/systemd/user/rebuild-phone-mirror.service
+UnitFileState=static
+Result=success
+ExecMainStartTimestamp=@1794633915
+ExecMainStatus=0
+
+Id=snap.firmware-updater.firmware-notifier.service
+Description=Service for snap application firmware-updater.firmware-notifier
+ActiveState=inactive
+FragmentPath=/etc/systemd/user/snap.firmware-updater.firmware-notifier.service
+UnitFileState=static
+Result=success
+ExecMainStartTimestamp=@1794625205
+ExecMainStatus=0
+
+Id=systemd-tmpfiles-clean.service
+Description=Cleanup of User's Temporary Files and Directories
+ActiveState=inactive
+FragmentPath=/usr/lib/systemd/user/systemd-tmpfiles-clean.service
+UnitFileState=static
+Result=success
+ExecMainStartTimestamp=
+ExecMainStatus=0
+
+Id=ubuntu-insights-collect.service
+Description="Collect platform report using Ubuntu Insights while respecting consent"
+ActiveState=inactive
+FragmentPath=/usr/lib/systemd/user/ubuntu-insights-collect.service
+UnitFileState=indirect
+Result=success
+ExecMainStartTimestamp=@1794569727
+ExecMainStatus=1
+
+Id=ubuntu-insights-upload.service
+Description="Upload collected and matured platform reports using Ubuntu Insights while respecting consent"
+ActiveState=inactive
+FragmentPath=/usr/lib/systemd/user/ubuntu-insights-upload.service
+UnitFileState=indirect
+Result=success
+ExecMainStartTimestamp=@1794569937
+ExecMainStatus=0
+
+Id=voice-corpus-sync.service
+Description=Mirror ~/voice-corpus to backup storage
+ActiveState=inactive
+FragmentPath=/home/alice/.config/systemd/user/voice-corpus-sync.service
+UnitFileState=static
+Result=success
+ExecMainStartTimestamp=@1794634046
+ExecMainStatus=0
+
+Id=x-reply-leads.service
+Description=Daily reply-leads fetch for Tweety (read-only search)
+ActiveState=inactive
+FragmentPath=/home/alice/.config/systemd/user/x-reply-leads.service
+UnitFileState=static
+Result=success
+ExecMainStartTimestamp=@1794571175
+ExecMainStatus=0
+
+Id=battery-watch.timer
+Description=Run battery-watch every minute
+ActiveState=active
+FragmentPath=/home/alice/.config/systemd/user/battery-watch.timer
+UnitFileState=enabled
+Unit=battery-watch.service
+TimersMonotonic={ OnBootUSec=1min ; next_elapse=1min }
+TimersCalendar={ OnCalendar=*-*-* *:*:15 ; next_elapse=@1794634455 }
+LastTriggerUSec=@1794634395
+Result=success
+
+Id=claude-sync-push.timer
+Description=Periodic claude-sync push (every 15 min)
+ActiveState=active
+FragmentPath=/home/alice/.config/systemd/user/claude-sync-push.timer
+UnitFileState=enabled
+Unit=claude-sync-push.service
+TimersMonotonic={ OnUnitActiveUSec=15min ; next_elapse=18h 9min 53.122673s }
+TimersMonotonic={ OnBootUSec=3min ; next_elapse=3min }
+LastTriggerUSec=@1794633915
+Result=success
+
+Id=notes-site-build.timer
+Description=Check the notes for changes every 3 minutes
+ActiveState=active
+FragmentPath=/home/alice/.config/systemd/user/notes-site-build.timer
+UnitFileState=enabled
+Unit=notes-site-build.service
+TimersMonotonic={ OnUnitInactiveUSec=3min ; next_elapse=18h 5min 58.113945s }
+TimersMonotonic={ OnBootUSec=2min ; next_elapse=2min }
+LastTriggerUSec=@1794634399
+Result=success
+
+Id=study-reminders.timer
+Description=Study reminders (push via bot-dm, ends 17 Nov 2026)
+ActiveState=active
+FragmentPath=/home/alice/.config/systemd/user/study-reminders.timer
+UnitFileState=enabled
+Unit=study-reminders.service
+TimersCalendar={ OnCalendar=2026-11-16 23:25:00 UTC ; next_elapse=@1794871500 }
+TimersCalendar={ OnCalendar=2026-11-16 11:55:00 UTC ; next_elapse=@1794830100 }
+TimersCalendar={ OnCalendar=2026-11-15 23:25:00 UTC ; next_elapse=@1794785100 }
+TimersCalendar={ OnCalendar=2026-11-15 05:50:00 UTC ; next_elapse=@1794721800 }
+TimersCalendar={ OnCalendar=2026-11-15 01:20:00 UTC ; next_elapse=@1794705600 }
+TimersCalendar={ OnCalendar=2026-11-14 05:50:00 UTC ; next_elapse=@1794635400 }
+TimersCalendar={ OnCalendar=2026-11-14 00:50:00 UTC ; next_elapse=@1794617400 }
+TimersCalendar={ OnCalendar=2026-11-13 11:55:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-12 23:25:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-12 13:00:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-11 23:25:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-11 11:55:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-10 23:25:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-10 13:00:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-09 23:25:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-09 11:55:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-08 23:25:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-07 23:25:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-07 01:55:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-06 11:55:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-05 23:25:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-05 13:00:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-04 23:25:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-04 11:55:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-03 23:25:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-03 13:00:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-02 23:25:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-02 11:55:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-01 23:25:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-11-01 01:55:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-10-31 01:55:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-10-30 11:55:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-10-29 23:25:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-10-29 13:00:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-10-28 23:25:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-10-28 11:55:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-10-27 23:25:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-10-27 13:00:00 UTC ; next_elapse=(null) }
+TimersCalendar={ OnCalendar=2026-10-26 23:25:00 UTC ; next_elapse=(null) }
+LastTriggerUSec=@1794617400
+Result=success
+
+Id=fc-daily-standup.timer
+Description=FC daily standup, 06:00 Asia/Singapore
+ActiveState=active
+FragmentPath=/home/alice/.config/systemd/user/fc-daily-standup.timer
+UnitFileState=enabled
+Unit=fc-daily-standup.service
+TimersCalendar={ OnCalendar=*-*-* 06:00:00 Asia/Singapore ; next_elapse=@1794693600 }
+LastTriggerUSec=@1794607205
+Result=success
+
+Id=fc-emmet-checkin.timer
+Description=FC Emmet check-in, 10:00 and 22:00 Asia/Singapore
+ActiveState=inactive
+FragmentPath=/home/alice/.config/systemd/user/fc-emmet-checkin.timer
+UnitFileState=disabled
+Unit=fc-emmet-checkin.service
+TimersCalendar={ OnCalendar=*-*-* 10,22:00:00 Asia/Singapore ; next_elapse=(null) }
+LastTriggerUSec=
+Result=success
+
+Id=herdr-gc-stale.timer
+Description=Weekday Herdr 48h worker GC
+ActiveState=active
+FragmentPath=/home/alice/.config/systemd/user/herdr-gc-stale.timer
+UnitFileState=enabled
+Unit=herdr-gc-stale.service
+TimersCalendar={ OnCalendar=Mon..Fri *-*-* 09:49:00 ; next_elapse=@1794822540 }
+LastTriggerUSec=@1794563348
+Result=success
+
+Id=launchpadlib-cache-clean.timer
+Description=Clean up old files in the Launchpadlib cache
+ActiveState=active
+FragmentPath=/usr/lib/systemd/user/launchpadlib-cache-clean.timer
+UnitFileState=enabled
+Unit=launchpadlib-cache-clean.service
+TimersMonotonic={ OnUnitActiveUSec=1d ; next_elapse=1d 5min 21.987127s }
+TimersMonotonic={ OnStartupUSec=5min ; next_elapse=5min 19.712328s }
+LastTriggerUSec=@1794569743
+Result=success
+
+Id=matilda-mail-summary-check.timer
+Description=Matilda mail summary watchdog, weekdays 02:30 UTC (after the 01:30 UTC backstop)
+ActiveState=active
+FragmentPath=/home/alice/.config/systemd/user/matilda-mail-summary-check.timer
+UnitFileState=enabled
+Unit=matilda-mail-summary-check.service
+TimersCalendar={ OnCalendar=Mon..Fri *-*-* 02:30:00 UTC ; next_elapse=@1794796200 }
+LastTriggerUSec=@1794537008
+Result=success
+
+Id=matilda-mailtriage.timer
+Description=Matilda mail triage, weekdays 08:00 Asia/Singapore (00:00 UTC)
+ActiveState=active
+FragmentPath=/home/alice/.config/systemd/user/matilda-mailtriage.timer
+UnitFileState=enabled
+Unit=matilda-mailtriage.service
+TimersCalendar={ OnCalendar=Mon..Fri *-*-* 00:00:00 UTC ; next_elapse=@1794787200 }
+LastTriggerUSec=@1794528008
+Result=success
+
+Id=oauth-watch.timer
+Description=Run oauth-watch every 5 minutes
+ActiveState=active
+FragmentPath=/home/alice/.config/systemd/user/oauth-watch.timer
+UnitFileState=enabled
+Unit=oauth-watch.service
+TimersMonotonic={ OnBootUSec=2min ; next_elapse=2min }
+TimersCalendar={ OnCalendar=*-*-* *:00/5:00 ; next_elapse=@1794634500 }
+LastTriggerUSec=@1794634205
+Result=success
+
+Id=pi-sync-push.timer
+Description=Periodic pi-sync push (every 15 min)
+ActiveState=active
+FragmentPath=/home/alice/.config/systemd/user/pi-sync-push.timer
+UnitFileState=enabled
+Unit=pi-sync-push.service
+TimersMonotonic={ OnUnitActiveUSec=15min ; next_elapse=18h 9min 55.593685s }
+TimersMonotonic={ OnBootUSec=4min ; next_elapse=4min }
+LastTriggerUSec=@1794633917
+Result=success
+
+Id=ratelimit-watchdog.timer
+Description=Rate-limit watchdog every 2 minutes
+ActiveState=active
+FragmentPath=/home/alice/.config/systemd/user/ratelimit-watchdog.timer
+UnitFileState=enabled
+Unit=ratelimit-watchdog.service
+TimersMonotonic={ OnUnitActiveUSec=2min ; next_elapse=18h 4min 28.444428s }
+TimersMonotonic={ OnBootUSec=3min ; next_elapse=3min }
+LastTriggerUSec=@1794634370
+Result=success
+
+Id=rebuild-phone-mirror.timer
+Description=Rebuild the phone mirror every 15 minutes
+ActiveState=active
+FragmentPath=/home/alice/.config/systemd/user/rebuild-phone-mirror.timer
+UnitFileState=enabled
+Unit=rebuild-phone-mirror.service
+TimersMonotonic={ OnUnitActiveUSec=15min ; next_elapse=18h 9min 53.123617s }
+TimersMonotonic={ OnBootUSec=3min ; next_elapse=3min }
+LastTriggerUSec=@1794633915
+Result=success
+
+Id=snap.firmware-updater.firmware-notifier.timer
+Description=Timer firmware-notifier for snap application firmware-updater.firmware-notifier
+ActiveState=active
+FragmentPath=/etc/systemd/user/snap.firmware-updater.firmware-notifier.timer
+UnitFileState=enabled
+Unit=snap.firmware-updater.firmware-notifier.service
+TimersCalendar={ OnCalendar=*-*-* 21:00:00 ; next_elapse=@1794690000 }
+TimersCalendar={ OnCalendar=*-*-* 18:00:00 ; next_elapse=@1794679200 }
+TimersCalendar={ OnCalendar=*-*-* 15:00:00 ; next_elapse=@1794668400 }
+TimersCalendar={ OnCalendar=*-*-* 12:00:00 ; next_elapse=@1794657600 }
+TimersCalendar={ OnCalendar=*-*-* 09:00:00 ; next_elapse=@1794646800 }
+TimersCalendar={ OnCalendar=*-*-* 06:00:00 ; next_elapse=@1794636000 }
+TimersCalendar={ OnCalendar=*-*-* 03:00:00 ; next_elapse=@1794711600 }
+TimersCalendar={ OnCalendar=*-*-* 00:00:00 ; next_elapse=@1794700800 }
+LastTriggerUSec=@1794625205
+Result=success
+
+Id=systemd-tmpfiles-clean.timer
+Description=Daily Cleanup of User's Temporary Directories
+ActiveState=inactive
+FragmentPath=/usr/lib/systemd/user/systemd-tmpfiles-clean.timer
+UnitFileState=disabled
+Unit=systemd-tmpfiles-clean.service
+TimersMonotonic={ OnUnitActiveUSec=1d ; next_elapse=0 }
+TimersMonotonic={ OnStartupUSec=5min ; next_elapse=0 }
+LastTriggerUSec=
+Result=success
+
+Id=ubuntu-insights-collect.timer
+Description="Run Ubuntu-Insights collect 5 mins after boot and every month relative to the activation time"
+ActiveState=active
+FragmentPath=/usr/lib/systemd/user/ubuntu-insights-collect.timer
+UnitFileState=enabled
+Unit=ubuntu-insights-collect.service
+TimersMonotonic={ OnUnitActiveUSec=1month ; next_elapse=1month 5min 5.358435s }
+TimersMonotonic={ OnBootUSec=5min ; next_elapse=5min }
+LastTriggerUSec=@1794569727
+Result=success
+
+Id=ubuntu-insights-upload.timer
+Description="Run Ubuntu-Insights upload 8 mins after boot and every week relative to the activation time"
+ActiveState=active
+FragmentPath=/usr/lib/systemd/user/ubuntu-insights-upload.timer
+UnitFileState=enabled
+Unit=ubuntu-insights-upload.service
+TimersMonotonic={ OnUnitActiveUSec=1w ; next_elapse=1w 8min 35.093782s }
+TimersMonotonic={ OnBootUSec=8min ; next_elapse=8min }
+LastTriggerUSec=@1794569937
+Result=success
+
+Id=voice-corpus-sync.timer
+Description=Mirror the dictation corpus to backup storage every 15 min
+ActiveState=active
+FragmentPath=/home/alice/.config/systemd/user/voice-corpus-sync.timer
+UnitFileState=enabled
+Unit=voice-corpus-sync.service
+TimersMonotonic={ OnUnitActiveUSec=15min ; next_elapse=18h 12min 4.047476s }
+TimersMonotonic={ OnBootUSec=5min ; next_elapse=5min }
+LastTriggerUSec=@1794634046
+Result=success
+
+Id=x-reply-leads.timer
+Description=X reply-leads fetch (Mon..Fri 07:00,20:00 +-3 min Asia/Singapore)
+ActiveState=active
+FragmentPath=/home/alice/.config/systemd/user/x-reply-leads.timer
+UnitFileState=enabled
+Unit=x-reply-leads.service
+TimersCalendar={ OnCalendar=Mon..Fri *-*-* 19:57:00 Asia/Singapore ; next_elapse=@1794830220 }
+TimersCalendar={ OnCalendar=Mon..Fri *-*-* 06:57:00 Asia/Singapore ; next_elapse=@1794783420 }
+LastTriggerUSec=@1794571175
+Result=success

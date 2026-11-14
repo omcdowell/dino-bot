@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
@@ -14,9 +14,8 @@ afterEach(() => {
 function createTts(numThreads?: number, beforeGenerate?: () => Promise<void>) {
   const modelDir = mkdtempSync(join(tmpdir(), "paseo-tts-"));
   directories.push(modelDir);
-  for (const name of ["model.onnx", "voices.bin", "tokens.txt"])
+  for (const name of ["model.onnx", "voices.bin", "tokens.txt", "lexicon-en-us.txt"])
     writeFileSync(join(modelDir, name), "");
-  mkdirSync(join(modelDir, "espeak-ng-data"));
   let nativeConfig: unknown;
   const requests: unknown[] = [];
   const released: boolean[] = [];
@@ -59,6 +58,19 @@ function holdNativeSynthesis() {
 }
 
 describe("SherpaOnnxTTS", () => {
+  it("configures Kokoro with the lexicon frontend (sherpa-onnx 2.x has no espeak-ng)", () => {
+    const { nativeConfig } = createTts();
+    const kokoro = (nativeConfig as { model: { kokoro: Record<string, unknown> } }).model.kokoro;
+    expect(kokoro.lexicon).toMatch(/lexicon-en-us\.txt$/);
+    expect(kokoro).not.toHaveProperty("dataDir");
+  });
+
+  it("spells out digits, which the lexicon frontend would drop", async () => {
+    const { tts, requests } = createTts();
+    await tts.synthesizeSpeech("Review 3 files");
+    expect(requests[0]).toMatchObject({ text: "Review three files" });
+  });
+
   it("requests Electron-compatible copied samples and returns PCM audio", async () => {
     const { tts, requests } = createTts();
     const result = await tts.synthesizeSpeech("hello");

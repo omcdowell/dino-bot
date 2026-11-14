@@ -1,7 +1,7 @@
 {
   "name": "DinoBot",
   "id": "dinobot",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "installUrl": "https://omcdowell.github.io/dino-bot/install",
   "downloadBaseUrl": "https://github.com/omcdowell/dino-bot/releases/latest/download",
   "releaseRepo": "omcdowell/dino-bot",

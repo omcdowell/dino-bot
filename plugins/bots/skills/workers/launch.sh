@@ -1,7 +1,22 @@
 #!/bin/sh
-# Start a herdr worker (pi) on a brief: one workspace per project, one tab per task.
+# Start a herdr worker (pi, or Claude Code) on a brief: one workspace per project, one tab per task.
 #
-#   sh launch.sh <name> <brief-file> <minutes> [cwd]
+#   sh launch.sh [--engine pi|cc] <name> <brief-file> <minutes> [cwd]
+#
+# --engine (or WORKER_ENGINE): pi (default) or cc, the interactive Claude Code TUI (`claude`, run by
+# herdr's claude kind). Everything else is the same for both: the brief, the first prompt, the
+# bot-dm report, bot-worker add, the skill shortlist. cc only (see SKILL.md, "Claude Code workers"):
+#   CC_WORKER_CONFIG_DIR  CLAUDE_CONFIG_DIR for the worker (its own login and settings); empty: the
+#                 user's own Claude Code login. DINOBOT_CLAUDE_CONFIG_DIR, when set, comes first
+#                 (the login the app's Claude Code card shows)
+#   CC_WORKER_BASE_URL    ANTHROPIC_BASE_URL for the worker (a proxy holding the login), with
+#                 CC_WORKER_AUTH_TOKEN (default: proxy) as ANTHROPIC_AUTH_TOKEN
+#   CC_WORKER_MODEL       claude --model (default: WORKER_MODEL / BOTS_WORKER_MODEL when it is an
+#                 anthropic/ model, its :thinking as --effort; else Claude Code's default)
+#   CC_WORKER_TOOLS       claude --tools (default Bash,Read,Edit,Write,Glob,Grep,Skill: the token trim)
+#   WORKER_BUDGET_USD     budget in US$ shown next to the spend in the status line (default: the
+#                 first "US$<n>" in the brief; optional). Advisory, as for pi: the bot stops
+#                 the worker at it. Files go to <brief without .md>.cc/
 #
 # Run it in the bot's own shell (not in a worker pane). Env:
 #   BOT           your bot name (folder under the bots root); default: the current folder when
@@ -9,6 +24,11 @@
 #   PROJECT       workspace label (default: the last path part of cwd)
 #   WORKER_MODEL  pi --model for this worker (default: $BOTS_WORKER_MODEL, the model chosen
 #                 for workers in setup; empty: pi's own defaults)
+#   PI_CODING_AGENT_DIR  pi's folder for sign-ins, settings and packages. The worker uses the
+#                 same one as the bots: this variable when set (the daemon's, which the bot's
+#                 shell inherits), else DinoBot's own (DINOBOT_PI_DIR, else $DINOBOT_HOME/pi:
+#                 where the app's Providers page signs in). Only when that folder exists; else
+#                 pi's default (~/.pi/agent).
 #   WORKER_SKILLS more skill files or folders for the worker, colon-separated (each becomes
 #                 --skill <path>), added to the bundled worker shortlist. The entry `none` drops
 #                 the shortlist (WORKER_SKILLS=none: no skills at all; none:/x/y: only /x/y).
@@ -20,13 +40,20 @@
 set -eu
 
 usage() {
-  echo "usage: launch.sh <name> <brief-file> <minutes> [cwd]" >&2
+  echo "usage: launch.sh <name> <brief-file> <minutes> [cwd]   (first, optional: --engine pi|cc)" >&2
   exit 2
 }
 fail() {
   echo "launch: $*" >&2
   exit 1
 }
+ENGINE=${WORKER_ENGINE:-pi}
+if [ "${1:-}" = --engine ]; then
+  [ $# -ge 2 ] || usage
+  ENGINE=$2
+  shift 2
+fi
+case $ENGINE in pi | cc) ;; *) echo "launch: engine must be pi or cc" >&2; exit 2 ;; esac
 [ $# -ge 3 ] && [ $# -le 4 ] || usage
 NAME=$1
 BRIEF=$2
@@ -48,11 +75,17 @@ fi
 PROJECT=${PROJECT:-$(basename "$CWD")}
 MODEL=${WORKER_MODEL:-${BOTS_WORKER_MODEL:-}}
 SESSION_ID="$NAME-$(date +%Y%m%d-%H%M%S)"
+# Claude Code wants a UUID session id.
+[ "$ENGINE" != cc ] || SESSION_ID=$(node -e 'process.stdout.write(require("crypto").randomUUID())')
 
 # get <path.to.value>: reads herdr's JSON on stdin (node is always there; jq may not be).
 get() {
   node -e 'let s="";process.stdin.on("data",(d)=>(s+=d)).on("end",()=>{let v=JSON.parse(s);for(const k of process.argv[1].split("."))v=v==null?v:v[k];process.stdout.write(v==null?"":String(v))})' "$1"
 }
+
+# Without claude, herdr would wait a minute on a pane that only says "command not found".
+[ "$ENGINE" != cc ] || command -v claude >/dev/null 2>&1 ||
+  fail "claude (Claude Code) is not on PATH; install it, or use --engine pi"
 
 if herdr agent get "$NAME" >/dev/null 2>&1; then
   fail "a live worker is already named $NAME; pick another name"
@@ -72,6 +105,20 @@ fi
 PANE=$(printf '%s' "$OUT" | get result.root_pane.pane_id)
 [ -n "$PANE" ] || fail "herdr gave no pane id: $OUT"
 
+if [ "$ENGINE" = cc ]; then
+  . "$(cd "$(dirname "$0")" && pwd)/launch-cc.sh"
+else
+# Same pi sign-ins as the bots (see PI_CODING_AGENT_DIR above): set in the pane's shell, which herdr
+# then types `pi ...` into (after the shell's own start-up files, so they cannot undo it).
+PIDIR=${PI_CODING_AGENT_DIR:-}
+[ -n "$PIDIR" ] || [ -z "${DINOBOT_HOME:-}${DINOBOT_PI_DIR:-}" ] || PIDIR=${DINOBOT_PI_DIR:-$DINOBOT_HOME/pi}
+case $PIDIR in "~") PIDIR=$HOME ;; "~/"*) PIDIR=$HOME/${PIDIR#"~/"} ;; esac
+if [ -n "$PIDIR" ] && [ -d "$PIDIR" ]; then
+  PIDIR=$(cd "$PIDIR" && pwd)
+  Q=$(printf '%s' "$PIDIR" | sed "s/'/'\\\\''/g")
+  herdr pane run "$PANE" "export PI_CODING_AGENT_DIR='$Q'" >/dev/null || fail "cannot set PI_CODING_AGENT_DIR in pane $PANE"
+  sleep 1
+fi
 set -- --no-skills --session-id "$SESSION_ID" --name "$NAME"
 # Bundled shortlist first (unless WORKER_SKILLS has `none`), then WORKER_SKILLS.
 case ":${WORKER_SKILLS:-}:" in
@@ -97,6 +144,7 @@ fi
 OUT=$(herdr agent start "$NAME" --kind pi --pane "$PANE" --timeout 60000 -- "$@") ||
   fail "pi did not start in pane $PANE (tab $TAB left open to inspect: herdr pane read $PANE --source recent)"
 SESSION_FILE=$(printf '%s' "$OUT" | get result.agent.agent_session.value)
+fi
 
 PROMPT="Read and carry out $BRIEF (about $MINUTES min). When done, report with: bot-dm $BOT --from worker:$NAME --kind report --text \"<one-line status; report path>\""
 arrived() { [ -n "$SESSION_FILE" ] && [ -f "$SESSION_FILE" ] && grep -qF "$BRIEF" "$SESSION_FILE"; }
@@ -115,7 +163,7 @@ fi
 
 bot-worker add "$NAME" --pane "$PANE" --bot "$BOT" >/dev/null || echo "launch: bot-worker add failed; run it yourself: bot-worker add $NAME" >&2
 
-INFO=$(node -e 'const [name,bot,project,workspace,tab,pane,cwd,brief,minutes,model,session_id,session_file]=process.argv.slice(1);process.stdout.write(JSON.stringify({name,bot,project,workspace,tab,pane,cwd,brief,minutes:Number(minutes),model:model||null,session_id,session_file}))' \
-  "$NAME" "$BOT" "$PROJECT" "$WS" "$TAB" "$PANE" "$CWD" "$BRIEF" "$MINUTES" "$MODEL" "$SESSION_ID" "$SESSION_FILE")
+INFO=$(node -e 'const [name,bot,project,workspace,tab,pane,cwd,brief,minutes,model,session_id,session_file,engine,cc]=process.argv.slice(1);process.stdout.write(JSON.stringify({name,bot,project,workspace,tab,pane,cwd,brief,minutes:Number(minutes),model:model||null,session_id,session_file,...(engine==="cc"?{engine,cc_dir:cc}:{})}))' \
+  "$NAME" "$BOT" "$PROJECT" "$WS" "$TAB" "$PANE" "$CWD" "$BRIEF" "$MINUTES" "$MODEL" "$SESSION_ID" "$SESSION_FILE" "$ENGINE" "${CCDIR:-}")
 printf '%s\n' "$INFO" >"${BRIEF%.md}.launch.json"
 printf '%s\n' "$INFO"

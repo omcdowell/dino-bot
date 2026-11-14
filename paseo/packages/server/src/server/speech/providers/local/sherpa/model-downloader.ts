@@ -5,10 +5,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type pino from "pino";
 
-import {
-  getSherpaOnnxModelSpec,
-  type SherpaOnnxModelId,
-} from "./model-catalog.js";
+import { getSherpaOnnxModelSpec, type SherpaOnnxModelId } from "./model-catalog.js";
 import { spawnProcess } from "../../../../../utils/spawn.js";
 
 export interface EnsureSherpaOnnxModelOptions {
@@ -18,18 +15,12 @@ export interface EnsureSherpaOnnxModelOptions {
   signal?: AbortSignal;
 }
 
-export function getSherpaOnnxModelDir(
-  modelsDir: string,
-  modelId: SherpaOnnxModelId
-): string {
+export function getSherpaOnnxModelDir(modelsDir: string, modelId: SherpaOnnxModelId): string {
   const spec = getSherpaOnnxModelSpec(modelId);
   return path.join(modelsDir, spec.extractedDir);
 }
 
-async function hasRequiredFiles(
-  modelDir: string,
-  requiredFiles: string[]
-): Promise<boolean> {
+async function hasRequiredFiles(modelDir: string, requiredFiles: string[]): Promise<boolean> {
   const results = await Promise.all(
     requiredFiles.map(async (rel) => {
       const abs = path.join(modelDir, rel);
@@ -42,7 +33,7 @@ async function hasRequiredFiles(
       } catch {
         return false;
       }
-    })
+    }),
   );
   return results.every((present) => present);
 }
@@ -57,9 +48,7 @@ async function downloadToFile(options: DownloadToFileOptions): Promise<void> {
   const { url, outputPath } = options;
   const res = await fetch(url, { signal: options.signal });
   if (!res.ok) {
-    throw new Error(
-      `Failed to download ${url}: ${res.status} ${res.statusText}`
-    );
+    throw new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
   }
   if (!res.body) {
     throw new Error(`Failed to download ${url}: missing response body`);
@@ -91,7 +80,7 @@ async function downloadToFile(options: DownloadToFileOptions): Promise<void> {
 export function describeTarFailure(
   code: number | null,
   stderr: string,
-  archivePath: string
+  archivePath: string,
 ): string {
   const tail = stderr.trim().split("\n").slice(-2).join(" ").slice(0, 300);
   if (
@@ -107,7 +96,7 @@ export function describeTarFailure(
 async function extractTarArchive(
   archivePath: string,
   destDir: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<void> {
   await mkdir(destDir, { recursive: true });
 
@@ -136,16 +125,13 @@ interface SherpaOnnxModelPaths {
 
 function getSherpaOnnxModelPaths(
   modelsDir: string,
-  modelId: SherpaOnnxModelId
+  modelId: SherpaOnnxModelId,
 ): SherpaOnnxModelPaths {
   const spec = getSherpaOnnxModelSpec(modelId);
   const downloadsDir = path.join(modelsDir, ".downloads");
   return {
     modelDir: path.join(modelsDir, spec.extractedDir),
-    archivePath: path.join(
-      downloadsDir,
-      path.basename(new URL(spec.archiveUrl).pathname)
-    ),
+    archivePath: path.join(downloadsDir, path.basename(new URL(spec.archiveUrl).pathname)),
     extractionDir: path.join(downloadsDir, `${spec.extractedDir}.extracting`),
   };
 }
@@ -154,14 +140,42 @@ function getSherpaOnnxModelPaths(
 // still in .downloads did not finish installing and may hold truncated files.
 export async function isSherpaOnnxModelInstalled(
   modelsDir: string,
-  modelId: SherpaOnnxModelId
+  modelId: SherpaOnnxModelId,
 ): Promise<boolean> {
   const spec = getSherpaOnnxModelSpec(modelId);
   const { modelDir, archivePath } = getSherpaOnnxModelPaths(modelsDir, modelId);
   return (
     !(await isNonEmptyFile(archivePath)) &&
-    (await hasRequiredFiles(modelDir, spec.requiredFiles))
+    (await hasRequiredFiles(modelDir, spec.requiredFiles)) &&
+    (await hasRequiredFiles(modelDir, extraFileNames(spec.extraFiles)))
   );
+}
+
+function extraFileNames(extraFiles: ReadonlyArray<{ file: string }> | undefined): string[] {
+  return (extraFiles ?? []).map((extra) => extra.file);
+}
+
+async function ensureExtraFiles(options: {
+  modelDir: string;
+  extraFiles: ReadonlyArray<{ file: string; url: string }> | undefined;
+  logger: pino.Logger;
+  signal?: AbortSignal;
+}): Promise<void> {
+  for (const extra of options.extraFiles ?? []) {
+    const target = path.join(options.modelDir, extra.file);
+    if (await isNonEmptyFile(target)) {
+      continue;
+    }
+    options.logger.info({ file: extra.file, url: extra.url }, "Downloading model file");
+    // Download beside the target and rename, so a partial file never looks installed.
+    const partial = `${target}.partial`;
+    try {
+      await downloadToFile({ url: extra.url, outputPath: partial, signal: options.signal });
+      await rename(partial, target);
+    } finally {
+      await rm(partial, { force: true });
+    }
+  }
 }
 
 async function isNonEmptyFile(filePath: string): Promise<boolean> {
@@ -174,7 +188,7 @@ async function isNonEmptyFile(filePath: string): Promise<boolean> {
 }
 
 export async function ensureSherpaOnnxModel(
-  options: EnsureSherpaOnnxModelOptions
+  options: EnsureSherpaOnnxModelOptions,
 ): Promise<string> {
   const logger = options.logger.child({
     module: "speech",
@@ -186,7 +200,7 @@ export async function ensureSherpaOnnxModel(
   const spec = getSherpaOnnxModelSpec(options.modelId);
   const { modelDir, archivePath, extractionDir } = getSherpaOnnxModelPaths(
     options.modelsDir,
-    options.modelId
+    options.modelId,
   );
   if (await isSherpaOnnxModelInstalled(options.modelsDir, options.modelId)) {
     return modelDir;
@@ -195,6 +209,27 @@ export async function ensureSherpaOnnxModel(
   logger.info({ modelsDir: options.modelsDir }, "Starting model download");
 
   try {
+    const archiveInstalled =
+      !(await isNonEmptyFile(archivePath)) &&
+      (await hasRequiredFiles(modelDir, spec.requiredFiles));
+    if (!archiveInstalled) {
+      await installArchive();
+    }
+    await ensureExtraFiles({
+      modelDir,
+      extraFiles: spec.extraFiles,
+      logger,
+      signal: options.signal,
+    });
+
+    logger.info({ modelDir }, "Model download completed");
+    return modelDir;
+  } catch (error) {
+    logger.error({ err: error }, "Model download failed");
+    throw error;
+  }
+
+  async function installArchive(): Promise<void> {
     if (!(await isNonEmptyFile(archivePath))) {
       await downloadToFile({
         url: spec.archiveUrl,
@@ -209,7 +244,7 @@ export async function ensureSherpaOnnxModel(
         archivePath,
         modelDir,
       },
-      "Extracting model archive"
+      "Extracting model archive",
     );
     // Extract beside the archive and move into place once complete, so an interrupted
     // extraction never leaves partial files at modelDir.
@@ -223,13 +258,11 @@ export async function ensureSherpaOnnxModel(
           modelId: options.modelId,
           modelDir,
         },
-        "Verifying downloaded model files"
+        "Verifying downloaded model files",
       );
       if (!(await hasRequiredFiles(extractedModelDir, spec.requiredFiles))) {
         throw new Error(
-          `Downloaded and extracted ${path.basename(
-            archivePath
-          )}, but required files are missing.`
+          `Downloaded and extracted ${path.basename(archivePath)}, but required files are missing.`,
         );
       }
 
@@ -238,7 +271,7 @@ export async function ensureSherpaOnnxModel(
           modelId: options.modelId,
           archivePath,
         },
-        "Finalizing model artifacts"
+        "Finalizing model artifacts",
       );
       // A retained archive marks the model as not installed, so remove it before the model
       // is moved into place. If removal fails, nothing at modelDir looks installed.
@@ -248,12 +281,6 @@ export async function ensureSherpaOnnxModel(
     } finally {
       await rm(extractionDir, { recursive: true, force: true });
     }
-
-    logger.info({ modelDir }, "Model download completed");
-    return modelDir;
-  } catch (error) {
-    logger.error({ err: error }, "Model download failed");
-    throw error;
   }
 }
 
@@ -273,7 +300,7 @@ export async function ensureSherpaOnnxModels(options: {
         signal: options.signal,
       });
       return [id, modelPath] as [SherpaOnnxModelId, string];
-    })
+    }),
   );
   // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
   return Object.fromEntries(entries) as Record<SherpaOnnxModelId, string>;

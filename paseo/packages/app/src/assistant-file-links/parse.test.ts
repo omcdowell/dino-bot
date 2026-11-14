@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyAssistantFileLink,
+  hasKnownFileExtension,
   normalizeInlinePathTarget,
   parseAssistantFileLink,
   parseFileProtocolUrl,
@@ -467,5 +468,25 @@ describe("normalizeInlinePathTarget", () => {
     ).toEqual({
       directory: "packages/app",
     });
+  });
+});
+
+describe("hasKnownFileExtension", () => {
+  it("is true for names with a known file extension", () => {
+    expect(hasKnownFileExtension("~/notes.md")).toBe(true);
+    expect(hasKnownFileExtension("/abs/src/app.TS")).toBe(true);
+    expect(hasKnownFileExtension("docs\\linux.md")).toBe(true);
+  });
+
+  it("is false for extension-less and dot-names, which may be folders", () => {
+    expect(hasKnownFileExtension("~/bots")).toBe(false);
+    expect(hasKnownFileExtension("~/.optchat")).toBe(false);
+    expect(hasKnownFileExtension("~/.local/state/bot-rooms")).toBe(false);
+    expect(hasKnownFileExtension("/abs/dir/")).toBe(false);
+    expect(hasKnownFileExtension("Makefile")).toBe(false);
+  });
+
+  it("is false for an unknown extension", () => {
+    expect(hasKnownFileExtension("~/archive.zzz")).toBe(false);
   });
 });

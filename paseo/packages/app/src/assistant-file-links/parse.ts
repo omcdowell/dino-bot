@@ -610,6 +610,20 @@ function isPlausibleAssistantLocalPath(pathValue: string): boolean {
   return isPlausibleAssistantFileName(firstSegment);
 }
 
+/**
+ * True when the last segment of `pathValue` has a known file extension (`notes.md`, `~/x.ts`).
+ * Extension-less names (`~/bots`) and dot-names (`~/.optchat`) are ambiguous: they are often
+ * folders, so callers should check with the daemon before opening them as a file.
+ */
+export function hasKnownFileExtension(pathValue: string): boolean {
+  const lastSegment = pathValue.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop() ?? "";
+  const lastDot = lastSegment.lastIndexOf(".");
+  if (lastDot <= 0) {
+    return false;
+  }
+  return ASSISTANT_FILE_EXTENSIONS.has(lastSegment.slice(lastDot + 1).toLowerCase());
+}
+
 function isPlausibleAssistantFileName(fileName: string | undefined): boolean {
   if (!fileName) {
     return false;

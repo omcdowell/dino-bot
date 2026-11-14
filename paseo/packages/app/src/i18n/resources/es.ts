@@ -1963,6 +1963,8 @@ export const es: TranslationResources = {
       tooLargeToDisplay: "Este archivo es demasiado grande para mostrarlo",
       failedToLoad: "No se pudo cargar el archivo",
       failedToLoadPreview: "No se pudo cargar la vista previa del archivo",
+      failedToLoadFolder: "No se pudo cargar la carpeta",
+      folderEmpty: "Esta carpeta está vacía",
       editor: {
         fileSize: "Tamaño {{size}}",
         lines: "{{count}} líneas",

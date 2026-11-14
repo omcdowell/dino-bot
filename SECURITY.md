@@ -32,8 +32,8 @@ can try to trick a bot. This is called "prompt injection". To limit the damage:
   over your Wi-Fi in plain text.
 - The pairing QR code holds your daemon's address and a **password**. Treat it like a password and
   don't share a photo of it. There is no command to change the password yet. If it leaks, run
-  `dinobot uninstall --purge` and install again. You will then need to sign in to your AI
-  providers again; your bots and memories are kept.
+  `dinobot uninstall` and install again. You will then need to sign in to your AI
+  providers again; your bots and memories are kept (`dinobot uninstall --purge` deletes those too).
 - If you expose the daemon any other way, such as port forwarding or a public server address,
   anyone who can reach it and knows the password controls your account. Please don't.
 

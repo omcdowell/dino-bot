@@ -30,10 +30,25 @@ The installer itself never uses sudo.
 
 ## Uninstall
 
-`dinobot uninstall [--purge]`: the systemd units are disabled, stopped and deleted, then
-`daemon-reload` + `reset-failed`. Left on purpose: `~/bots`, `~/.optchat`,
-`~/.local/state/bot-rooms` (group chats) and herdr's own `~/.config/herdr` and
-`~/.local/state/herdr`. Linger is not turned off.
+`dinobot uninstall`: the systemd units are disabled, stopped and deleted (then `daemon-reload` +
+`reset-failed`), herdr's socket folder goes, and so does all of `~/.dinobot`: the app, your AI
+sign-ins (`~/.dinobot/pi/auth.json`), the daemon password and key. Kept: your bots (`~/bots`),
+memories (`~/.optchat`), group chats (`~/.local/state/bot-rooms`) and herdr's own `~/.config/herdr`
+and `~/.local/state/herdr`. Linger is not changed.
+
+`dinobot uninstall --purge`: full wipe. Everything above, plus `~/bots`, `~/.optchat`,
+`~/.local/state/bot-rooms`, `~/.local/state/bot-dm` (bot messages, worker registry),
+`~/.config/herdr` and `~/.local/state/herdr` (`PASEO_BOTS_ROOT` and `OPTCHAT_HOME` are honoured;
+`PASEO_BOTS_ROOMS`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` only when inside your home folder). It first lists the exact paths with their
+sizes and asks you to type `DELETE`; `--yes` skips the question (scripts). Without a terminal and
+without `--yes` it refuses. It never deletes your home folder, `/` or a folder above home (the whole
+uninstall stops if a path resolves to one), and symlinks are removed as links, never followed.
+Linger is turned off (`loginctl disable-linger`, no sudo) only if setup turned it on; if it is on
+and setup did not record turning it on, the command is printed instead.
+
+On WSL both forms also undo `dinobot wsl-autostart` (the Windows Startup script and the
+`.wslconfig` line). On macOS the launchd agents are booted out and their plists in
+`~/Library/LaunchAgents` deleted (user agents only; nothing needs sudo).
 
 ## Tailscale
 

@@ -25,6 +25,8 @@ import { isFileQueryEnabled } from "@/components/file-pane-enabled";
 import { isWeb } from "@/constants/platform";
 import { useAppSettings } from "@/hooks/use-settings";
 import { useLiveFile } from "./live-file/hook";
+import { FolderListing } from "./folder-listing";
+import { isNotAFileError } from "./folder-listing-model";
 import { useFilePreview } from "./preview-lifecycle/hook";
 import { resolveFilePreviewLifecycle } from "./preview-lifecycle/model";
 import { FilePanelBar } from "./bar";
@@ -224,11 +226,14 @@ export function FilePane({
   workspaceRoot,
   location,
   navigationRevision,
+  onOpenPath,
 }: {
   serverId: string;
   workspaceRoot: string;
   location: WorkspaceFileLocation;
   navigationRevision: number;
+  /** Opens another path in this tab; used when the path is a folder and is listed instead. */
+  onOpenPath?: (path: string) => void;
 }) {
   const { t } = useTranslation();
   const isMobile = useIsCompactFormFactor();
@@ -316,6 +321,7 @@ export function FilePane({
       location={location}
       navigationRevision={navigationRevision}
       imagePreviewUri={imagePreviewUri}
+      onOpenPath={onOpenPath}
     />
   );
 }
@@ -357,6 +363,7 @@ function FilePanePresentation({
   location,
   navigationRevision,
   imagePreviewUri,
+  onOpenPath,
 }: {
   serverId: string;
   client: DaemonClient | null;
@@ -378,6 +385,7 @@ function FilePanePresentation({
   location: WorkspaceFileLocation;
   navigationRevision: number;
   imagePreviewUri: string | null;
+  onOpenPath?: (path: string) => void;
 }) {
   if (!client && readTarget) {
     return (
@@ -412,6 +420,18 @@ function FilePanePresentation({
   }
 
   if (errorMessage) {
+    if (isNotAFileError(errorMessage) && client && readTarget) {
+      return (
+        <View style={styles.container} testID="workspace-file-pane">
+          <FolderListing
+            client={client}
+            cwd={readTarget.cwd}
+            path={readTarget.path}
+            onOpenPath={onOpenPath}
+          />
+        </View>
+      );
+    }
     if (errorMessage === "File is too large to display") {
       return (
         <View style={styles.container} testID="workspace-file-pane">

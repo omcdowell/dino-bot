@@ -23,7 +23,14 @@ import {
  * "Add a provider" (every built-in sign-in, plus installing from a link). Nothing shows on a host
  * without DinoBot or with a daemon from before provider.* (bots plugin RPCs).
  */
-export function BotProvidersSection({ serverId }: { serverId: string }) {
+export function BotProvidersSection({
+  serverId,
+  onAvailabilityChange,
+}: {
+  serverId: string;
+  /** true once the host answers as a DinoBot host, false when it has no DinoBot (or is too old). */
+  onAvailabilityChange?: (available: boolean) => void;
+}) {
   const router = useRouter();
   const [answer, setAnswer] = useState<ProviderListAnswer | null>(null);
   const [hidden, setHidden] = useState(false);
@@ -36,11 +43,14 @@ export function BotProvidersSection({ serverId }: { serverId: string }) {
       const r = await botsRpc<ProviderListAnswer>(serverId, PROVIDER_RPC.list, {});
       if (!r.available) setHidden(true);
       else setAnswer(r);
+      onAvailabilityChange?.(r.available);
     } catch (e) {
-      if (isUnsupportedRpcError(e)) setHidden(true);
-      else setError((e as Error).message);
+      if (isUnsupportedRpcError(e)) {
+        setHidden(true);
+        onAvailabilityChange?.(false);
+      } else setError((e as Error).message);
     }
-  }, [serverId]);
+  }, [serverId, onAvailabilityChange]);
   // Again whenever the screen is shown (back from a sign-in or an install).
   useFocusEffect(
     useCallback(() => {

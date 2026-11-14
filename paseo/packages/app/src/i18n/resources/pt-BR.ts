@@ -1948,6 +1948,8 @@ export const ptBR: TranslationResources = {
       tooLargeToDisplay: "Este arquivo é grande demais para exibir",
       failedToLoad: "Falha ao carregar arquivo",
       failedToLoadPreview: "Falha ao carregar prévia do arquivo",
+      failedToLoadFolder: "Falha ao carregar a pasta",
+      folderEmpty: "Esta pasta está vazia",
       editor: {
         fileSize: "Tamanho {{size}}",
         lines: "{{count}} linhas",

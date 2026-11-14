@@ -1915,6 +1915,8 @@ export const ar: TranslationResources = {
       tooLargeToDisplay: "هذا الملف كبير جدًا بحيث لا يمكن عرضه",
       failedToLoad: "فشل تحميل الملف",
       failedToLoadPreview: "فشل تحميل معاينة الملف",
+      failedToLoadFolder: "فشل تحميل المجلد",
+      folderEmpty: "هذا المجلد فارغ",
       editor: {
         fileSize: "حجم الملف {{size}}",
         lines: "{{count}} سطر",

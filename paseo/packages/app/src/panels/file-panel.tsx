@@ -1,5 +1,5 @@
 import { Text, View } from "react-native";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import invariant from "tiny-invariant";
 import { useTranslation } from "react-i18next";
 import { FilePane } from "@/file-pane/pane";
@@ -7,6 +7,7 @@ import { usePaneContext } from "@/panels/pane-context";
 import { definePanel } from "@/panels/panel-registry";
 import { useWorkspaceDirectory } from "@/stores/session-store-hooks";
 import { createMaterialFileIcon } from "@/components/material-file-icon";
+import { createWorkspaceFileTabTarget } from "@/workspace/file-open";
 
 const CENTERED_PADDED_STYLE = {
   flex: 1,
@@ -30,8 +31,14 @@ function useFilePanelDescriptor(target: { kind: "file"; path: string }) {
 
 function FilePanel() {
   const { t } = useTranslation();
-  const { serverId, workspaceId, target, fileNavigationRevision } = usePaneContext();
+  const { serverId, workspaceId, target, fileNavigationRevision, retargetCurrentTab } =
+    usePaneContext();
   const workspaceDirectory = useWorkspaceDirectory(serverId, workspaceId);
+  // A file tab that turns out to be a folder lists it; opening an entry reuses this tab.
+  const openPath = useCallback(
+    (path: string) => retargetCurrentTab(createWorkspaceFileTabTarget({ path })),
+    [retargetCurrentTab],
+  );
   invariant(target.kind === "file", "FilePanel requires file target");
   if (!workspaceDirectory) {
     return (
@@ -46,6 +53,7 @@ function FilePanel() {
       workspaceRoot={workspaceDirectory}
       location={target}
       navigationRevision={fileNavigationRevision ?? 0}
+      onOpenPath={openPath}
     />
   );
 }

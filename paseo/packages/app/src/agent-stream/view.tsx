@@ -54,6 +54,11 @@ import type { AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
 import { useSessionStore } from "@/stores/session-store";
 import { useRevealedText } from "@/hooks/use-revealed-text";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
+import { usePanelStore } from "@/stores/panel-store";
+import {
+  explorerDirectoryAncestry,
+  resolveInlinePathOpenTarget,
+} from "@/assistant-file-links/open-target";
 import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
 import { isCompactToolCall } from "@/timeline/compact-tool-call";
 import { resolveContentMaxWidth, useSettings } from "@/hooks/use-settings";
@@ -89,10 +94,7 @@ import {
 } from "./bottom-anchor-controller";
 import { createAssistantImageOccurrenceKey } from "@/assistant-image/acquisition-cache";
 import { AssistantSelectionCopySurface } from "@/assistant-selection-copy/surface";
-import {
-  AssistantFileLinkResolverProvider,
-  normalizeInlinePathTarget,
-} from "@/assistant-file-links";
+import { AssistantFileLinkResolverProvider } from "@/assistant-file-links";
 import {
   createWorkspaceFileTabTarget,
   normalizeWorkspaceFileLocation,
@@ -411,11 +413,18 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     );
 
     const workspaceRoot = context.cwd?.trim() || "";
-    const { requestDirectoryListing } = useFileExplorerActions({
+    const {
+      requestDirectoryListing,
+      selectExplorerEntry,
+      workspaceStateKey: explorerStateKey,
+    } = useFileExplorerActions({
       serverId: resolvedServerId,
       workspaceId: context.workspaceId,
       workspaceRoot,
     });
+    const setExpandedPathsForWorkspace = usePanelStore(
+      (state) => state.setExpandedPathsForWorkspace,
+    );
     const agentHistoryPagination = useLoadOlderAgentHistory({
       serverId: resolvedServerId,
       agentId,
@@ -450,20 +459,71 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       setExpandedToolCallGroupIds(new Set());
     }, [agentId]);
 
-    const handleInlinePathPress = useStableEvent(
-      (target: InlinePathTarget, disposition: OpenFileDisposition) => {
-        if (!target.path) {
+    // Opens a folder in the Files explorer and expands the tree down to it. `directory` is
+    // whatever the link said ("src", "~/bots"); the listing returns the explorer's own path.
+    const revealDirectoryInExplorer = useStableEvent(async (directory: string) => {
+      openExplorerSidebarView({
+        isCompact: isMobile,
+        workspaceKey: buildWorkspaceTabPersistenceKey({
+          serverId: resolvedServerId,
+          workspaceId: context.workspaceId ?? "",
+        }),
+        checkout: {
+          serverId: resolvedServerId,
+          cwd: context.cwd,
+          isGit: context.projectPlacement?.checkout?.isGit ?? true,
+        },
+        view: "files",
+      });
+
+      const listing = await requestDirectoryListing(directory, {
+        recordHistory: false,
+        setCurrentPath: false,
+      });
+      const ancestry = listing ? explorerDirectoryAncestry(listing.path) : [];
+      if (!listing || !explorerStateKey || ancestry.length === 0) {
+        return;
+      }
+      setExpandedPathsForWorkspace(explorerStateKey, (currentPaths) =>
+        Array.from(new Set([...currentPaths, ...ancestry])),
+      );
+      selectExplorerEntry(listing.path);
+      // The tree only draws a nested folder when every parent has been listed too.
+      await Promise.all(
+        ancestry
+          .slice(0, -1)
+          .map((parent) =>
+            requestDirectoryListing(parent, { recordHistory: false, setCurrentPath: false }),
+          ),
+      );
+    });
+
+    // Folder or file? `~/bots` and `~/.optchat` look like files to the parser, so ambiguous names
+    // are checked with a directory listing first. Anything that is not a listable folder in this
+    // workspace (a file, a missing path, a folder outside the workspace, a timeout) opens a file
+    // tab, whose pane shows folders outside the workspace as a listing (never an error toast).
+    const probeDirectory = useStableEvent(async (path: string): Promise<string | null> => {
+      if (!client || !workspaceRoot) {
+        return null;
+      }
+      const directory = await client.listDirectory(workspaceRoot, path);
+      return directory.path || ".";
+    });
+
+    const openInlinePath = useStableEvent(
+      async (target: InlinePathTarget, disposition: OpenFileDisposition) => {
+        const resolved = await resolveInlinePathOpenTarget({
+          target,
+          cwd: context.cwd,
+          probeDirectory,
+        });
+        if (!resolved) {
           return;
         }
 
-        const normalized = normalizeInlinePathTarget(target.path, context.cwd);
-        if (!normalized) {
-          return;
-        }
-
-        if (normalized.file) {
+        if (resolved.kind === "file") {
           const location = normalizeWorkspaceFileLocation({
-            path: normalized.file,
+            path: resolved.path,
             lineStart: target.lineStart,
             lineEnd: target.lineEnd,
           });
@@ -489,24 +549,13 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           return;
         }
 
-        void requestDirectoryListing(normalized.directory, {
-          recordHistory: false,
-          setCurrentPath: false,
-        });
+        await revealDirectoryInExplorer(resolved.path);
+      },
+    );
 
-        openExplorerSidebarView({
-          isCompact: isMobile,
-          workspaceKey: buildWorkspaceTabPersistenceKey({
-            serverId: resolvedServerId,
-            workspaceId: context.workspaceId ?? "",
-          }),
-          checkout: {
-            serverId: resolvedServerId,
-            cwd: context.cwd,
-            isGit: context.projectPlacement?.checkout?.isGit ?? true,
-          },
-          view: "files",
-        });
+    const handleInlinePathPress = useStableEvent(
+      (target: InlinePathTarget, disposition: OpenFileDisposition) => {
+        void openInlinePath(target, disposition);
       },
     );
 

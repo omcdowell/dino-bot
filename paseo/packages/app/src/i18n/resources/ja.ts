@@ -1934,6 +1934,8 @@ export const ja: TranslationResources = {
       tooLargeToDisplay: "このファイルは大きすぎて表示できません",
       failedToLoad: "ファイルの読み込みに失敗しました",
       failedToLoadPreview: "ファイルプレビューの読み込みに失敗しました",
+      failedToLoadFolder: "フォルダーの読み込みに失敗しました",
+      folderEmpty: "このフォルダーは空です",
       editor: {
         fileSize: "ファイルサイズ {{size}}",
         lines: "{{count}} 行",

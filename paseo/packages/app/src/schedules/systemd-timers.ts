@@ -3,6 +3,9 @@
  * `bots.timers` RPC (paseo-bots), not the daemon's schedule store. The only action is pause/resume
  * (`bots.timers.set`: stop + disable / enable + start). Hosts without the plugin contribute nothing
  * and raise no error.
+ *
+ * System timers (unit file outside the user's home: distro /usr/lib, snap's /etc/systemd/user —
+ * the plugin decides, `system: true`) are fetched too (`includeAll`) but hidden until "Show all".
  */
 export const TIMERS_PLUGIN_ID = "bots";
 export const TIMERS_METHOD = "bots.timers";
@@ -19,6 +22,8 @@ export interface SystemdTimer {
   timerState: "active" | "paused" | "inactive";
   lastResult: "ok" | "failed" | "running" | "never";
   resultDetail: string | null;
+  /** Vendor/distro timer (ubuntu-insights, snap, systemd-tmpfiles-clean…); hidden by default. */
+  system: boolean;
   serverId: string;
   serverName: string;
 }
@@ -57,6 +62,7 @@ export function parseTimers(answer: unknown, host: Omit<TimersHost, "client">): 
         timerState: STATES.find((state) => state === row.timerState) ?? "active",
         lastResult: result,
         resultDetail: str(row.resultDetail),
+        system: row.system === true,
         serverId: host.serverId,
         serverName: host.serverName,
       },
@@ -68,7 +74,7 @@ export async function fetchSystemdTimers(hosts: readonly TimersHost[]): Promise<
   const perHost = await Promise.all(
     hosts.map((host) =>
       host.client
-        .invokePluginRpc(TIMERS_PLUGIN_ID, TIMERS_METHOD, {})
+        .invokePluginRpc(TIMERS_PLUGIN_ID, TIMERS_METHOD, { includeAll: true })
         .then((answer) => parseTimers(answer, host))
         .catch((): SystemdTimer[] => []),
     ),
@@ -87,6 +93,28 @@ export async function setSystemdTimerPaused(
     paused,
   })) as { error?: unknown } | null;
   if (typeof answer?.error === "string" && answer.error) throw new Error(answer.error);
+}
+
+/** What the card lists: yours, plus system timers once "Show all" is on; `hidden` counts the rest. */
+export function visibleTimers(
+  timers: readonly SystemdTimer[],
+  showAll: boolean,
+): { shown: SystemdTimer[]; hidden: number; system: number } {
+  const system = timers.filter((timer) => timer.system).length;
+  const shown = showAll ? [...timers] : timers.filter((timer) => !timer.system);
+  return { shown, hidden: timers.length - shown.length, system };
+}
+
+/** Row title: the timer's Description= line when it has one (moved Paseo schedules read as
+ * sentences), else the unit name; the unit name then moves to the subtitle. */
+export function timerTitle(timer: SystemdTimer): {
+  title: string;
+  subtitle: string | null;
+} {
+  const description = timer.description?.trim();
+  return description
+    ? { title: description, subtitle: timer.name }
+    : { title: timer.name, subtitle: null };
 }
 
 export function timerBadge(timer: SystemdTimer): {
