@@ -58,6 +58,11 @@ bots stop with it. This line makes Windows start Ubuntu when you sign in and kee
 If setup said **"run once: sudo loginctl enable-linger …"**, run that line too. Then sign out of
 Windows and back in.
 
+The commands below use the full path `~/.dinobot/bin/dinobot`, which always works. Setup also
+links `~/.local/bin/dinobot`; Ubuntu adds `~/.local/bin` to your PATH when you next open Ubuntu,
+so from then on plain `dinobot` (for example `dinobot pair`) works too. If setup printed a line
+starting `echo 'export PATH=`, run it once.
+
 **6. Connect the iPhone.** Scan the QR code with the DinoBot app. To show
 the code again: `~/.dinobot/bin/dinobot pair`.
 

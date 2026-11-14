@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.1.8
+
+### The `dinobot` command is on your PATH
+
+- **Setup links `~/.local/bin/dinobot`** to `~/.dinobot/bin/dinobot`, so you can type `dinobot pair`,
+  `dinobot doctor` and so on instead of the full path. It creates `~/.local/bin` if needed and
+  links only `dinobot` (not `paseo`, `herdr`, `pi` or `git`, so your own tools are never shadowed).
+  Running setup again, or `dinobot update`, keeps the link and repairs it if it is stale.
+- **A `~/.local/bin/dinobot` that is not DinoBot's is left alone.** Setup says so and keeps going;
+  use `~/.dinobot/bin/dinobot` then.
+- **No shell files are edited.** If `~/.local/bin` is not on your PATH, setup prints the exact one
+  line to add for your shell (`~/.zshrc` for zsh, the Mac default; `~/.bashrc` for bash, the Linux
+  default), and until then shows later commands with their full path.
+- **Uninstall** (plain and `--purge`) removes `~/.local/bin/dinobot` only if it is DinoBot's link
+  into `~/.dinobot`. The `~/.local/bin` folder always stays.
+- Existing installs: the update to v0.1.8 runs the old updater, which does not know the link.
+  Run `~/.dinobot/bin/dinobot update` once more afterwards: it says "already up to date" and adds
+  the link (and the PATH line, if needed). `DINOBOT_NO_PATH_LINK=1` skips the link.
+
+The iPhone app is unchanged (build 11).
+
 ## v0.1.7
 
 ### Uninstall (changed, read this before you run it)

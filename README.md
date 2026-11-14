@@ -49,6 +49,14 @@ Many thanks to the Paseo project.</p>
 3. **Pair your iPhone**: install the DinoBot app, scan the QR code the installer shows, sign in to
    your AI provider in the app, and start chatting. Join the TestFlight beta: https://testflight.apple.com/join/QZm1NqTF
 
+**The `dinobot` command.** It lives in `~/.dinobot/bin/dinobot`, and setup links it as
+`~/.local/bin/dinobot` (only that one command; DinoBot never edits your shell files). If
+`~/.local/bin` is not on your PATH yet, setup prints the one line to add for your shell, for example
+`echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc` on a Mac; open a new terminal after it.
+Until then, use the full path `~/.dinobot/bin/dinobot`. Then `dinobot help` lists the commands:
+`dinobot pair` shows the pairing code again, `dinobot doctor` checks everything, `dinobot update`
+updates, `dinobot uninstall` removes DinoBot.
+
 Sharing a Mac with someone who already uses DinoBot or Tailscale? See
 [Two people on one Mac](docs/shared-mac.md) (advanced).
 
@@ -66,7 +74,7 @@ network.
 - **Linux** (x64): `DinoBot-x86_64.AppImage` from the same release. Make it executable
   (`chmod +x`) and run it; see [Linux](docs/linux.md#desktop-app) if it does not start.
 
-To connect, run `~/.dinobot/bin/dinobot pair --link` on the DinoBot computer and paste the link
+To connect, run `dinobot pair --link` (or `~/.dinobot/bin/dinobot pair --link`) on the DinoBot computer and paste the link
 into the app (**Paste pairing link**). The app does not update itself: download the new version
 from the release page.
 

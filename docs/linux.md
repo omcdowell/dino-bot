@@ -26,7 +26,27 @@ The installer itself never uses sudo.
   logout and start at the next login; with linger they start at boot with nobody logged in.
 - **No systemd** (WSL without systemd, containers, `--service none`): detached processes, pids in
   `~/.dinobot/pids.json`, log `~/.dinobot/logs/daemon.log`. They survive logout but not a reboot:
-  the summary and `doctor` say to run `~/.dinobot/bin/dinobot start` (dinobot is not put on PATH).
+  the summary and `doctor` say to run `dinobot start` (the full path `~/.dinobot/bin/dinobot start`
+  when `~/.local/bin` is not on your PATH).
+
+## The `dinobot` command
+
+Setup (and every `dinobot update`) links `~/.local/bin/dinobot` -> `~/.dinobot/bin/dinobot`,
+creating `~/.local/bin` if needed. Only `dinobot` is linked: `paseo`, `herdr`, `pi` and the other
+wrappers stay in `~/.dinobot/bin`, so your own tools of those names are never shadowed. If
+`~/.local/bin/dinobot` already exists and is not DinoBot's link, it is left alone and setup says
+so; use the full path then. A stale DinoBot link is re-pointed. DinoBot never edits `~/.bashrc`,
+`~/.profile` or any other shell file. If `~/.local/bin` is not on your PATH, setup prints the one
+line to add, for bash:
+
+```sh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+```
+
+then open a new terminal. (Ubuntu's and Debian's default `~/.profile` already adds `~/.local/bin`
+when it exists, from your next login.) Until then, and in scripts, `~/.dinobot/bin/dinobot` always
+works. `DINOBOT_NO_PATH_LINK=1` skips the link (for test installs that share a home folder with a
+real one).
 
 ## Uninstall
 
@@ -34,7 +54,8 @@ The installer itself never uses sudo.
 `reset-failed`), herdr's socket folder goes, and so does all of `~/.dinobot`: the app, your AI
 sign-ins (`~/.dinobot/pi/auth.json`), the daemon password and key. Kept: your bots (`~/bots`),
 memories (`~/.optchat`), group chats (`~/.local/state/bot-rooms`) and herdr's own `~/.config/herdr`
-and `~/.local/state/herdr`. Linger is not changed.
+and `~/.local/state/herdr`. `~/.local/bin/dinobot` is removed only if it is DinoBot's symlink
+(pointing into `~/.dinobot`); `~/.local/bin` itself always stays. Linger is not changed.
 
 `dinobot uninstall --purge`: full wipe. Everything above, plus `~/bots`, `~/.optchat`,
 `~/.local/state/bot-rooms`, `~/.local/state/bot-dm` (bot messages, worker registry),
