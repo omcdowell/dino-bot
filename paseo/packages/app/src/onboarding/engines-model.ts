@@ -20,6 +20,11 @@ export const ENGINES_RPC = {
 
 /** signin.start's option id for the Claude Code login (lib/engines.mjs CLAUDE_CODE_OPTION_ID). */
 export const CLAUDE_CODE_OPTION_ID = "claude-code:login";
+/**
+ * signin.start's option id for "Install Claude Code": Anthropic's native installer on the computer,
+ * then the same login by itself (lib/claude-install.mjs CLAUDE_CODE_INSTALL_ID).
+ */
+export const CLAUDE_CODE_INSTALL_ID = "claude-code:install";
 
 export interface PiSignIn {
   provider: string;
@@ -43,6 +48,8 @@ export interface PiCard {
 
 export interface ClaudeCodeCard {
   installed: boolean;
+  /** The host can install Claude Code for the app (absent on hosts before "Install Claude Code"). */
+  canInstall?: boolean;
   version: string | null;
   modsReady: boolean;
   loggedIn: boolean;
@@ -109,6 +116,39 @@ export function claudeCodeSummary(card: ClaudeCodeCard): { ok: boolean; text: st
 export function claudeCodeSignInRoute(serverId: string): string {
   const q = new URLSearchParams({ serverId, from: "settings", option: CLAUDE_CODE_OPTION_ID });
   return `${ONBOARDING_ROUTES.signin}?${q.toString()}`;
+}
+
+/** The setup sign-in screen for "Install Claude Code" (install, then the login), from Settings. */
+export function claudeCodeInstallRoute(serverId: string): string {
+  const q = new URLSearchParams({ serverId, from: "settings", option: CLAUDE_CODE_INSTALL_ID });
+  return `${ONBOARDING_ROUTES.signin}?${q.toString()}`;
+}
+
+/** One "Install Claude Code" step as the app shows it. */
+export type SetupStepState = "done" | "current" | "failed" | "todo";
+export const CLAUDE_SETUP_STEPS = [
+  "Installing Claude Code",
+  "Log in with your Claude plan",
+  "Done",
+] as const;
+
+/**
+ * The three steps of "Install Claude Code" (1 install → 2 log in → 3 done) for a session that has
+ * a phase (signin.status); null for any other sign-in.
+ */
+export function claudeSetupSteps(status: {
+  state: string;
+  phase?: string | null;
+}): { label: string; state: SetupStepState }[] | null {
+  if (!status.phase) return null;
+  const at = status.state === "done" ? 2 : status.phase === "login" ? 1 : 0;
+  return CLAUDE_SETUP_STEPS.map((label, i) => {
+    let state: SetupStepState = "todo";
+    if (i < at) state = "done";
+    else if (i === at)
+      state = status.state === "error" ? "failed" : status.state === "done" ? "done" : "current";
+    return { label, state };
+  });
 }
 
 /** The setup sign-in screen showing only "Install from a link" (Add a provider package). */

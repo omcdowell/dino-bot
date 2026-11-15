@@ -280,6 +280,27 @@ describe("Settings → Providers: two engines", () => {
     );
   });
 
+  it("Models › Bot models opens the models screen from Settings (SR1 fix 3)", async () => {
+    h.rpc.mockResolvedValue(STATUS);
+    await render();
+    await click("engines-bot-models");
+    expect(h.push).toHaveBeenCalledWith("/setup-models?serverId=mac&from=settings");
+  });
+
+  it("Claude Code card: not installed on a host that can install it: one Install Claude Code button (install, then login)", async () => {
+    h.rpc.mockResolvedValue({
+      ...STATUS,
+      claudeCode: { ...STATUS.claudeCode, installed: false, canInstall: true, loggedIn: false, version: null },
+    });
+    await render();
+    expect(byId("engine-claude-login")).toBeNull();
+    expect(byId("engine-claude-install-button")!.textContent).toBe("Install Claude Code");
+    await click("engine-claude-install-button");
+    expect(h.push).toHaveBeenCalledWith(
+      "/setup-signin?serverId=mac&from=settings&option=claude-code%3Ainstall",
+    );
+  });
+
   it("Claude Code card: not installed says what to do; an old version asks for an update", async () => {
     h.rpc.mockResolvedValue({
       ...STATUS,
@@ -287,7 +308,8 @@ describe("Settings → Providers: two engines", () => {
     });
     await render();
     expect(byId("engine-claude-status")!.textContent).toBe("Not installed on your computer");
-    expect(byId("engine-claude-install")).not.toBeNull();
+    expect(byId("engine-claude-install")!.textContent).toContain("claude.com/download");
+    expect(byId("engine-claude-install-button")).toBeNull(); // an older host cannot install it
     expect(byId("engine-claude-login")).toBeNull();
     act(() => root?.unmount());
     container?.remove();

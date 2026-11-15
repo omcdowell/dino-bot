@@ -39,7 +39,24 @@ import { setupColumnStyle } from "@/constants/layout";
 import { DEVICE_COPY } from "@/constants/device-copy";
 import { providerInviteFromIncoming } from "@/hosts/pair-deep-link";
 import { providerLinkRoute } from "@/onboarding/provider-model";
-import { CLAUDE_CODE_OPTION_ID } from "@/onboarding/engines-model";
+import {
+  CLAUDE_CODE_INSTALL_ID,
+  CLAUDE_CODE_OPTION_ID,
+  claudeSetupSteps,
+  ENGINES_RPC,
+  isEnginesUnsupportedError,
+  type ClaudeCodeCard,
+  type EnginesAnswer,
+} from "@/onboarding/engines-model";
+import {
+  CLAUDE_CODE_FIRST_RUN_COPY,
+  claudeCodeCardPressable,
+  extraUsageWarning,
+  firstRunClaudeCode,
+  orderPiOptions,
+  signedInWithClaudeCode,
+  type FirstRunClaudeCode,
+} from "@/onboarding/firstrun-claude-code";
 
 const ThemedTextInput = withUnistyles(EditingTextInput, (theme: Theme) => ({
   placeholderTextColor: theme.colors.foregroundMuted,
@@ -63,6 +80,24 @@ const CLAUDE_CODE_OPTION: SignInOption = {
   label: "Claude Code",
   method: "paste-code",
 };
+
+/**
+ * "Install Claude Code": the host runs Anthropic's native installer, then the same Claude Code
+ * login starts by itself (one session: phase "install", then "login"; lib/claude-install.mjs).
+ */
+const CLAUDE_CODE_INSTALL_OPTION: SignInOption = {
+  id: CLAUDE_CODE_INSTALL_ID,
+  provider: "claude-code",
+  label: "Claude Code",
+  method: "install",
+};
+
+/** The two Claude Code options the screen starts itself (not in pi's list). */
+function claudeCodeOption(id: string): SignInOption | null {
+  if (id === CLAUDE_CODE_OPTION_ID) return CLAUDE_CODE_OPTION;
+  if (id === CLAUDE_CODE_INSTALL_ID) return CLAUDE_CODE_INSTALL_OPTION;
+  return null;
+}
 
 /** Survives the screen being mounted again (appearance change); see signin-session-store.ts. */
 const signInMemory = createSignInMemory<Options>();
@@ -88,6 +123,10 @@ async function rpc<T>(serverId: string, method: string, input: unknown): Promise
  * computer (device code or copy code, never a localhost callback), and the tokens are stored
  * there in pi's auth.json, never on this phone. Claude login is last and needs the EXTRA USAGE
  * confirm sheet first.
+ *
+ * First run only (FR1, 15 Nov): Claude Code's own login is on top ("uses your Claude Pro/Max
+ * plan"), its state from engines.status as on Settings › Providers; pi's list follows. From
+ * Settings the list is pi's only (Providers has its own Claude Code card).
  */
 export default function SetupSignInScreen() {
   const insets = useSafeAreaInsets();
@@ -126,6 +165,28 @@ export default function SetupSignInScreen() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<EditingTextInputHandle>(null);
+  // First run: the Claude Code card (engines.status, as on Settings › Providers).
+  const showClaudeCode = !fromSettings;
+  const [ccCard, setCcCard] = useState<ClaudeCodeCard | null>(null);
+  const [ccUnsupported, setCcUnsupported] = useState(false);
+  const loadClaudeCode = useCallback(async () => {
+    try {
+      const r = await rpc<EnginesAnswer>(serverId, ENGINES_RPC.status, {});
+      setCcCard(r?.claudeCode ?? null);
+    } catch (e) {
+      // An older daemon has no Claude Code login either: no card. Other errors: the card stays
+      // usable (signin.start reports what is wrong).
+      if (isEnginesUnsupportedError(e)) setCcUnsupported(true);
+    }
+  }, [serverId]);
+  const reloadClaudeCode = useCallback(() => void loadClaudeCode(), [loadClaudeCode]);
+  useEffect(() => {
+    if (showClaudeCode) reloadClaudeCode();
+  }, [showClaudeCode, reloadClaudeCode]);
+  const claudeCode: FirstRunClaudeCode = showClaudeCode
+    ? firstRunClaudeCode({ unsupported: ccUnsupported, card: ccCard })
+    : { kind: "hidden" };
+  const signedIn = options ? signedInWithClaudeCode(options.signedIn, claudeCode) : [];
 
   const next = useCallback(async () => {
     signInMemory.forget(serverId);
@@ -233,16 +294,14 @@ export default function SetupSignInScreen() {
     if (!optionParam || autoStarted.current || status || !options) return;
     // The Claude Code login is not one of pi's options: the host runs `claude auth login`.
     const option =
-      optionParam === CLAUDE_CODE_OPTION_ID
-        ? CLAUDE_CODE_OPTION
-        : options.options.find((o) => o.id === optionParam);
+      claudeCodeOption(optionParam) ?? options.options.find((o) => o.id === optionParam);
     autoStarted.current = true;
     if (option) choose(option);
     else setActionError("That sign-in is not offered by this computer any more. Pick one below.");
   }, [optionParam, options, status, choose]);
 
-  // Back: stops a sign-in in progress; otherwise this is the first step (the pair screen is gone),
-  // so it carries on to the next one: Choose models, which is also where its own Back came from.
+  // Back: stops a sign-in in progress; otherwise it leaves this screen (Settings, or home on first
+  // run). It no longer means "next" (SR1 fix 1): "Skip for now" is the visible way on.
   const back = useCallback(() => {
     if (status && status.state !== "done") {
       void rpc(serverId, ONBOARDING_RPC.signinCancel, { sessionId: status.sessionId }).catch(
@@ -251,16 +310,24 @@ export default function SetupSignInScreen() {
       setStatus(null);
       return;
     }
-    void next();
-  }, [status, serverId, next, setStatus]);
+    if (fromSettings) return void next();
+    signInMemory.forget(serverId);
+    if (router.canGoBack()) router.back();
+    else router.replace("/" as Href);
+  }, [status, serverId, next, setStatus, fromSettings, router]);
 
   // Several accounts are fine (e.g. a subscription plus an API key): back to the list.
   const another = useCallback(() => {
     setStatus(null);
     setOptions(null);
     void load();
-  }, [load, setStatus, setOptions]);
+    if (showClaudeCode) reloadClaudeCode();
+  }, [load, setStatus, setOptions, showClaudeCode, reloadClaudeCode]);
+  const chooseClaudeCode = useCallback(() => choose(CLAUDE_CODE_OPTION), [choose]);
   const chooseAgain = useCallback(() => setStatus(null), [setStatus]);
+  // "Install Claude Code" failed: the same one button again (install if still missing, then login).
+  const tryAgain = useCallback(() => void start(CLAUDE_CODE_INSTALL_OPTION, false), [start]);
+  const installClaudeCode = useCallback(() => tryAgain(), [tryAgain]);
 
   const openAndCopy = useCallback(async () => {
     if (status?.code) await Clipboard.setStringAsync(status.code);
@@ -284,6 +351,8 @@ export default function SetupSignInScreen() {
             ? "Add a provider package"
             : optionParam === CLAUDE_CODE_OPTION_ID
               ? "Log in to Claude Code"
+              : optionParam === CLAUDE_CODE_INSTALL_ID
+                ? "Install Claude Code"
               : fromSettings
                 ? "Add a sign-in"
                 : "Sign in for your bots"
@@ -312,6 +381,7 @@ export default function SetupSignInScreen() {
               continueLabel={fromSettings ? "Done" : "Continue"}
               onAnother={another}
               onChooseAgain={chooseAgain}
+              onTryAgain={tryAgain}
               onOpenAndCopy={handleOpenAndCopy}
               onOpenUrl={openUrl}
             />
@@ -321,11 +391,9 @@ export default function SetupSignInScreen() {
             <Text style={styles.lead}>
               {`${APP_DISPLAY_NAME}'s bots run on your computer. Pick the account they use. You sign in here; your computer keeps the sign-in.`}
             </Text>
-            {options?.signedIn.length ? (
+            {signedIn.length ? (
               <View style={styles.card}>
-                <Text
-                  style={styles.ok}
-                >{`✓ Already signed in: ${options.signedIn.join(", ")}`}</Text>
+                <Text style={styles.ok}>{`✓ Already signed in: ${signedIn.join(", ")}`}</Text>
                 {fromSettings ? null : (
                   <Button variant="default" onPress={goNext} testID="setup-signin-skip">
                     Continue with this
@@ -333,6 +401,20 @@ export default function SetupSignInScreen() {
                 )}
               </View>
             ) : null}
+            {claudeCode.kind === "hidden" ? null : (
+              <ClaudeCodeOption
+                state={claudeCode}
+                disabled={busy}
+                onChoose={chooseClaudeCode}
+                onInstall={installClaudeCode}
+                onCheckAgain={reloadClaudeCode}
+              />
+            )}
+            {claudeCode.kind === "hidden" || !options ? null : (
+              <Text style={styles.body} testID="setup-signin-pi-heading">
+                {CLAUDE_CODE_FIRST_RUN_COPY.piHeading}
+              </Text>
+            )}
             <OptionsList
               options={options}
               loadError={loadError}
@@ -341,6 +423,11 @@ export default function SetupSignInScreen() {
               onChoose={choose}
             />
             {fromSettings && serverId ? <InstallFromLink serverId={serverId} /> : null}
+            {fromSettings || signedIn.length ? null : (
+              <Button onPress={goNext} testID="setup-signin-skip-for-now">
+                Skip for now
+              </Button>
+            )}
           </>
         )}
       </ScrollView>
@@ -359,12 +446,56 @@ interface SessionBodyProps {
   continueLabel: string;
   onAnother: () => void;
   onChooseAgain: () => void;
+  onTryAgain: () => void;
   onOpenAndCopy: () => void;
   onOpenUrl: () => void;
 }
 
+/** "Install Claude Code": 1 Installing → 2 Log in → 3 Done, the current one marked. */
+function SetupSteps({ status }: { status: SignInStatus }) {
+  const steps = claudeSetupSteps(status);
+  if (!steps) return null;
+  const mark = { done: "✓", current: "→", failed: "✕", todo: "○" } as const;
+  return (
+    <View style={styles.steps} testID="setup-signin-steps">
+      {steps.map((step, i) => (
+        <Text
+          key={step.label}
+          style={
+            step.state === "failed"
+              ? styles.error
+              : step.state === "todo"
+                ? styles.body
+                : styles.stepOn
+          }
+          testID={`setup-signin-step-${i + 1}-${step.state}`}
+        >
+          {`${mark[step.state]} ${i + 1}. ${step.label}`}
+        </Text>
+      ))}
+      {status.phase === "install" && status.state === "running" ? (
+        <View style={styles.progressRow}>
+          <MutedSpinner />
+          <Text style={styles.body} numberOfLines={2} testID="setup-signin-progress">
+            {status.progress ?? "Installing…"}
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 /** One sign-in in progress: done, failed, or waiting (code / page / pasted code or key). */
 function SessionBody(props: SessionBodyProps) {
+  return (
+    <>
+      <SetupSteps status={props.status} />
+      <SessionState {...props} />
+    </>
+  );
+}
+
+function SessionState(props: SessionBodyProps) {
   const { status } = props;
   if (status.state === "done") {
     return (
@@ -384,7 +515,14 @@ function SessionBody(props: SessionBodyProps) {
   if (status.state === "error") {
     return (
       <>
-        <Text style={styles.error}>{status.error ?? "Sign-in failed."}</Text>
+        <Text style={styles.error} testID="setup-signin-error">
+          {status.error ?? "Sign-in failed."}
+        </Text>
+        {status.phase === "install" ? (
+          <Button variant="default" onPress={props.onTryAgain} testID="setup-signin-try-again">
+            Try again
+          </Button>
+        ) : null}
         <Button onPress={props.onChooseAgain}>Choose again</Button>
       </>
     );
@@ -421,7 +559,7 @@ function SessionBody(props: SessionBodyProps) {
             {isKey ? "Save key" : "Continue"}
           </Button>
         </>
-      ) : (
+      ) : status.phase === "install" ? null : (
         <View style={styles.row}>
           <MutedSpinner />
           <Text style={styles.body}>
@@ -500,7 +638,7 @@ function OptionsList({
   }
   return (
     <>
-      {options.options.map((o) => (
+      {orderPiOptions(options.options).map((o) => (
         <SignInOptionRow key={o.id} option={o} disabled={busy} onChoose={onChoose} />
       ))}
     </>
@@ -565,6 +703,7 @@ function SignInOptionRow({
   onChoose: (option: SignInOption) => void;
 }) {
   const handlePress = useCallback(() => onChoose(option), [onChoose, option]);
+  const warning = extraUsageWarning(option);
   return (
     <Pressable
       onPress={handlePress}
@@ -581,6 +720,85 @@ function SignInOptionRow({
         ) : null}
       </View>
       {option.note ? <Text style={styles.body}>{option.note}</Text> : null}
+      {warning ? (
+        <Text style={styles.warn} testID={`setup-signin-${option.id}-warning`}>
+          {warning}
+        </Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
+/**
+ * First run: Claude Code's own login, above pi's list. Pressing it starts the same login as
+ * Settings › Providers › Claude Code › Log in. Without the `claude` CLI on the computer: one
+ * "Install Claude Code" button (the host runs Anthropic's installer, then the login starts by
+ * itself), or on an older host the Providers page's install line and "Check again".
+ */
+function ClaudeCodeOption({
+  state,
+  disabled,
+  onChoose,
+  onInstall,
+  onCheckAgain,
+}: {
+  state: FirstRunClaudeCode;
+  disabled: boolean;
+  onChoose: () => void;
+  onInstall: () => void;
+  onCheckAgain: () => void;
+}) {
+  const pressable = claudeCodeCardPressable(state);
+  const body = (
+    <>
+      <View style={styles.row}>
+        <Text style={styles.title}>{CLAUDE_CODE_FIRST_RUN_COPY.label}</Text>
+        <Text style={styles.badge}>YOUR PLAN</Text>
+      </View>
+      <Text style={styles.ok}>{CLAUDE_CODE_FIRST_RUN_COPY.note}</Text>
+      <Text style={styles.body}>{CLAUDE_CODE_FIRST_RUN_COPY.detail}</Text>
+      {state.kind === "logged-in" ? (
+        <Text style={styles.ok} testID="setup-signin-claude-code-status">{`✓ ${state.status}`}</Text>
+      ) : null}
+      {state.kind === "error" ? <Text style={styles.error}>{state.message}</Text> : null}
+      {state.kind === "not-installed" ? (
+        <>
+          <Text style={styles.body} testID="setup-signin-claude-code-install">
+            {state.message}
+          </Text>
+          {state.canInstall ? (
+            <Button
+              variant="default"
+              onPress={onInstall}
+              disabled={disabled}
+              testID="setup-signin-claude-code-install-button"
+            >
+              {CLAUDE_CODE_FIRST_RUN_COPY.installButton}
+            </Button>
+          ) : (
+            <Button onPress={onCheckAgain} testID="setup-signin-claude-code-check">
+              Check again
+            </Button>
+          )}
+        </>
+      ) : null}
+    </>
+  );
+  if (!pressable) {
+    return (
+      <View style={styles.card} testID="setup-signin-claude-code">
+        {body}
+      </View>
+    );
+  }
+  return (
+    <Pressable
+      onPress={onChoose}
+      disabled={disabled}
+      style={pressableCardStyle}
+      testID="setup-signin-claude-code"
+    >
+      {body}
     </Pressable>
   );
 }
@@ -596,6 +814,13 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
   },
   pressed: { opacity: 0.7 },
+  steps: { gap: theme.spacing[1], paddingBottom: theme.spacing[1] },
+  progressRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
+  stepOn: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+  },
   title: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize.base,
@@ -605,6 +830,11 @@ const styles = StyleSheet.create((theme) => ({
   body: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm, flexShrink: 1 },
   ok: { color: theme.colors.foreground, fontSize: theme.fontSize.sm },
   error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm },
+  warn: {
+    color: theme.colors.destructive,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+  },
   code: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize["2xl"],

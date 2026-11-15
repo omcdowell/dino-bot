@@ -65,6 +65,14 @@ export interface SetupState {
   includeScratch: boolean;
 }
 
+/**
+ * The import step has nothing to offer (SR1 fix 14): the host's scan found no past messages at all.
+ * Unknown (no scan, older plugin, no estimate) is not "nothing": the step stays.
+ */
+export function nothingToImport(scan: { estimate?: Pick<ImportEstimate, "messages"> } | null): boolean {
+  return Boolean(scan?.estimate && scan.estimate.messages === 0);
+}
+
 export function initialSetupState(policy: ReleasePolicy): SetupState {
   return {
     claudePlan: policy.claudePlanDefault,

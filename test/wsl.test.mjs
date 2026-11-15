@@ -323,7 +323,7 @@ describe("install.sh on Windows / WSL", { skip: process.platform !== "linux" }, 
       const r = run(binDir(`bin-wsl2-${i}`), { HOME: join(TMP, `h-wsl2-${i}`), ...env });
       assert.match(r.out, /Windows WSL Ubuntu-24\.04/, r.out);
       assert.match(r.out, /untested/i, "warns that Windows is untested");
-      assert.match(r.out, /Downloading/, "got to the download");
+      assert.match(r.out, /Downloading|neither curl nor wget/, "got past the WSL checks to the download");
     }
   });
   it("plain Linux: no WSL wording", () => {

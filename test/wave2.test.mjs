@@ -38,7 +38,7 @@ describe("product names (one place)", () => {
     assert.equal(PRODUCT, "DinoBot");
     assert.equal(PRODUCT_ID, p.id);
     assert.match(VERSION, /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
-    assert.equal(VERSION, "0.1.8");
+    assert.equal(VERSION, "0.1.9");
     // Self-builders sign the app with their own Apple account: the id is a build setting (5 Nov).
     assert.equal(p.bundleId, undefined);
     assert.doesNotMatch(readFileSync(join(HERE, "lib", "product.json"), "utf8"), /com\.dinobot\./);
@@ -205,7 +205,8 @@ describe("second person on one Mac: own tailscaled (R4)", () => {
     // Without DINOBOT_TAILSCALE_BIN the socket goes to the usual CLIs.
     await detectTailscale({ env: { DINOBOT_TAILSCALE_SOCKET: sock }, bins: [fake] });
     assert.equal(readFileSync(log, "utf8").trim(), `--socket ${sock} status --json`);
-    assert.equal(stickyEnvOf({ DINOBOT_TAILSCALE_BIN: "/b/tailscale", DINOBOT_TAILSCALE_SOCKET: "/s/ts.sock" }), 'export DINOBOT_TAILSCALE_BIN="/b/tailscale"\nexport DINOBOT_TAILSCALE_SOCKET="/s/ts.sock"\n');
+    // Remembered in ~/.config/dinobot/install.env now (test/install-env.test.mjs), not in the wrapper.
+    assert.equal(stickyEnvOf({ DINOBOT_TAILSCALE_BIN: "/b/tailscale", DINOBOT_TAILSCALE_SOCKET: "/s/ts.sock" }), "");
   });
   describe("refuses a system Tailscale that belongs to another macOS user", () => {
     const APP = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
@@ -411,8 +412,8 @@ describe("own pi dir (split) and default packages", async () => {
     assert.match(readFileSync(join(L.bin, "pi"), "utf8"), new RegExp(`export PI_CODING_AGENT_DIR="${L.piAgentDir}"`));
     // bot-dm / bot-room: the bundled daemon's CLI internals, not ~/.local/lib/node_modules (visual-bugs 1).
     assert.equal(env.PASEO_CLI_DIST, join(L.app, "daemon", "dist"));
-    // Install-time Tailscale CLI and launchd label stick in the dinobot wrapper (visual-bugs 5: pair --link).
-    assert.equal(stickyEnv({ DINOBOT_TAILSCALE_BIN: "/opt/ts/tailscale", DINOBOT_LAUNCHD_LABEL: "x.test", OTHER: "1" }), 'export DINOBOT_LAUNCHD_LABEL="x.test"\nexport DINOBOT_TAILSCALE_BIN="/opt/ts/tailscale"\n');
+    // A test install's launchd label sticks in the dinobot wrapper; the Tailscale settings are in install.env.
+    assert.equal(stickyEnv({ DINOBOT_TAILSCALE_BIN: "/opt/ts/tailscale", DINOBOT_LAUNCHD_LABEL: "x.test", OTHER: "1" }), 'export DINOBOT_LAUNCHD_LABEL="x.test"\n');
     assert.equal(stickyEnv({}), "");
     for (const w of ["bot-dm", "bot-room"]) {
       assert.ok(readFileSync(join(L.bin, w), "utf8").includes(`export PASEO_CLI_DIST="${join(L.app, "daemon", "dist")}"`), w);

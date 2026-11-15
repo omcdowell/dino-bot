@@ -32,7 +32,7 @@ bad() { echo "FAIL $*"; fails=$((fails + 1)); }
 BW() { env -i HOME="$H" USER="$USER" PATH=/usr/bin:/bin DINOBOT_ALLOW_UNSIGNED=1 OPENROUTER_API_KEY=sk-or-fake-e2e "$H/.dinobot/bin/dinobot" "$@"; }
 cleanup() {
   step "cleanup"
-  BW uninstall --purge 2>&1 | tail -1
+  BW uninstall --purge --yes 2>&1 | tail -1
   for l in daemon herdr herdr-gc; do launchctl bootout "gui/$UIDN/$LABEL.$l" 2>/dev/null; done
   sleep 1
   left=$(launchctl list | grep -c "$LABEL" || true)

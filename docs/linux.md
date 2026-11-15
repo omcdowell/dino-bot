@@ -50,16 +50,20 @@ real one).
 
 ## Uninstall
 
-`dinobot uninstall`: the systemd units are disabled, stopped and deleted (then `daemon-reload` +
+To update, run `dinobot update` (or the install command again): no need to uninstall.
+
+`dinobot uninstall` first says what goes and asks `[y/N]` (`--yes` skips it; without a terminal and
+without `--yes` it refuses). Then the systemd units are disabled, stopped and deleted (then `daemon-reload` +
 `reset-failed`), herdr's socket folder goes, and so does all of `~/.dinobot`: the app, your AI
 sign-ins (`~/.dinobot/pi/auth.json`), the daemon password and key. Kept: your bots (`~/bots`),
-memories (`~/.optchat`), group chats (`~/.local/state/bot-rooms`) and herdr's own `~/.config/herdr`
-and `~/.local/state/herdr`. `~/.local/bin/dinobot` is removed only if it is DinoBot's symlink
+memories (`~/.optchat`), group chats (`~/.local/state/bot-rooms`), herdr's own `~/.config/herdr`
+and `~/.local/state/herdr`, and saved install settings (`~/.config/dinobot/install.env`). After a
+reinstall you sign in again and your phone scans the new code. `~/.local/bin/dinobot` is removed only if it is DinoBot's symlink
 (pointing into `~/.dinobot`); `~/.local/bin` itself always stays. Linger is not changed.
 
 `dinobot uninstall --purge`: full wipe. Everything above, plus `~/bots`, `~/.optchat`,
 `~/.local/state/bot-rooms`, `~/.local/state/bot-dm` (bot messages, worker registry),
-`~/.config/herdr` and `~/.local/state/herdr` (`PASEO_BOTS_ROOT` and `OPTCHAT_HOME` are honoured;
+`~/.config/herdr`, `~/.local/state/herdr` and `~/.config/dinobot/install.env` (`PASEO_BOTS_ROOT` and `OPTCHAT_HOME` are honoured;
 `PASEO_BOTS_ROOMS`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` only when inside your home folder). It first lists the exact paths with their
 sizes and asks you to type `DELETE`; `--yes` skips the question (scripts). Without a terminal and
 without `--yes` it refuses. It never deletes your home folder, `/` or a folder above home (the whole

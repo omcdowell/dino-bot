@@ -147,7 +147,7 @@ describe("uninstall and the link", () => {
     const { env, L, dir, link } = home();
     ensurePathLink(L, { env });
     put(join(dir, "mytool"), "mine");
-    const r = await uninstall(L, {}, quiet(env));
+    const r = await uninstall(L, { yes: true }, quiet(env));
     assert.ok(r.ok);
     assert.ok(r.removed.includes(link));
     assert.equal(existsSync(link), false);
@@ -176,7 +176,7 @@ describe("uninstall and the link", () => {
   it("a foreign ~/.local/bin/dinobot (file or other link) is never removed", async () => {
     const a = home();
     put(a.link, "mine");
-    await uninstall(a.L, {}, quiet(a.env));
+    await uninstall(a.L, { yes: true }, quiet(a.env));
     assert.equal(readFileSync(a.link, "utf8"), "mine");
     const b = home();
     mkdirSync(b.dir, { recursive: true });

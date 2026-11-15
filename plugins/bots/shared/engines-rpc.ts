@@ -6,7 +6,8 @@ import { z } from "zod";
  *   pi           the default; its sign-ins (pi's auth.json in DinoBot's pi dir) and added packages
  *   Claude Code  the user's own Claude Code login (Claude Code's own store; DinoBot never holds it)
  * Host side: DinoBot's installer (lib/engines.mjs through lib/phone-signin.mjs createOnboarding).
- * Signing in uses signin.start: a pi option id, or "claude-code:login" for Claude Code.
+ * Signing in uses signin.start: a pi option id, "claude-code:login" for Claude Code, or
+ * "claude-code:install" (Anthropic's native installer first, then the same login; lib/claude-install.mjs).
  *
  * Keys never come back: an API key is shown only as `keyHint` (its public prefix and last 4
  * characters, computed on the computer).
@@ -31,6 +32,8 @@ export type PiSignIn = z.infer<typeof PiSignInSchema>;
 
 const ClaudeCodeSchema = z.object({
   installed: z.boolean(),
+  /** The host can run Anthropic's native installer for the app ("Install Claude Code"); absent on older hosts. */
+  canInstall: z.boolean().optional(),
   version: z.string().nullable(),
   /** The version has the mods OptChat needs (>= 2.1.287). */
   modsReady: z.boolean(),

@@ -153,15 +153,19 @@ test -e "$HOMEDIR/.pi" && { echo "FAIL ~/.pi was created"; fails=$((fails + 1));
 test -L "$HOMEDIR/.$PRODUCT_ID/pi/npm/node_modules/pi-web-access" && grep -q 'npm:pi-web-access' "$HOMEDIR/.$PRODUCT_ID/pi/settings.json" && echo "ok   pi-web-access installed for DinoBot's pi" || { echo "FAIL pi-web-access"; fails=$((fails + 1)); }
 HP=$(pgrep -f "$HOMEDIR/.$PRODUCT_ID/app/herdr/herdr server" | head -1)
 [ -n "$HP" ] && tr '\0' '\n' </proc/$HP/environ | grep -q "^PI_CODING_AGENT_DIR=$HOMEDIR/.$PRODUCT_ID/pi$" && echo "ok   herdr server (workers) uses the same pi dir" || { echo "FAIL herdr env PI_CODING_AGENT_DIR"; fails=$((fails + 1)); }
-grep -q 'Workers: separate herdr session "paseo-bots" running' "$E2E/install.log" && echo "ok   setup saw the herdr session running" || { echo "FAIL setup did not see herdr running"; fails=$((fails + 1)); }
+# (Setup's details are in state.json and `setup --verbose`; the terminal keeps the QR on screen.)
+grep -q 'Workers: separate herdr session \\"paseo-bots\\" running' "$STATE" && echo "ok   setup saw the herdr session running" || { echo "FAIL setup did not see herdr running"; fails=$((fails + 1)); }
+grep -q 'Setup steps (since' "$E2E/install.log" && { echo "FAIL timing table printed without --verbose"; fails=$((fails + 1)); } || echo "ok   setup end is short (no timing table)"
 echo "== doctor"
 "${BW[@]}" doctor | tee "$E2E/doctor.txt" || true
 grep -q '^FAIL' "$E2E/doctor.txt" && { echo "FAIL doctor reported problems"; fails=$((fails + 1)); } || echo "ok   doctor: no FAIL"
 
 echo "== update (same tarball)"
+TARGETS_BEFORE=$(grep -cE '"GET /[^ ]+\.tar\.(gz|zst) ' "$E2E/http.log" || true)
 "${BW[@]}" update | tee "$E2E/update-same.txt"
 echo "   installed from $(node -p "require('$HOMEDIR/.$PRODUCT_ID/state.json').tarballFormat" 2>/dev/null) archive"
 grep -q 'already up to date' "$E2E/update-same.txt" && echo "ok   update: same build is a no-op" || { echo "FAIL update no-op"; fails=$((fails + 1)); }
+[ "$(grep -cE '"GET /[^ ]+\.tar\.(gz|zst) ' "$E2E/http.log")" = "$TARGETS_BEFORE" ] && echo "ok   no-op update downloaded only the .sha256" || { echo "FAIL the no-op update downloaded the tarball"; fails=$((fails + 1)); }
 if [ "${UPDATE:-0}" = 1 ]; then
   echo "== update (changed tarball)"
   rm -rf "$E2E/upd"; mkdir -p "$E2E/upd"; tar -xzf "$TAR" -C "$E2E/upd"
@@ -177,6 +181,19 @@ if [ "${UPDATE:-0}" = 1 ]; then
   echo "   update took $(( $(now_ms) - t0 )) ms"
   grep -q 'e2e-update' "$HOMEDIR/.$PRODUCT_ID/app/MANIFEST.json" && echo "ok   update swapped the app" || { echo "FAIL update swap"; fails=$((fails + 1)); }
   if env -i HOME="$HOMEDIR" PATH=/usr/bin:/bin PASEO_PASSWORD="$PW" "$PASEO" daemon status --host "$FIRST" --json >/dev/null 2>&1; then echo "ok   daemon answers after update (same password)"; else echo "FAIL daemon after update"; fails=$((fails + 1)); fi
+fi
+if [ "${UNINSTALL:-0}" = 1 ]; then
+  echo "== uninstall (plain) then reinstall"
+  echo n | script -qec "env -i HOME='$HOMEDIR' PATH=/usr/bin:/bin '$HOMEDIR/.$PRODUCT_ID/bin/$PRODUCT_ID' uninstall" /dev/null >"$E2E/uninstall-no.txt" 2>&1 || true
+  grep -q 'no need to uninstall' "$E2E/uninstall-no.txt" && test -d "$HOMEDIR/.$PRODUCT_ID/app" && echo "ok   uninstall asks first (answered n: nothing changed)" || { echo "FAIL uninstall prompt: $(tr -d '\r' <"$E2E/uninstall-no.txt" | tail -3)"; fails=$((fails + 1)); }
+  printf 'DINOBOT_PORT=%s\n' "$E2E_PORT" >"$HOMEDIR/.config/$PRODUCT_ID/install.env" 2>/dev/null || { mkdir -p "$HOMEDIR/.config/$PRODUCT_ID"; printf 'DINOBOT_PORT=%s\n' "$E2E_PORT" >"$HOMEDIR/.config/$PRODUCT_ID/install.env"; }
+  "${BW[@]}" uninstall --yes | tee "$E2E/uninstall.txt"
+  test -e "$HOMEDIR/.$PRODUCT_ID" && { echo "FAIL ~/.$PRODUCT_ID still there"; fails=$((fails + 1)); } || echo "ok   ~/.$PRODUCT_ID removed"
+  test -f "$HOMEDIR/bots/juniper/.bot.json" && test -f "$HOMEDIR/.config/$PRODUCT_ID/install.env" && echo "ok   bots and saved settings kept" || { echo "FAIL bots or install.env gone"; fails=$((fails + 1)); }
+  env -i "${BASE_ENV[@]}" "${EXTRA_ENV[@]}" sh "$HERE/dist/install.sh" --service none --answers "$ANSWERS" >"$E2E/reinstall.log" 2>&1 || true
+  grep -q "Using your saved settings (DINOBOT_PORT)" "$E2E/reinstall.log" && echo "ok   reinstall used the saved settings" || { echo "FAIL saved settings not used"; fails=$((fails + 1)); }
+  [ "$(node -p "require('$STATE').port")" = "$E2E_PORT" ] && echo "ok   reinstall on the saved port $E2E_PORT" || { echo "FAIL reinstall port"; fails=$((fails + 1)); }
+  grep -q "Scan this with the $PRODUCT_NAME app" "$E2E/reinstall.log" && echo "ok   reinstall printed the QR" || { echo "FAIL reinstall: $(tail -5 "$E2E/reinstall.log")"; fails=$((fails + 1)); }
 fi
 test -f "$HOMEDIR/bots/juniper/.optchat-profile" && echo "ok   starter bot juniper" || { echo "FAIL starter bot"; fails=$((fails + 1)); }
 # The installer's model pick is the host default, so the phone's "Choose models" may move it (setup: true).

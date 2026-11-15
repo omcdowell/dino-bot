@@ -4,6 +4,7 @@ import {
   buildSetupRequest,
   defaultBotModel,
   importWarning,
+  nothingToImport,
   initialSetupState,
   needsSetup,
   type ImportEstimate,
@@ -69,5 +70,14 @@ describe("import warning copy", () => {
     expect(importWarning({ ...estimate, billing: "api" }, { showPlanPercent: false })).toContain(
       "$389 on your API bill (could be $195–$584)",
     );
+  });
+});
+
+describe("nothingToImport (SR1 fix 14)", () => {
+  it("skips only when the scan found zero messages", () => {
+    expect(nothingToImport({ estimate: { messages: 0 } })).toBe(true);
+    expect(nothingToImport({ estimate: { messages: 3 } })).toBe(false);
+    expect(nothingToImport({})).toBe(false);
+    expect(nothingToImport(null)).toBe(false);
   });
 });

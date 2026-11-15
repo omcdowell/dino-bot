@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   badgeIsWarning,
+  botModelsRoute,
+  modelsLead,
+  ROLE_COPY,
   clampEffort,
   filterModels,
   initialPicks,
@@ -95,5 +98,19 @@ describe("sign-in badges", () => {
     expect(badgeIsWarning({ badge: "UNOFFICIAL", confirm })).toBe(true);
     expect(badgeIsWarning({ badge: "NEW" })).toBe(false);
     expect(badgeIsWarning({ confirm })).toBe(false);
+  });
+});
+
+describe("models screen copy and Settings route (SR1 fixes 1, 3, 14)", () => {
+  it("lead: who the suggestions are for, or no models yet (no 'Suggested for .')", () => {
+    expect(modelsLead(["ChatGPT (Codex)"], 12)).toBe("Suggested for ChatGPT (Codex). Change any of them.");
+    expect(modelsLead([], 0)).toMatch(/^No models yet/);
+    expect(modelsLead(["X"], 0)).toMatch(/^No models yet/);
+  });
+  it("Bot models from Settings", () => {
+    expect(botModelsRoute("a b")).toBe("/setup-models?serverId=a%20b&from=settings");
+  });
+  it("workers are called Workers, not Herdr subagents", () => {
+    expect(ROLE_COPY.workers.title).toBe("Workers");
   });
 });

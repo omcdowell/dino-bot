@@ -141,6 +141,11 @@ main() {
     [ "$RELEASE" = latest ] || BASE=${DEFAULT_BASE_URL%/latest/download}/download/$RELEASE
   fi
 
+  case "$MODE:${DINOBOT_TARBALL:-}" in
+    url:*|tarball:http://*|tarball:https://*)
+      command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 ||
+        fail "this computer has neither curl nor wget to download with. Install curl (Ubuntu: sudo apt install curl), then run the install command again. Nothing was installed." ;;
+  esac
   # HTTPS only (TLS 1.2+, no downgrade on redirects); plain http only to this computer (tests).
   CURL="curl -fsSL --proto =https --tlsv1.2"
   case "$MODE" in tarball) U=$DINOBOT_TARBALL ;; url) U=$BASE ;; *) U=https:// ;; esac
@@ -164,10 +169,30 @@ main() {
       url) get_url "$BASE/$1" "$2" "${3:-}" ;;
     esac
   }
+  # get_url <url> <dest> [<headers file>]. Flaky networks (hotel Wi-Fi: about 1 in 5 new connections
+  # stalls 1-20 s, and a transfer can stop dead): a short connect timeout, growing on each try; a
+  # transfer that stalls (under 1 KB/s for 30 s) is dropped; up to 6 tries, each one resuming a
+  # <dest> ending in .part where the last stopped (curl's own --retry starts again from 0). A .part
+  # left by a failed run is resumed by the next run. 4xx: no retry, except a refused resume
+  # (the server has no byte ranges, or the file changed), which starts again from 0 once.
   get_url() {
-    if ! command -v curl >/dev/null 2>&1; then wget -qO "$2" "$1"
-    elif [ -n "$3" ]; then $CURL -D "$3" "$1" -o "$2"
-    else $CURL "$1" -o "$2"; fi
+    if ! command -v curl >/dev/null 2>&1; then wget -q -T 30 -t 6 -O "$2" "$1"; return; fi
+    _try=1; _fresh=0
+    while :; do
+      _c=""; case "$2" in *.part) [ -s "$2" ] && _c="-C -" ;; esac
+      _rc=0
+      # shellcheck disable=SC2086
+      if [ -n "$3" ]; then $CURL --connect-timeout $((_try * 5)) --speed-limit 1024 --speed-time 30 $_c -D "$3" "$1" -o "$2" || _rc=$?
+      else $CURL --connect-timeout $((_try * 5)) --speed-limit 1024 --speed-time 30 $_c "$1" -o "$2" || _rc=$?; fi
+      [ "$_rc" = 0 ] && return 0
+      if [ "$_rc" = 22 ] || [ "$_rc" = 33 ] || [ "$_rc" = 36 ]; then
+        [ -n "$_c" ] && [ "$_fresh" = 0 ] || return "$_rc"
+        _fresh=1; rm -f "$2"
+      fi
+      [ "$_try" -ge 6 ] && return "$_rc"
+      echo "network stalled or dropped (curl $_rc); trying again ($((_try + 1))/6, resuming)" >&2
+      _try=$((_try + 1)); sleep 1
+    done
   }
 
   # Download progress: bytes in the .part file against the expected size (the source file's size,
@@ -181,8 +206,13 @@ main() {
     esac
     if [ -n "$_f" ]; then [ -f "$_f" ] && wc -c <"$_f" | tr -d ' '; return 0; fi
     # Redirects write one header block each: the last block's Content-Length is the file's.
-    [ -s "$ROOT/download/$1.hdr" ] && tr -d '\r' <"$ROOT/download/$1.hdr" |
-      awk '/^HTTP\//{n=""} tolower($1)=="content-length:"{n=$2} END{if(n+0>0)print n+0}'
+    hdr_total "$ROOT/download/$1.hdr"
+  }
+  # Total size from a curl -D file: the last block's Content-Length, or the total of its
+  # Content-Range (a resumed download: Content-Length is only the rest).
+  hdr_total() {
+    [ -s "$1" ] && tr -d '\r' <"$1" |
+      awk '/^HTTP\//{n="";t=""} tolower($1)=="content-length:"{n=$2} tolower($1)=="content-range:"{sub(/.*\//,"",$3);t=$3} END{if(t+0>0)print t+0; else if(n+0>0)print n+0}'
     return 0
   }
   dl_measure() { # dl_measure [done]: sets GOT, TOT (empty: unknown), PC
@@ -220,18 +250,33 @@ main() {
 
   echo "Downloading $PRODUCT_NAME ($OS/$ARCH) in the background into $ROOT"
   # 1. Download in the background (.tar.zst first when it can be unpacked here; the asset that
-  # arrived is written to download/asset).
-  rm -f "$ROOT/download/asset" "$ROOT/download/$NAME".tar.*
-  (
-    # (The .tar.zst try logs to download-zst.log: download.log is about the archive that decided.)
-    if [ "$MODE" != tarball ] && [ "$ZST" = 1 ] && fetch "$NAME.tar.zst" "$ROOT/download/$NAME.tar.zst.part" "$ROOT/download/$NAME.tar.zst.hdr" 2>"$ROOT/logs/download-zst.log"; then
-      mv "$ROOT/download/$NAME.tar.zst.part" "$ROOT/download/$NAME.tar.zst" && echo "$NAME.tar.zst" >"$ROOT/download/asset"
-    else
-      rm -f "$ROOT/download/$NAME.tar.zst.part"
+  # arrived is written to download/asset). A .tar.*.part left by a run that lost its network is
+  # kept and resumed (RESUMED=1: if it then fails the checksum, it was of an older release, and
+  # the archive is downloaded once more from the start; step 3).
+  RESUMED=0
+  for f in "$ROOT/download/$NAME".tar.* "$ROOT/download/asset"; do
+    case "$f" in
+      "$ROOT/download/$NAME.tar.zst.part"|"$ROOT/download/$NAME.tar.gz.part") [ -s "$f" ] && RESUMED=1 ;;
+      *) rm -f "$f" ;;
+    esac
+  done
+  start_download() {
+    (
+      # (The .tar.zst try logs to download-zst.log: download.log is about the archive that decided.)
+      # No .tar.zst in the release (older ones; HTTP 404 or no such file): the .tar.gz. Any other
+      # failure stops here, keeping the .part for the next run to resume.
+      if [ "$MODE" != tarball ] && [ "$ZST" = 1 ]; then
+        _z=0; fetch "$NAME.tar.zst" "$ROOT/download/$NAME.tar.zst.part" "$ROOT/download/$NAME.tar.zst.hdr" 2>"$ROOT/logs/download-zst.log" || _z=$?
+        if [ "$_z" = 0 ]; then
+          mv "$ROOT/download/$NAME.tar.zst.part" "$ROOT/download/$NAME.tar.zst" && echo "$NAME.tar.zst" >"$ROOT/download/asset"; exit
+        fi
+        case "$_z:$MODE" in 22:*|8:*|*:file) rm -f "$ROOT/download/$NAME.tar.zst.part" ;; *) cat "$ROOT/logs/download-zst.log"; exit "$_z" ;; esac
+      fi
       fetch "$ASSET" "$TARBALL.part" "$TARBALL.hdr" && mv "$TARBALL.part" "$TARBALL" && echo "$ASSET" >"$ROOT/download/asset"
-    fi
-  ) >"$ROOT/logs/download.log" 2>&1 &
-  DL=$!
+    ) >"$ROOT/logs/download.log" 2>&1 &
+    DL=$!
+  }
+  start_download
   # 1a. At the same time, the small files beside it: <archive>.sha256 and <archive>.sigstore.json for
   # each archive it may be (each was one more round trip after the download; on GitHub that is a
   # redirect too). Checked exactly as before (step 3); one that did not arrive is fetched again there.
@@ -272,17 +317,22 @@ main() {
       (
         rm -f "$COSIGN.part"
         if [ "$MODE" != tarball ]; then
+          # (<file>.part resumes like the archive's; one the network cut off is kept for the next run)
           for z in $([ "$ZST" = 1 ] && echo zst) gz; do
-            if fetch "$COSIGN_ASSET.$z" "$COSIGN.$z"; then
-              if [ "$z" = zst ]; then zstd -dcq "$COSIGN.$z" >"$COSIGN.part"; else gzip -dc "$COSIGN.$z" >"$COSIGN.part"; fi || rm -f "$COSIGN.part"
+            _r=0; fetch "$COSIGN_ASSET.$z" "$COSIGN.$z.part" "$COSIGN.$z.hdr" || _r=$?
+            rm -f "$COSIGN.$z.hdr"
+            if [ "$_r" = 0 ]; then
+              if [ "$z" = zst ]; then zstd -dcq "$COSIGN.$z.part" >"$COSIGN.part"; else gzip -dc "$COSIGN.$z.part" >"$COSIGN.part"; fi || rm -f "$COSIGN.part"
+              rm -f "$COSIGN.$z.part"
+            else
+              case "$_r:$MODE" in 22:*|8:*|*:file) rm -f "$COSIGN.$z.part" ;; *) exit 1 ;; esac
             fi
-            rm -f "$COSIGN.$z"
             [ -s "$COSIGN.part" ] && { echo "cosign from the release ($COSIGN_ASSET.$z)"; break; }
           done
         fi
         if [ ! -s "$COSIGN.part" ]; then
           case "$COSIGN_URL" in file://*) CCURL="curl -fsSL" ;; *) CCURL="curl -fsSL --proto =https --tlsv1.2" ;; esac
-          if command -v curl >/dev/null 2>&1; then $CCURL --retry 2 "$COSIGN_URL" -o "$COSIGN.part"
+          if command -v curl >/dev/null 2>&1; then $CCURL --connect-timeout 10 --retry 4 --speed-limit 1024 --speed-time 30 "$COSIGN_URL" -o "$COSIGN.part"
           else wget -qO "$COSIGN.part" "$COSIGN_URL"; fi || exit 1
         fi
         [ "$(sha256_of "$COSIGN.part")" = "$COSIGN_PIN" ] || { rm -f "$COSIGN.part"; echo "cosign download does not match its pinned checksum"; exit 1; }
@@ -300,73 +350,91 @@ main() {
     [ -n "$n" ] && { echo "$n"; return; }
     u=${USER:-$(id -un)}; printf '%s\n' "$u" | awk '{print toupper(substr($0,1,1)) substr($0,2)}'
   }
-  NAME_DEFAULT=$(default_name)
+  # Asked on the first install only: running the install command again (an update) keeps the name
+  # setup saved (no --name: setup reads it).
   USER_NAME=${DINOBOT_NAME:-}
-  if [ -z "$USER_NAME" ]; then
+  if [ -z "$USER_NAME" ] && [ ! -f "$ROOT/state.json" ]; then
+    NAME_DEFAULT=$(default_name)
     case " $* " in *" --yes "*) USER_NAME=$NAME_DEFAULT ;; esac
+    if [ -z "$USER_NAME" ] && [ -r /dev/tty ] && (exec </dev/tty) 2>/dev/null; then
+      printf 'While that downloads: what should your bots call you? [%s]: ' "$NAME_DEFAULT"
+      read -r USER_NAME </dev/tty || USER_NAME=""
+    fi
+    [ -n "$USER_NAME" ] || USER_NAME=$NAME_DEFAULT
   fi
-  if [ -z "$USER_NAME" ] && [ -r /dev/tty ] && (exec </dev/tty) 2>/dev/null; then
-    printf 'While that downloads: what should your bots call you? [%s]: ' "$NAME_DEFAULT"
-    read -r USER_NAME </dev/tty || USER_NAME=""
-  fi
-  [ -n "$USER_NAME" ] || USER_NAME=$NAME_DEFAULT
+  [ -z "$USER_NAME" ] || set -- --name "$USER_NAME" "$@"
 
   # 3. Wait for the download, check it, unpack (old app kept until the new one is in place).
   # (A progress bar from a ticker; `wait` returns the moment the download ends, not at the next
   # tick. Terminal: one line redrawn twice a second. Otherwise (logs, CI): a line at each quarter,
   # or every 30 s when the size is unknown. Already finished: just the finished bar.)
-  TICK=""
-  if kill -0 "$DL" 2>/dev/null; then
-    (
-      i=0; q=25
-      if [ "$TTY" = 1 ]; then dl_measure; dl_draw; fi
-      while sleep 0.5 2>/dev/null || sleep 1; do
-        i=$((i + 1)); dl_measure
-        if [ "$TTY" = 1 ]; then dl_draw
-        elif [ -n "$PC" ]; then [ "$PC" -ge "$q" ] && [ "$PC" -lt 100 ] && { dl_draw; q=$(( (PC / 25 + 1) * 25 )); }
-        elif [ $((i % 60)) = 0 ]; then dl_draw; fi
-      done
-    ) &
-    TICK=$!
-  fi
-  DLRC=0; wait "$DL" || DLRC=$?
-  [ -z "$TICK" ] || { kill "$TICK" 2>/dev/null || true; wait "$TICK" 2>/dev/null || true; }
-  rm -f "$ROOT/download/$NAME".tar.*.hdr
-  if [ "$DLRC" != 0 ]; then
-    [ "$TTY" = 1 ] && echo
-    echo "Downloading failed"; cat "$ROOT/logs/download.log" >&2
-    # curl -f: "error: 404"; wget: "ERROR 404". A release URL that 404s means nothing is published there.
-    [ "$MODE" = url ] && grep -Eq '(error|ERROR):? 404' "$ROOT/logs/download.log" 2>/dev/null &&
-      fail "no release has been published yet at $BASE (or it has no $ASSET for this computer). Nothing was installed."
-    fail "download of $ASSET failed ($MODE). Nothing was installed."
-  fi
-  dl_measure done; dl_draw done
-  wait "$SIDE" 2>/dev/null || true
-  ASSET=$(cat "$ROOT/download/asset")
-  TARBALL="$ROOT/download/$ASSET"
-  rm -f "$ROOT/download/asset"
-  # Verify, fail closed: no checksum, no install. Two sources, both from the release: the checksum
-  # pinned into this script when the release was published, and the release's <tarball>.sha256.
-  # Either is enough; if both are there they must agree. Checksums catch corruption; authenticity
-  # comes from the signature check right after.
-  # DINOBOT_ALLOW_UNVERIFIED=1 is for local development builds only.
-  echo "Checking the download (checksum$([ "$SIGN" = 1 ] && echo " and signature"))..."
-  TAR_SHA=$(sha256_of "$TARBALL")
-  PIN_SHA=""
-  for p in $PINNED_SHA256S; do [ "${p%%=*}" = "$ASSET" ] && PIN_SHA=${p#*=}; done
-  FILE_SHA=""
-  if { [ -s "$TARBALL.sha256" ] || fetch "$ASSET.sha256" "$TARBALL.sha256" >/dev/null 2>&1; } && [ -s "$TARBALL.sha256" ]; then FILE_SHA=$(cut -d' ' -f1 "$TARBALL.sha256"); fi
-  rm -f "$TARBALL.sha256"
-  WANT_SHA=${PIN_SHA:-$FILE_SHA}
-  if [ -n "$PIN_SHA" ] && [ -n "$FILE_SHA" ] && [ "$PIN_SHA" != "$FILE_SHA" ]; then
-    rm -f "$TARBALL"; fail "the release's checksum file does not match the checksum in this install script (tampered or mixed releases). Nothing was installed."
-  fi
-  if [ -z "$WANT_SHA" ]; then
-    if [ "${DINOBOT_ALLOW_UNVERIFIED:-0}" = 1 ]; then echo "WARNING: installing an unverified build (DINOBOT_ALLOW_UNVERIFIED=1)" >&2
-    else rm -f "$TARBALL"; fail "could not get the checksum ($ASSET.sha256), so the download cannot be verified. Nothing was installed; try again later."; fi
-  elif [ "$WANT_SHA" != "$TAR_SHA" ]; then
-    rm -f "$TARBALL"; fail "the download does not match its checksum (corrupted or tampered). Nothing was installed."
-  fi
+  wait_download() {
+    TICK=""
+    if kill -0 "$DL" 2>/dev/null; then
+      (
+        i=0; q=25
+        if [ "$TTY" = 1 ]; then dl_measure; dl_draw; fi
+        while sleep 0.5 2>/dev/null || sleep 1; do
+          i=$((i + 1)); dl_measure
+          if [ "$TTY" = 1 ]; then dl_draw
+          elif [ -n "$PC" ]; then [ "$PC" -ge "$q" ] && [ "$PC" -lt 100 ] && { dl_draw; q=$(( (PC / 25 + 1) * 25 )); }
+          elif [ $((i % 60)) = 0 ]; then dl_draw; fi
+        done
+      ) &
+      TICK=$!
+    fi
+    DLRC=0; wait "$DL" || DLRC=$?
+    [ -z "$TICK" ] || { kill "$TICK" 2>/dev/null || true; wait "$TICK" 2>/dev/null || true; }
+    rm -f "$ROOT/download/$NAME".tar.*.hdr
+    if [ "$DLRC" != 0 ]; then
+      [ "$TTY" = 1 ] && echo
+      echo "Downloading failed"; cat "$ROOT/logs/download.log" >&2
+      # curl -f: "error: 404"; wget: "ERROR 404". A release URL that 404s means nothing is published there.
+      [ "$MODE" = url ] && grep -Eq '(error|ERROR):? 404' "$ROOT/logs/download.log" 2>/dev/null &&
+        fail "no release has been published yet at $BASE (or it has no $ASSET for this computer). Nothing was installed."
+      [ "$MODE" = file ] && fail "could not copy $ASSET from $BASE. Nothing was installed."
+      fail "the download of $ASSET stopped: the network dropped or stalled. Run the same install command again: it carries on where it stopped. Nothing was installed yet."
+    fi
+    dl_measure done; dl_draw done
+  }
+  ASSET0=$ASSET; TARBALL0=$TARBALL
+  while :; do
+    wait_download
+    wait "$SIDE" 2>/dev/null || true
+    ASSET=$(cat "$ROOT/download/asset")
+    TARBALL="$ROOT/download/$ASSET"
+    rm -f "$ROOT/download/asset"
+    # Verify, fail closed: no checksum, no install. Two sources, both from the release: the checksum
+    # pinned into this script when the release was published, and the release's <tarball>.sha256.
+    # Either is enough; if both are there they must agree. Checksums catch corruption; authenticity
+    # comes from the signature check right after.
+    # DINOBOT_ALLOW_UNVERIFIED=1 is for local development builds only.
+    echo "Checking the download (checksum$([ "$SIGN" = 1 ] && echo " and signature"))..."
+    TAR_SHA=$(sha256_of "$TARBALL")
+    PIN_SHA=""
+    for p in $PINNED_SHA256S; do [ "${p%%=*}" = "$ASSET" ] && PIN_SHA=${p#*=}; done
+    FILE_SHA=""
+    if { [ -s "$TARBALL.sha256" ] || fetch "$ASSET.sha256" "$TARBALL.sha256" >/dev/null 2>&1; } && [ -s "$TARBALL.sha256" ]; then FILE_SHA=$(cut -d' ' -f1 "$TARBALL.sha256"); fi
+    rm -f "$TARBALL.sha256"
+    WANT_SHA=${PIN_SHA:-$FILE_SHA}
+    if [ -n "$PIN_SHA" ] && [ -n "$FILE_SHA" ] && [ "$PIN_SHA" != "$FILE_SHA" ]; then
+      rm -f "$TARBALL"; fail "the release's checksum file does not match the checksum in this install script (tampered or mixed releases). Nothing was installed."
+    fi
+    if [ -z "$WANT_SHA" ]; then
+      if [ "${DINOBOT_ALLOW_UNVERIFIED:-0}" = 1 ]; then echo "WARNING: installing an unverified build (DINOBOT_ALLOW_UNVERIFIED=1)" >&2
+      else rm -f "$TARBALL"; fail "could not get the checksum ($ASSET.sha256), so the download cannot be verified. Nothing was installed; try again later."; fi
+    elif [ "$WANT_SHA" != "$TAR_SHA" ]; then
+      rm -f "$TARBALL"
+      # A .part resumed from an earlier run, of a release that has been replaced since: once more from 0.
+      if [ "$RESUMED" = 1 ]; then
+        echo "The part downloaded by an earlier try was of another release; downloading again from the start."
+        RESUMED=0; ASSET=$ASSET0; TARBALL=$TARBALL0; rm -f "$ROOT/download/$NAME".tar.*
+        start_download; continue
+      fi
+      fail "the download does not match its checksum (corrupted or tampered). Nothing was installed."
+    fi
+    break
+  done
   # Signature (see SIGNING_MODE above), fail closed, before anything is unpacked. Fetched by the
   # same route as the tarball (URL or file).
   if [ "$SIGN" = 1 ]; then
@@ -374,8 +442,17 @@ main() {
     [ -s "$BUNDLE" ] || { fetch "$ASSET$SIG_SUFFIX" "$BUNDLE" >/dev/null 2>&1 || rm -f "$BUNDLE"; }
     [ -s "$BUNDLE" ] || { rm -f "$TARBALL" "$BUNDLE"; fail "the release has no signature ($ASSET$SIG_SUFFIX), so it cannot be verified. Nothing was installed."; }
     if [ -n "$CS" ]; then
+      # Progress of whichever cosign file is arriving (MB so far / total; terminal only, one line).
       printf 'Getting the signature checker'
-      ( while sleep 1; do printf '.'; done ) &
+      if [ "$TTY" = 1 ]; then
+        ( while sleep 0.5 2>/dev/null || sleep 1; do
+            GOT=""; TOT=""
+            for _x in "$COSIGN.zst" "$COSIGN.gz" "$COSIGN"; do
+              [ -f "$_x.part" ] && { GOT=$(wc -c <"$_x.part" | tr -d ' '); TOT=$(hdr_total "$_x.hdr"); break; }
+            done
+            [ -n "$GOT" ] && printf '\rGetting the signature checker  %s   ' "$(dl_amount)"
+          done ) &
+      else ( while sleep 10; do printf '.'; done ) & fi
       TICK=$!
       CSRC=0; wait "$CS" || CSRC=$?
       kill "$TICK" 2>/dev/null || true; wait "$TICK" 2>/dev/null || true
@@ -415,7 +492,7 @@ main() {
   # The wizard reads answers from /dev/tty itself, so `curl | sh` works.
   DINOBOT_T0_MS=$T0 DINOBOT_FETCH_MS=$((T1 - T0)) DINOBOT_HOME=$ROOT DINOBOT_TARBALL_SHA=$TAR_SHA DINOBOT_TARBALL_FORMAT=${ASSET##*.} DINOBOT_SOURCE_MODE=$MODE \
     exec "$ROOT/app/node/bin/node" --experimental-transform-types --no-warnings \
-    "$ROOT/app/installer/lib/cli.mjs" setup --name "$USER_NAME" "$@"
+    "$ROOT/app/installer/lib/cli.mjs" setup "$@"
 }
 
 main "$@"

@@ -86,8 +86,8 @@ describe("install.sh on a minimal Linux", { skip: process.platform !== "linux" }
     const h = join(TMP, "h-perlbase");
     const r = run(binDir("bin-perlbase", [...BASE, "ps"], { perl: "echo \"Can't locate Time/HiRes.pm in @INC\" >&2; exit 2" }), h);
     assert.doesNotMatch(r.out, /HiRes/);
-    // No curl or wget in this PATH: the download fails at once, after the clock (no network).
-    assert.match(r.out, /Downloading failed\n[\s\S]*download of \S+ failed/, "got past the clock to the download");
+    // No curl or wget in this PATH: stops at once, after the clock (no network), and says so.
+    assert.match(r.out, /neither curl nor wget/, "got past the clock to the download check");
   });
 });
 

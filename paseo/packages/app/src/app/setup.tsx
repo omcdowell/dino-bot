@@ -7,13 +7,14 @@ import { BackHeader } from "@/components/headers/back-header";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { APP_DISPLAY_NAME, RELEASE_POLICY } from "@/constants/flavour";
+import { APP_DISPLAY_NAME, RELEASE_POLICY, isPublicFlavour } from "@/constants/flavour";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import {
   IMPORT_INTRO,
   SETUP_RPC,
   importWarning,
   initialSetupState,
+  nothingToImport,
   type ImportEstimate,
   type SetupState,
 } from "@/onboarding/setup-model";
@@ -72,6 +73,21 @@ export default function SetupScreen() {
     if (!serverId) return router.replace("/" as Href);
     void routeAfterStep("import", serverId).then((route) => router.replace(route as Href));
   }, [router, serverId]);
+
+  // Nothing at all to import (the scan of everything finds no messages): skip the step.
+  useEffect(() => {
+    if (!serverId) return;
+    let cancelled = false;
+    void scanHost(serverId, { ...state, importDays: null, includeScratch: false }).then((all) => {
+      if (!cancelled && nothingToImport(all)) leave();
+      return undefined;
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Once per host: not again when the switches change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverId]);
 
   const handleContinue = useCallback(() => {
     const client = serverId ? getHostRuntimeStore().getClient(serverId) : null;
@@ -132,6 +148,7 @@ export default function SetupScreen() {
                 value={state.importDays === null ? "all" : "90"}
                 onValueChange={setDays}
               />
+              {isPublicFlavour ? null : (
               <View style={styles.row}>
                 <Text style={styles.rowLabel}>Include worker sessions in ~/scratch</Text>
                 <Switch
@@ -141,6 +158,7 @@ export default function SetupScreen() {
                   testID="setup-import-scratch"
                 />
               </View>
+              )}
               <Text style={styles.warning} testID="setup-import-warning">
                 {scanning
                   ? "Counting your past chats…"

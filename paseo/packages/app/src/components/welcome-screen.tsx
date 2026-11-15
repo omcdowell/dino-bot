@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
-import { Pressable, Text, View, ScrollView } from "react-native";
+import { Pressable, Share, Text, View, ScrollView } from "react-native";
 import { useRouter, type Href } from "expo-router";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import {
@@ -415,6 +415,11 @@ function InstallStep({ url }: { url: string }) {
       .then(() => setCopied(true))
       .catch(() => undefined);
   }, [command]);
+  // SR1 fix 14 (H-A7): copy on the phone reaches the computer only with Universal Clipboard;
+  // Share offers AirDrop, Messages, Mail, Notes…
+  const handleShare = useCallback(() => {
+    void Share.share({ message: command }).catch(() => undefined);
+  }, [command]);
   return (
     <View style={styles.installStep} testID="welcome-install-step">
       <Text style={styles.installTitle}>1. On your Mac or Linux computer, run:</Text>
@@ -427,6 +432,11 @@ function InstallStep({ url }: { url: string }) {
           {command}
         </Text>
       </Pressable>
+      {isNative ? (
+        <Button variant="outline" size="sm" onPress={handleShare} testID="welcome-install-share">
+          Send to your computer (AirDrop, Messages…)
+        </Button>
+      ) : null}
       <Text style={styles.installHint}>
         {copied ? "Copied. Paste it into Terminal on your computer." : installHint()}
       </Text>

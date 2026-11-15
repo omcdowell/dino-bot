@@ -10,6 +10,7 @@ import { botsRpc } from "@/onboarding/bots-rpc";
 import { packageLabel, PROVIDER_RPC, signInRoute } from "@/onboarding/provider-model";
 import {
   addPackageRoute,
+  claudeCodeInstallRoute,
   claudeCodeSignInRoute,
   claudeCodeState,
   claudeCodeSummary,
@@ -23,6 +24,7 @@ import {
   type PiSignIn,
 } from "@/onboarding/engines-model";
 import { buildNewWorkspaceRoute } from "@/utils/host-routes";
+import { botModelsRoute } from "@/onboarding/onboarding-model";
 import { BotProvidersSection } from "@/screens/settings/bot-providers-section";
 
 /**
@@ -74,6 +76,8 @@ export function EnginesSection({
   const addSignIn = useCallback(() => signIn(null), [signIn]);
   const addPackage = useCallback(() => go(addPackageRoute(serverId)), [go, serverId]);
   const claudeLogin = useCallback(() => go(claudeCodeSignInRoute(serverId)), [go, serverId]);
+  const claudeInstall = useCallback(() => go(claudeCodeInstallRoute(serverId)), [go, serverId]);
+  const botModels = useCallback(() => go(botModelsRoute(serverId)), [go, serverId]);
   const openTerminal = useCallback(
     () => go(buildNewWorkspaceRoute({ serverId })),
     [go, serverId],
@@ -179,6 +183,7 @@ export function EnginesSection({
             card={answer.claudeCode}
             busy={busy === "claude-logout"}
             onLogin={claudeLogin}
+            onInstall={claudeInstall}
             onLogout={claudeLogout}
           />
         ) : null}
@@ -186,6 +191,17 @@ export function EnginesSection({
 
       {answer ? (
         <>
+          <SettingsSection title="Models" style={styles.section}>
+            <View style={settingsStyles.card}>
+              <LinkRow
+                icon="◎"
+                title="Bot models"
+                hint="Bots, compaction and workers"
+                onPress={botModels}
+                testID="engines-bot-models"
+              />
+            </View>
+          </SettingsSection>
           <SettingsSection title="Add" style={styles.section}>
             <View style={settingsStyles.card}>
               <LinkRow
@@ -448,11 +464,13 @@ function ClaudeCodeCardView({
   card,
   busy,
   onLogin,
+  onInstall,
   onLogout,
 }: {
   card: ClaudeCodeData;
   busy: boolean;
   onLogin: () => void;
+  onInstall: () => void;
   onLogout: () => void;
 }) {
   const state = claudeCodeState(card);
@@ -473,7 +491,24 @@ function ClaudeCodeCardView({
       {state === "error" && card.error ? (
         <Text style={[styles.blurb, styles.error]}>{card.error}</Text>
       ) : null}
-      {state === "not-installed" ? (
+      {state === "not-installed" && card.canInstall ? (
+        <>
+          <Text style={styles.blurb} testID="engine-claude-install">
+            Not on your computer yet. One tap installs it (Anthropic&apos;s installer), then you log
+            in.
+          </Text>
+          <View style={[settingsStyles.row, settingsStyles.rowBorder, styles.actionsRow]}>
+            <Button
+              variant="default"
+              size="sm"
+              onPress={onInstall}
+              testID="engine-claude-install-button"
+            >
+              Install Claude Code
+            </Button>
+          </View>
+        </>
+      ) : state === "not-installed" ? (
         <Text style={styles.blurb} testID="engine-claude-install">
           Install Claude Code on your computer first (claude.com/download), then log in here.
         </Text>

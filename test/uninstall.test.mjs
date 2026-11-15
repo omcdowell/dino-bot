@@ -85,7 +85,7 @@ describe("uninstall (no flag): what --purge used to do", () => {
   it("removes services, herdr sockets and all of ~/.dinobot (sign-ins too); keeps bots, memories, rooms, herdr", async () => {
     const { home, env, L } = fakeInstall();
     const { d, calls, out } = deps(env);
-    const r = await uninstall(L, {}, d);
+    const r = await uninstall(L, { yes: true }, d);
     assert.equal(r.ok, true);
     assert.deepEqual(calls, ["stop none", "remove none paseo-bots"]);
     assert.equal(existsSync(L.root), false, "~/.dinobot gone");
@@ -96,7 +96,59 @@ describe("uninstall (no flag): what --purge used to do", () => {
     assert.match(out.text, /sign-ins are removed/);
     assert.match(out.text, /bots .* and memories .* are kept/);
     assert.match(out.text, /uninstall --purge/);
-    assert.doesNotMatch(out.text, /DELETE/, "no prompt without --purge");
+    assert.doesNotMatch(out.text, /DELETE/, "no DELETE prompt without --purge");
+  });
+
+  it("says what goes (sign-ins, phone pairing), how to update instead, and asks y/N at a terminal", async () => {
+    for (const [answer, done] of [["y\n", true], ["yes\n", true], ["\n", false], ["n\n", false], ["sure\n", false]]) {
+      const { env, L } = fakeInstall();
+      const input = new PassThrough();
+      const { d, calls, out } = deps(env, { isTTY: true, input });
+      const p = uninstall(L, {}, d);
+      input.end(answer);
+      const r = await p;
+      assert.match(out.text, /To update DinoBot, run `dinobot update` \(or the install command again\): no need to uninstall\./);
+      assert.match(out.text, /your AI sign-ins/);
+      assert.match(out.text, /your phone has to scan a new code/);
+      assert.match(out.text, /Uninstall\? \[y\/N\] /);
+      assert.equal(r.ok, done, `${JSON.stringify(answer)}: ${out.text}`);
+      assert.equal(existsSync(L.root), !done);
+      if (!done) {
+        assert.equal(r.refused, "not-confirmed");
+        assert.deepEqual(calls, [], "nothing stopped");
+        assert.match(out.text, /Not uninstalled\. Nothing was changed\./);
+      }
+    }
+  });
+
+  it("no terminal and no --yes: refused, nothing changed", async () => {
+    const { env, L } = fakeInstall();
+    const { d, calls, out } = deps(env, { isTTY: false });
+    const r = await uninstall(L, {}, d);
+    assert.equal(r.refused, "no-tty");
+    assert.deepEqual(calls, []);
+    assert.ok(existsSync(L.root));
+    assert.match(out.text, /dinobot uninstall --yes/);
+  });
+
+  it("saved install settings (install.env): plain keeps and mentions them; --purge deletes only that file", async () => {
+    const { home, env, L } = fakeInstall();
+    const saved = join(home, ".config", "dinobot", "install.env");
+    put(saved, "DINOBOT_PORT=6747\n");
+    const a = deps(env);
+    await uninstall(L, { yes: true }, a.d);
+    assert.ok(existsSync(saved), "plain keeps it");
+    assert.match(a.out.text, /shared-Mac settings \(.*install\.env\)/);
+    put(join(home, ".config", "dinobot", "private-patterns.txt"), "x"); // someone else's file there
+    const b = deps(env);
+    await uninstall(L, { purge: true, yes: true }, b.d);
+    assert.equal(existsSync(saved), false, "purge deletes it");
+    assert.match(b.out.text, /install\.env  \(saved install settings/);
+    assert.ok(existsSync(join(home, ".config", "dinobot", "private-patterns.txt")), "other files in the folder stay");
+    const c = fakeInstall();
+    put(join(c.home, ".config", "dinobot", "install.env"), "DINOBOT_PORT=1\n");
+    await uninstall(c.L, { purge: true, yes: true }, deps(c.env).d);
+    assert.equal(existsSync(join(c.home, ".config", "dinobot")), false, "an emptied folder goes too");
   });
 });
 
@@ -307,14 +359,14 @@ describe("linger: off only when setup turned it on", () => {
     put(join(L.root, LINGER_MARK), "x");
     const { d, calls } = deps(env, { mode: "systemd" });
     d.exec = lingerExec(calls);
-    await uninstall(L, {}, d);
+    await uninstall(L, { yes: true }, d);
     assert.ok(!calls.some((c) => c.startsWith("loginctl")));
   });
 });
 
 describe("WSL: the Windows sign-in start is undone", () => {
   it("calls wsl-autostart --off on WSL, both modes", async () => {
-    for (const args of [{}, { purge: true, yes: true }]) {
+    for (const args of [{ yes: true }, { purge: true, yes: true }]) {
       const { env, L } = fakeInstall();
       const seen = [];
       const { d } = deps(env, { wsl: { version: 2 }, wslAutostart: async (_L, o) => seen.push(o.off) });

@@ -32,6 +32,18 @@ export function stepRoute(step: OnboardingStep, serverId: string): string {
   return `${ONBOARDING_ROUTES[step]}?serverId=${encodeURIComponent(serverId)}`;
 }
 
+/** Settings › host › Bot models: the models screen outside onboarding (Done goes back). */
+export function botModelsRoute(serverId: string): string {
+  return `${ONBOARDING_ROUTES.models}?serverId=${encodeURIComponent(serverId)}&from=settings`;
+}
+
+/** The models screen's lead: who the suggestions are for, or that there is nothing to pick yet. */
+export function modelsLead(labels: readonly string[], modelCount: number): string {
+  if (!modelCount || !labels.length)
+    return "No models yet: your computer has no sign-in your bots can use.";
+  return `Suggested for ${labels.join(" and ")}. Change any of them.`;
+}
+
 /** The step after `current` in `steps`, or null when onboarding is over. */
 export function nextStep(
   steps: readonly OnboardingStep[],
@@ -81,6 +93,10 @@ export interface SignInStatus {
   instructions: string | null;
   prompt: { kind: "code" | "key" | string; message: string } | null;
   error: string | null;
+  /** "Install Claude Code" (claude-code:install): "install", then "login"; absent/null otherwise. */
+  phase?: "install" | "login" | string | null;
+  /** The installer's last line while installing. */
+  progress?: string | null;
 }
 
 export type ModelRole = "bots" | "compaction" | "workers";
@@ -91,7 +107,7 @@ export const ROLE_COPY: Record<ModelRole, { title: string; hint: string }> = {
     title: "Compaction",
     hint: "Keeps each bot's memory short. Called often: pick a cheap, fast one.",
   },
-  workers: { title: "Herdr subagents", hint: "Workers your bots start for longer jobs." },
+  workers: { title: "Workers", hint: "Helpers your bots start for longer jobs." },
 };
 
 export interface PiModel {

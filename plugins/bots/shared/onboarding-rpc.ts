@@ -38,6 +38,10 @@ const SignInStatusSchema = z.object({
   instructions: z.string().nullable(),
   prompt: z.object({ kind: z.string(), message: z.string() }).nullable(),
   error: z.string().nullable(),
+  /** Claude Code "Install Claude Code" (signin.start "claude-code:install"): "install" then "login"; null otherwise. */
+  phase: z.string().nullable().optional(),
+  /** The installer's last line while installing ("Downloading …"); null otherwise. */
+  progress: z.string().nullable().optional(),
 });
 export type SignInStatus = z.infer<typeof SignInStatusSchema>;
 

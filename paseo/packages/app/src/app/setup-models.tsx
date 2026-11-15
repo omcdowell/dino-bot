@@ -24,6 +24,7 @@ import {
   filterModels,
   findModel,
   initialPicks,
+  modelsLead,
   pickModel,
   previousStep,
   samePick,
@@ -61,8 +62,10 @@ async function rpc<T>(serverId: string, method: string, input: unknown): Promise
 export default function SetupModelsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const params = useLocalSearchParams<{ serverId?: string }>();
+  const params = useLocalSearchParams<{ serverId?: string; from?: string }>();
   const serverId = typeof params.serverId === "string" ? params.serverId : "";
+  // Settings › host › Bot models (SR1 fix 3): the same screen; Done/Back return to Settings.
+  const fromSettings = params.from === "settings";
   const [answer, setAnswer] = useState<ModelsAnswer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [picks, setPicks] = useState<ModelPicks>({ bots: null, compaction: null, workers: null });
@@ -75,20 +78,32 @@ export default function SetupModelsScreen() {
   const [signedIn, setSignedIn] = useState<string[] | null>(null);
 
   const next = useCallback(async () => {
+    if (fromSettings) {
+      if (router.canGoBack()) router.back();
+      else router.replace("/" as Href);
+      return;
+    }
     if (!serverId) {
       router.replace("/" as Href);
       return;
     }
     const route = await routeAfterStep("models", serverId);
     router.replace(route as Href);
-  }, [router, serverId]);
+  }, [router, serverId, fromSettings]);
+  const skip = useCallback(() => void next(), [next]);
+  // No models (no sign-in the bots can use): to the sign-in screen, never a dead end (SR1 fix 1).
+  const signIn = useCallback(() => {
+    if (fromSettings) router.push(`${stepRoute("signin", serverId)}&from=settings` as Href);
+    else router.replace(stepRoute("signin", serverId) as Href);
+  }, [router, serverId, fromSettings]);
 
   // Back goes to the sign-in step when it is behind this one (to add an account), else on.
   const back = useCallback(() => {
+    if (fromSettings) return void next();
     const prev = previousStep(RELEASE_POLICY.onboardingSteps, "models");
     if (prev && serverId) router.replace(stepRoute(prev, serverId) as Href);
     else void next();
-  }, [router, serverId, next]);
+  }, [router, serverId, next, fromSettings]);
 
   const load = useCallback(
     async (refresh: boolean) => {
@@ -155,6 +170,7 @@ export default function SetupModelsScreen() {
     [insets.bottom],
   );
   const ready = Boolean(answer && MODEL_ROLES.every((r) => picks[r]));
+  const noModels = Boolean(answer && answer.models.length === 0);
   // When the host already has models (onboarding opened again), offer the sign-in's suggestions.
   const differsFromSuggested = Boolean(
     answer && MODEL_ROLES.some((r) => !samePick(picks[r], answer.suggested[r])),
@@ -178,12 +194,12 @@ export default function SetupModelsScreen() {
 
   return (
     <View style={styles.container} testID="setup-models-screen">
-      <BackHeader title="Choose models" onBack={back} />
+      <BackHeader title={fromSettings ? "Bot models" : "Choose models"} onBack={back} />
       <ScrollView contentContainerStyle={contentStyle}>
         <Text style={styles.lead}>
           {answer
-            ? `Suggested for ${providerLabels(answer.providers, signedIn).join(" and ")}. Change any of them; the lists come from pi on your computer.`
-            : "Getting the model list from pi on your computer…"}
+            ? modelsLead(providerLabels(answer.providers, signedIn), answer.models.length)
+            : "Getting the model list from your computer…"}
         </Text>
         {answer && differsFromSuggested ? (
           <Button onPress={useSuggested} testID="setup-models-use-suggested">
@@ -193,7 +209,7 @@ export default function SetupModelsScreen() {
         {!answer && !error ? (
           <View style={styles.row}>
             <MutedSpinner />
-            <Text style={styles.body}>pi update --models, then get_available_models</Text>
+            <Text style={styles.body}>Checking which models your sign-ins offer…</Text>
           </View>
         ) : null}
         {error ? (
@@ -202,7 +218,21 @@ export default function SetupModelsScreen() {
             <Button onPress={retry}>Try again</Button>
           </View>
         ) : null}
-        {answer
+        {noModels ? (
+          <View style={styles.card} testID="setup-models-empty">
+            <Text style={styles.title}>No models yet: sign in</Text>
+            <Text style={styles.body}>
+              Sign in to an AI account first; its models show up here.
+            </Text>
+            <Button variant="default" onPress={signIn} testID="setup-models-sign-in">
+              Sign in
+            </Button>
+            <Button onPress={skip} testID="setup-models-skip">
+              {fromSettings ? "Back" : "Skip for now"}
+            </Button>
+          </View>
+        ) : null}
+        {answer && !noModels
           ? MODEL_ROLES.map((role) => (
               <RoleCard
                 key={role}
@@ -219,7 +249,7 @@ export default function SetupModelsScreen() {
             {saveError}
           </Text>
         ) : null}
-        {answer ? (
+        {answer && !noModels ? (
           <Button
             variant="default"
             onPress={handleSave}
@@ -227,7 +257,7 @@ export default function SetupModelsScreen() {
             loading={saving}
             testID="setup-models-continue"
           >
-            Continue
+            {fromSettings ? "Save" : "Continue"}
           </Button>
         ) : null}
       </ScrollView>

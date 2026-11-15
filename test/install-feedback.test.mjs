@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import http from "node:http";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, statSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { PRODUCT, PRODUCT_ID } from "../lib/util.mjs";
@@ -110,13 +110,15 @@ describe("install.sh: instant feedback", () => {
   });
 });
 
+const isFile = (f) => existsSync(f) && statSync(f).isFile();
+
 // The main download's progress bar. A stand-in release server on 127.0.0.1 sends the tarball slowly
 // (64 KB every 40 ms), with or without a Content-Length.
 /** @returns {Promise<{ url: string, close: () => void }>} */
 function slowServer(dir, { length = true } = {}) {
   const server = http.createServer((req, res) => {
     const f = join(dir, req.url.slice(1));
-    if (!existsSync(f)) return res.writeHead(404).end();
+    if (!isFile(f)) return res.writeHead(404).end(); // (also a local port scanner's "/")
     const body = readFileSync(f);
     res.writeHead(200, length ? { "content-length": body.length } : {});
     let at = 0;
@@ -231,9 +233,118 @@ describe("install.sh: download progress bar", () => {
       assert.notEqual(r.code, 0);
       assert.match(r.out, /^Downloading failed$/m);
       assert.match(r.err, /404/);
-      assert.match(r.err, /download of \S+ failed/);
+      assert.match(r.err, /no release has been published yet|stopped: the network/);
     } finally {
       srv.close();
     }
+  });
+});
+
+// Flaky networks (dbnet report: new connections stall, transfers stop dead): each try resumes the
+// .part where the last stopped; a run that gives up keeps the .part and the next run resumes it.
+/** A release server with byte ranges. cut(n, from): bytes to send on request n before dropping the connection (null: all). */
+function rangeServer(dir, { cut = () => null } = {}) {
+  const log = [];
+  const server = http.createServer((req, res) => {
+    const f = join(dir, req.url.slice(1));
+    if (!isFile(f)) return res.writeHead(404).end();
+    const body = readFileSync(f);
+    const m = /bytes=(\d+)-/.exec(req.headers.range ?? "");
+    const from = m ? Number(m[1]) : 0;
+    log.push({ url: req.url, range: req.headers.range ?? null });
+    if (from >= body.length) return res.writeHead(416, { "content-range": `bytes */${body.length}` }).end();
+    const rest = body.subarray(from);
+    res.writeHead(m ? 206 : 200, { "content-length": rest.length, "accept-ranges": "bytes", ...(m ? { "content-range": `bytes ${from}-${body.length - 1}/${body.length}` } : {}) });
+    const n = cut(log.filter((l) => l.url === req.url).length, from);
+    if (n == null) return res.end(rest);
+    res.write(rest.subarray(0, n), () => res.socket.destroy());
+  });
+  return new Promise((r) => server.listen(0, "127.0.0.1", () => r({ url: `http://127.0.0.1:${server.address().port}`, log, close: () => server.close() })));
+}
+
+describe("install.sh: flaky network (resume, retry, rerun)", () => {
+  const MB = 1048576;
+  it("a connection dropped mid-download: the next try resumes from where it stopped (Range), installs", async () => {
+    const d = tmp();
+    const tar = fakeRelease(d, { pad: 2 * MB });
+    const name = tar.split("/").pop();
+    const srv = await rangeServer(d, { cut: (n) => (n === 1 ? MB : null) });
+    try {
+      const r = await run("sh", [SH, "--yes"], tarEnv(d, `${srv.url}/${name}`));
+      assert.equal(r.code, 0, r.out + r.err);
+      assert.match(r.out, /WIZARD-STARTED/);
+      const tries = srv.log.filter((l) => l.url === `/${name}`);
+      assert.equal(tries.length, 2, JSON.stringify(srv.log));
+      assert.equal(tries[0].range, null);
+      assert.match(tries[1].range, /^bytes=\d+-$/);
+      assert.ok(Number(/=(\d+)/.exec(tries[1].range)[1]) >= MB / 2, tries[1].range);
+      assert.match(readFileSync(join(d, ".dinobot", "logs", "download.log"), "utf8"), /trying again \(2\/6, resuming\)/);
+    } finally {
+      srv.close();
+    }
+  });
+
+  it("gives up after 6 tries: says to run the same command again, keeps the .part; that run resumes it", async () => {
+    const d = tmp();
+    const tar = fakeRelease(d, { pad: 2 * MB });
+    const name = tar.split("/").pop();
+    let healthy = false;
+    const srv = await rangeServer(d, { cut: () => (healthy ? null : 300_000) });
+    try {
+      const r = await run("sh", [SH, "--yes"], tarEnv(d, `${srv.url}/${name}`));
+      const info = JSON.stringify(srv.log) + r.out + r.err;
+      assert.notEqual(r.code, 0, info);
+      assert.match(r.err, /Run the same install command again: it carries on where it stopped/, info);
+      assert.equal(srv.log.filter((l) => l.url === `/${name}`).length, 6, info);
+      const part = join(d, ".dinobot", "download", `${name}.part`);
+      assert.ok(existsSync(part), "the .part is kept");
+      assert.equal(existsSync(join(d, ".dinobot", "app")), false, "nothing installed");
+      healthy = true;
+      const before = srv.log.length;
+      const again = await run("sh", [SH, "--yes"], tarEnv(d, `${srv.url}/${name}`));
+      assert.equal(again.code, 0, again.out + again.err);
+      assert.match(again.out, /WIZARD-STARTED/);
+      const resumed = srv.log.slice(before).filter((l) => l.url === `/${name}`);
+      assert.equal(resumed.length, 1, JSON.stringify(srv.log) + again.out + again.err);
+      assert.match(resumed[0].range ?? "", /^bytes=[1-9]\d*-$/, "the rerun resumed");
+    } finally {
+      srv.close();
+    }
+  });
+
+  it("a .part from an older release (checksum mismatch after resuming): downloaded again from 0, installs", async () => {
+    const d = tmp();
+    const tar = fakeRelease(d, { pad: 2 * MB });
+    const name = tar.split("/").pop();
+    mkdirSync(join(d, ".dinobot", "download"), { recursive: true });
+    writeFileSync(join(d, ".dinobot", "download", `${name}.part`), randomBytes(MB));
+    const srv = await rangeServer(d);
+    try {
+      const r = await run("sh", [SH, "--yes"], tarEnv(d, `${srv.url}/${name}`));
+      assert.equal(r.code, 0, r.out + r.err);
+      assert.match(r.out, /another release; downloading again from the start/);
+      assert.match(r.out, /WIZARD-STARTED/);
+      const tries = srv.log.filter((l) => l.url === `/${name}`);
+      assert.deepEqual(tries.map((t) => t.range), [`bytes=${MB}-`, null]);
+    } finally {
+      srv.close();
+    }
+  });
+});
+
+describe("install.sh: the name is asked on the first install only", () => {
+  it("over an existing install (state.json): no question, no --name (setup keeps the saved name)", { skip: process.platform !== "linux" || !existsSync("/usr/bin/script") }, () => {
+    const d = tmp();
+    const tar = fakeRelease(d);
+    const stage = join(d, "stage", tar.split("/").pop().replace(/\.tar\.gz$/, ""));
+    writeFileSync(join(stage, "node", "bin", "node"), '#!/bin/sh\necho "WIZARD-ARGS $*"\n');
+    spawnSync("tar", ["-czf", tar, "-C", join(d, "stage"), stage.split("/").pop()]);
+    writeFileSync(`${tar}.sha256`, `${createHash("sha256").update(readFileSync(tar)).digest("hex")}  x\n`);
+    mkdirSync(join(d, ".dinobot"), { recursive: true });
+    writeFileSync(join(d, ".dinobot", "state.json"), "{}");
+    const env = { PATH: "/usr/bin:/bin", HOME: d, DINOBOT_HOME: join(d, ".dinobot"), DINOBOT_TARBALL: tar, DINOBOT_ALLOW_UNSIGNED: "1", TERM: "dumb" };
+    const r = spawnSync("script", ["-qec", `sh ${SH}`, "/dev/null"], { env, input: "", encoding: "utf8", timeout: 60_000 });
+    assert.doesNotMatch(r.stdout, /what should your bots call you/, r.stdout);
+    assert.match(r.stdout, /WIZARD-ARGS .*cli\.mjs setup\s*$/m, r.stdout);
   });
 });

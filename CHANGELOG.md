@@ -1,5 +1,70 @@
 # Changelog
 
+## v0.1.9
+
+### Claude Code first when you set up
+
+- **Sign in for your bots starts with Claude Code** ("Uses your Claude Pro/Max plan"): Claude
+  Code's own login, run by your computer, the same as Settings › Providers › Claude Code. pi's
+  sign-ins follow; "Claude login (extra usage)" is last and now says plainly that it is billed per
+  token on top of any Claude plan you pay for.
+- **One button installs Claude Code, then logs you in.** When your computer has no `claude` yet,
+  the card's button is "Install Claude Code": your computer runs Anthropic's own installer
+  (`curl -fsSL https://claude.ai/install.sh | bash`, as you, no sudo; it lands in `~/.local/bin`),
+  then the Claude Code login starts by itself. The app shows the steps (installing, log in, done)
+  and "Try again" if something fails. The same button is on Settings › Providers. DinoBot never
+  ships the Claude Code binary. In the terminal: `dinobot claude-code install-cli`.
+- `dinobot doctor` says whether Claude Code is installed and logged in (optional, never a failure).
+
+### No more getting stuck in the app's first-run steps
+
+- **Choose models with nothing to choose** (no sign-in yet) shows "No models yet: sign in" with
+  Sign in and Skip for now, instead of a disabled Continue. Sign in has a visible "Skip for now",
+  and its Back button no longer jumps forward.
+- **Settings › your computer › Providers › Bot models**: the models for bots, compaction and
+  workers, any time after setup.
+- The past-chats import step is skipped when there is nothing to import, and no longer shows a
+  developer-only `~/scratch` option. Plainer words ("Workers"), and the install command on the
+  welcome screen can be sent to your computer with Share (AirDrop, Messages…).
+- iOS build 0.1.3 (12).
+
+### Update, uninstall, reinstall
+
+- **`dinobot update` is instant when you are up to date.** It compares the release's checksum
+  first and downloads nothing (it used to fetch the whole 100-140 MB tarball, minutes on slow
+  Wi-Fi, just to say "already up to date"). A real update shows a progress line and ends with the
+  versions: `Updated DinoBot 0.1.8 -> 0.1.9`.
+- **The new version finishes its own update.** After the swap, `update` runs the new version's
+  post-update step (wrappers, services, the `~/.local/bin` link, saved settings) and rolls back if
+  it fails. No more "run update a second time" (from the update after v0.1.9 on; the update to
+  v0.1.9 itself still runs the old updater).
+- **`dinobot uninstall` asks first** and says what goes: your AI sign-ins and the phone's pairing
+  (after a reinstall you sign in again and scan a new code). Your bots and memories stay. It also
+  says: to update, run `dinobot update`, no need to uninstall. `--yes` skips the question; without
+  a terminal it needs `--yes`.
+- **Shared-Mac settings survive.** `DINOBOT_TAILNET_ADDRESS`, `DINOBOT_TAILSCALE_BIN`,
+  `DINOBOT_TAILSCALE_SOCKET` and `DINOBOT_PORT` are saved in `~/.config/dinobot/install.env`
+  (mode 600) once setup works with them; every command and a reinstall read them. Plain uninstall
+  keeps the file, `--purge` deletes it.
+- **New shared-Mac route without a second Tailscale**: the owner shares the Mac with your Tailscale
+  account, and `DINOBOT_TAILNET_ADDRESS=<the Mac's Tailscale IP>` replaces the stand-in script.
+  The safety stop names both routes, links the guide, and prints the exact command to finish
+  (`~/.dinobot/bin/dinobot setup`, nothing downloaded again).
+
+### Install
+
+- **Flaky networks**: every download has a short connect timeout, drops a stalled transfer, and
+  retries up to 6 times, each try resuming where the last stopped. If it still fails, run the same
+  install command again: it carries on from there. The signature checker's download shows its size.
+- **The name is asked on the first install only**; running the install command again keeps it.
+- **A quieter end of setup**: the QR, then only what needs you (the PATH line, `git`/`bzip2`
+  missing on Linux, a Mac laptop that sleeps) and the done line. Addresses, timings and details:
+  `dinobot setup --verbose` (and `~/.dinobot/state.json`).
+- **`dinobot` alone prints the help** (it used to run setup again, with a new QR and a restart).
+- Linux: while setup waits for Tailscale, it says to paste the Tailscale command into a **new**
+  terminal window.
+- Removed: the `--tailscale-embed` flag (it only printed "not built yet").
+
 ## v0.1.8
 
 ### The `dinobot` command is on your PATH

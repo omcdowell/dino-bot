@@ -116,6 +116,8 @@ Ubuntu's address changes at every restart, and DinoBot would have to listen outs
 
 ## Removing DinoBot
 
+To update, run `~/.dinobot/bin/dinobot update` instead: no need to uninstall.
+
 ```
 ~/.dinobot/bin/dinobot uninstall --purge
 ```
