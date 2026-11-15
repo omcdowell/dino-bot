@@ -8,10 +8,12 @@ import { botDmSender } from "./server/bot-dm-send";
 import { Extensions } from "./server/extensions";
 import { HerdrInstance } from "./server/herdr-instance";
 import { CcHost } from "./server/cc/engine";
-import { CcLauncher, ccModsDir, claudePlanReady, claudeSignedIn } from "./server/cc/launch";
+import { CcModels } from "./server/cc/models";
+import { CcLauncher, ccModsDir, claudeLogin, claudePlanReady, claudeSignedIn, resetClaudeAuthCache } from "./server/cc/launch";
 import { setWorkerDefault, workerDefault } from "./server/worker-default";
 import { pluginSkillsDirFor } from "./server/cc/skills";
 import { CC_PROVIDER, createCcProvider } from "./server/cc/provider";
+import { createCcUsageSource } from "./server/cc/usage-source";
 import { BotPrompts, onPath } from "./server/bot-prompt";
 import { stripProfiles } from "./server/bot-dm-block";
 import { botEnv, loadSettings, readSettingsAt, writeRoomFullTools } from "./server/settings";
@@ -113,6 +115,9 @@ export default function contribute(server: PluginServerContext) {
       warn: (message) => console.warn(message),
     }),
   );
+  // Plan usage cards (5-hour, weekly) for those bots, from the windows their Claude Code reports (server/cc/usage-source.ts).
+  // Paseo finds them through the plugin session's usage scope (daemon: PluginAgentSession.usageSession()).
+  server.registerUsageSource(createCcUsageSource({ botsRoot: root, botDir: (bot) => ccHost.botDir(bot), provider: CC_PROVIDER }));
   const service = new BotsService(root);
   // PaseoApi is structurally wider than the slices the services need.
   const sdk = (paseo: unknown) => paseo as BotsPaseo;
@@ -286,7 +291,15 @@ export default function contribute(server: PluginServerContext) {
   server.handle(botsTimersSetRpc, ({ unit, paused, includeAll }) => setTimerPaused(unit, paused, undefined, { includeAll }));
 
   // Onboarding on the phone (DinoBot): sign-in, models, optional import. pi does the work.
-  const onboarding = new Onboarding(settings, root);
+  // "Choose models" lists Claude Code's models too when it is signed in (v0.1.12: the Claude-Code-only setup loop).
+  const setupCcModels = new CcModels({ warn: (line) => console.warn(`[bots] ${line}`) });
+  const onboarding = new Onboarding(settings, root, process.env, {
+    claudeCode: async (refresh) => {
+      if (refresh) resetClaudeAuthCache(); // right after the phone's Claude login: no minute-old "not logged in"
+      const login = await claudeLogin(process.env);
+      return login.loggedIn ? { models: await setupCcModels.list(undefined, process.env), plan: login.plan } : null;
+    },
+  });
   // DinoBot: load the host module now, not at the first sign-in RPC; it runs the daemon's sweep of
   // a stale pairing QR picture (lib/qr.mjs startQrSweep). A plain Paseo host has none: no-op.
   void onboarding.host().catch(() => null);

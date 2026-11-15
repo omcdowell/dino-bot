@@ -55,3 +55,24 @@ test("claudeSignedIn: any login; claudePlanReady: a Claude plan, not Team/Enterp
   assert.equal(await claudeSignedIn(env, async () => ({ code: 1, stdout: "", stderr: "x" })), false);
   resetClaudeAuthCache();
 });
+
+test("a Claude Code model from setup (claude-code/<model>): Claude Code workers run it, pi workers fall back to pi's default", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const root = mkdtempSync(join(tmpdir(), "worker-default-"));
+  try {
+    writeFileSync(join(root, ".settings.json"), JSON.stringify({ models: { workers: { provider: "claude-code", model: "sonnet", thinking: "high" } } }));
+    const script = join(import.meta.dirname, "..", "skills", "workers", "worker-default.mjs");
+    const run = (engine: string) => execFileSync(process.execPath, [script], { env: { PATH: process.env.PATH, HOME: root, PASEO_BOTS_ROOT: root, WORKER_ENGINE: engine }, encoding: "utf8" });
+    assert.equal(run("cc"), "cc\nclaude-code/sonnet:high\n");
+    assert.equal(run("pi"), "pi\n\n");
+    // launch-cc.sh's model block: claude-code/<model>:<effort> becomes claude --model <model> --effort <effort>.
+    const sh = readFileSync(join(import.meta.dirname, "..", "skills", "workers", "launch-cc.sh"), "utf8");
+    const block = sh.slice(sh.indexOf("# Model: CC_WORKER_MODEL"), sh.indexOf("case $EFFORT in"));
+    const parse = (model: string) => execFileSync("sh", ["-c", `MODEL='${model}'\n${block}\necho "$MODEL|$EFFORT"`], { encoding: "utf8", env: { PATH: process.env.PATH } }).trim();
+    assert.equal(parse("claude-code/sonnet:high"), "sonnet|high");
+    assert.equal(parse("claude-code/claude-opus-5-5"), "claude-opus-5-5|");
+    assert.equal(parse("anthropic/claude-sonnet-5-5:low"), "claude-sonnet-5-5|low");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

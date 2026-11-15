@@ -1,4 +1,6 @@
-import { relative } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative } from "node:path";
 import type {
   ProviderConnection,
   ProviderLaunch,
@@ -314,6 +316,46 @@ describe("PluginAgentClientRegistry", () => {
       config: { providerOptions: { nested: { base: true, replace: "agent" } } },
     });
     await agent.session?.close();
+  });
+
+  test("gives usage sources the plugin session's provider, model and env (provider env, then launch env)", async () => {
+    const logger = createTestLogger();
+    const harness = createProviderHarness();
+    const plugins = new PluginAgentClientRegistry(logger);
+    plugins.replace([harness.registration]);
+    const registry = buildProviderRegistry(logger, {
+      pluginProviders: plugins.definitions(),
+      providerOverrides: {
+        "plugin-direct": ProviderOverrideSchema.parse({ env: { XDG_CONFIG_HOME: "/cfg" } }),
+      },
+    });
+    const manager = new AgentManager({
+      logger,
+      clients: { "plugin-direct": registry["plugin-direct"].createClient(logger) },
+      providerDefinitions: { "plugin-direct": registry["plugin-direct"] },
+    });
+    const cwd = mkdtempSync(join(tmpdir(), "plugin-usage-"));
+    const agent = await manager.createAgent(
+      { provider: "plugin-direct", cwd },
+      undefined,
+      { workspaceId: undefined },
+    );
+    const first = manager.usageSession(agent.id);
+    expect(first).toMatchObject({
+      provider: "plugin-direct",
+      env: { PASEO_AGENT_ID: agent.id, PASEO_AGENT_CWD: cwd, XDG_CONFIG_HOME: "/cfg" },
+    });
+    expect(first?.env.PATH).toBe(process.env.PATH);
+    expect(first?.sessionKey).toEqual(expect.any(String));
+    await agent.session?.setModel?.("plugin-model");
+    const second = manager.usageSession(agent.id);
+    expect(second).toMatchObject({ model: "plugin-model", sessionKey: first?.sessionKey });
+    // The registry keeps the env it was given; a caller mutating it must not change the session's scope.
+    second!.env.PASEO_AGENT_CWD = "/elsewhere";
+    expect(manager.usageSession(agent.id)?.env.PASEO_AGENT_CWD).toBe(cwd);
+    await agent.session?.close();
+    expect(agent.session?.usageSession?.()).toBeNull();
+    rmSync(cwd, { recursive: true, force: true });
   });
 
   test.each([

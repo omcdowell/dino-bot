@@ -10,6 +10,8 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { setDefaultChatModel } from "./bots";
+import type { CcModel } from "./cc/models";
+import { CC_SETUP_PROVIDER, ccChatProvider, ccSetupModels, ccSuggested, isCcPick } from "./cc/setup-models";
 import { hostProfileConfig } from "./manage";
 import { MODEL_ROLES, parseModelPick, settingsPath, type BotsSettings, type HostModels, type ModelPick } from "./settings";
 
@@ -41,9 +43,11 @@ type Installer = {
 
 type EngineInstaller = Required<Pick<Installer, "enginesStatus" | "piSignOut" | "claudeLogout">>;
 
+/** Claude Code's side of "Choose models": its models and plan when it is signed in, else null. */
+export type ClaudeCodeModels = (refresh: boolean) => Promise<{ models: readonly CcModel[]; plan: string | null } | null>;
+
 type ProviderInstaller = Required<Pick<Installer, "providerList" | "providerInstall" | "providerInstallStatus" | "providerRemove">>;
 
-const OPTCHAT = "optchat";
 const PROFILE_FILE = ".optchat-profile";
 const META_FILE = ".bot.json";
 
@@ -69,6 +73,7 @@ export class Onboarding {
     private readonly settings: BotsSettings,
     private readonly root: string,
     private readonly env: NodeJS.ProcessEnv = process.env,
+    private readonly opts: { claudeCode?: ClaudeCodeModels } = {},
   ) {}
 
   /** DinoBot's onboarding module, or null on a host without DinoBot's installer. */
@@ -147,16 +152,38 @@ export class Onboarding {
     }
   }
 
+  /**
+   * "Choose models": pi's live list for its sign-ins plus, when Claude Code is signed in, Claude Code's models
+   * (provider `claude-code`). A Claude-Code-only computer used to get an empty list here, and the app's "sign in"
+   * sent the user back to a sign-in step that was already done (the v0.1.11 setup loop).
+   */
   async models(refresh: boolean) {
     const current = this.settings.models;
+    const none = { bots: null, compaction: null, workers: null };
     const h = await this.host();
-    if (!h) return { available: false, providers: [], subscription: null, models: [], suggested: { bots: null, compaction: null, workers: null }, current, error: null };
-    try {
-      const r = await h.models({ refresh });
-      return { available: true, ...r, current, error: null };
-    } catch (e) {
-      return { available: true, providers: [], subscription: null, models: [], suggested: { bots: null, compaction: null, workers: null }, current, error: (e as Error).message };
-    }
+    if (!h) return { available: false, providers: [], subscription: null, models: [], suggested: none, current, error: null };
+    const [pi, cc] = await Promise.all([
+      h.models({ refresh }).then(
+        (r) => ({ ok: true as const, r }),
+        (e: Error) => ({ ok: false as const, error: e.message }),
+      ),
+      this.opts.claudeCode ? this.opts.claudeCode(refresh).catch(() => null) : Promise.resolve(null),
+    ]);
+    const piPart = pi.ok ? pi.r : { providers: [], subscription: null, models: [], suggested: none as HostModels };
+    if (!cc || !cc.models.length) return { available: true, ...piPart, current, error: pi.ok ? null : pi.error };
+    const ccSuggest = ccSuggested(cc.plan);
+    const suggested = {} as HostModels;
+    for (const role of MODEL_ROLES) suggested[role] = piPart.suggested[role] ?? ccSuggest[role];
+    return {
+      available: true,
+      providers: [...piPart.providers, CC_SETUP_PROVIDER],
+      subscription: piPart.subscription,
+      models: [...piPart.models, ...ccSetupModels(cc.models)],
+      suggested,
+      current,
+      // pi failing on a Claude-Code-only computer is no error the user can act on: Claude Code's models are here.
+      error: null,
+    };
   }
 
   async importScan(): Promise<{ signIn?: string; estimate?: Record<string, unknown> }> {
@@ -185,12 +212,13 @@ export class Onboarding {
     }
     if (models) {
       if (h) {
-        const live = await h.models();
+        const live = await this.models(false);
+        if (live.error) throw new Error(live.error);
         for (const role of MODEL_ROLES) {
           const pick = models[role];
           if (!pick) continue;
           const m = live.models.find((x) => x.provider === pick.provider && x.id === pick.model);
-          if (!m) throw new Error(`pi does not offer ${pick.provider}/${pick.model} with your sign-in.`);
+          if (!m) throw new Error(`${isCcPick(pick) ? "Claude Code" : "pi"} does not offer ${pick.provider}/${pick.model} with your sign-in.`);
           if (pick.thinking && !m.levels.includes(pick.thinking)) throw new Error(`${pick.model} has no "${pick.thinking}" effort (it has: ${m.levels.join(", ") || "none"}).`);
         }
       }
@@ -235,7 +263,7 @@ export class Onboarding {
       const chat = meta.chat as { setup?: boolean } | undefined;
       if (chat && !chat.setup) continue; // the user picked this bot's model: keep it
       if (models.bots) {
-        meta.chat = { provider: `${OPTCHAT}/${models.bots.provider}/${models.bots.model}`, ...(models.bots.thinking ? { thinkingOptionId: models.bots.thinking } : {}), setup: true };
+        meta.chat = { provider: ccChatProvider(models.bots), ...(models.bots.thinking ? { thinkingOptionId: models.bots.thinking } : {}), setup: true };
         await atomicWrite(join(dir, META_FILE), `${JSON.stringify(meta)}\n`, 0o664);
       }
       const profileName = readFileSync(join(dir, PROFILE_FILE), "utf8").trim() || id;
@@ -253,7 +281,8 @@ export class Onboarding {
   /** pi's defaults in DinoBot's pi dir: what a plain `pi` (a herdr worker) runs on. */
   private async writePiDefaults(workers: ModelPick | null): Promise<boolean> {
     const dir = this.env.PI_CODING_AGENT_DIR;
-    if (!dir || !workers) return false;
+    // pi cannot run a Claude Code model: its defaults stay as they are (Claude Code workers get it from launch-cc.sh).
+    if (!dir || !workers || isCcPick(workers)) return false;
     const path = join(dir, "settings.json");
     const s = (await readJson(path)) ?? {};
     s.defaultProvider = workers.provider;

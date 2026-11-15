@@ -53,6 +53,8 @@ interface LedgerFile {
   /** Each chat's sums and last context. */
   sessions: Record<string, Totals & { window?: number; used?: number }>;
   rateLimits?: CcRunUsage["rateLimits"];
+  /** When Claude Code last reported `rateLimits` (ISO): the usage card says how old its windows are. */
+  rateLimitsAt?: string;
 }
 
 const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) && x >= 0 ? x : 0);
@@ -73,7 +75,10 @@ export function totalsOf(t: CcTokens | undefined, usd = 0): Totals {
 export class CcUsageLedger {
   private data: LedgerFile;
 
-  constructor(private readonly file: string) {
+  constructor(
+    private readonly file: string,
+    private readonly now: () => number = Date.now,
+  ) {
     this.data = { v: 1, runs: {}, sessions: {} };
     try {
       const d = JSON.parse(readFileSync(file, "utf8"));
@@ -103,7 +108,10 @@ export class CcUsageLedger {
     if (window) s.window = window;
     const used = r.context?.tokens ?? r.context?.estimate;
     if (typeof used === "number" && Number.isFinite(used) && used >= 0) s.used = used;
-    if (Array.isArray(r.rateLimits) && r.rateLimits.length) this.data.rateLimits = r.rateLimits;
+    if (Array.isArray(r.rateLimits) && r.rateLimits.length) {
+      this.data.rateLimits = r.rateLimits;
+      this.data.rateLimitsAt = new Date(this.now()).toISOString();
+    }
     this.save();
     return this.usage(session)!;
   }

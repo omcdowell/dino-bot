@@ -36,6 +36,7 @@ import {
 } from "@/onboarding/onboarding-model";
 import { routeAfterStep } from "@/onboarding/setup-store";
 import { providerLabels } from "@/onboarding/signin-session-store";
+import { ENGINES_RPC } from "@/onboarding/engines-model";
 import { RELEASE_POLICY } from "@/constants/flavour";
 import { setupColumnStyle } from "@/constants/layout";
 
@@ -76,6 +77,9 @@ export default function SetupModelsScreen() {
   const [saveError, setSaveError] = useState<string | null>(null);
   // The sign-ins in their own words ("ChatGPT (Codex)"), from the sign-in step's list.
   const [signedIn, setSignedIn] = useState<string[] | null>(null);
+  // Claude Code logged in on the computer (engines.status): with "Already signed in", the empty list must not send
+  // the user back to the sign-in step (the v0.1.11 loop: sign-in said done, models said "sign in").
+  const [claudeCodeIn, setClaudeCodeIn] = useState(false);
 
   const next = useCallback(async () => {
     if (fromSettings) {
@@ -112,6 +116,9 @@ export default function SetupModelsScreen() {
       void rpc<{ signedIn?: string[] }>(serverId, ONBOARDING_RPC.signinOptions, {})
         .then((o) => setSignedIn(o.signedIn ?? null))
         .catch(() => setSignedIn(null));
+      void rpc<{ claudeCode?: { loggedIn?: boolean } | null }>(serverId, ENGINES_RPC.status, {})
+        .then((e) => setClaudeCodeIn(e?.claudeCode?.loggedIn === true))
+        .catch(() => setClaudeCodeIn(false));
       let a: ModelsAnswer;
       try {
         a = await rpc<ModelsAnswer>(serverId, ONBOARDING_RPC.models, { refresh });
@@ -171,6 +178,8 @@ export default function SetupModelsScreen() {
   );
   const ready = Boolean(answer && MODEL_ROLES.every((r) => picks[r]));
   const noModels = Boolean(answer && answer.models.length === 0);
+  // Signed in (a pi sign-in or Claude Code) yet no models listed: go on; adding a sign-in is the second choice.
+  const signedInAlready = claudeCodeIn || Boolean(signedIn?.length);
   // When the host already has models (onboarding opened again), offer the sign-in's suggestions.
   const differsFromSuggested = Boolean(
     answer && MODEL_ROLES.some((r) => !samePick(picks[r], answer.suggested[r])),
@@ -198,7 +207,9 @@ export default function SetupModelsScreen() {
       <ScrollView contentContainerStyle={contentStyle}>
         <Text style={styles.lead}>
           {answer
-            ? modelsLead(providerLabels(answer.providers, signedIn), answer.models.length)
+            ? noModels && signedInAlready
+              ? "Your computer listed no models for your sign-in."
+              : modelsLead(providerLabels(answer.providers, signedIn), answer.models.length)
             : "Getting the model list from your computer…"}
         </Text>
         {answer && differsFromSuggested ? (
@@ -218,7 +229,22 @@ export default function SetupModelsScreen() {
             <Button onPress={retry}>Try again</Button>
           </View>
         ) : null}
-        {noModels ? (
+        {noModels && signedInAlready ? (
+          <View style={styles.card} testID="setup-models-empty">
+            <Text style={styles.title}>You're signed in</Text>
+            <Text style={styles.body}>
+              Your bots use your sign-in's own default model for now. You can choose models later in
+              Settings, under Bot models.
+            </Text>
+            <Button variant="default" onPress={skip} testID="setup-models-skip">
+              {fromSettings ? "Back" : "Continue"}
+            </Button>
+            <Button onPress={signIn} testID="setup-models-add-signin">
+              Add another sign-in
+            </Button>
+          </View>
+        ) : null}
+        {noModels && !signedInAlready ? (
           <View style={styles.card} testID="setup-models-empty">
             <Text style={styles.title}>No models yet: sign in</Text>
             <Text style={styles.body}>

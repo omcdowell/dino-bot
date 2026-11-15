@@ -26,6 +26,7 @@ import { BOT_ID_RE } from "../shared/rooms/schema";
 import { agentsMdFor } from "../shared/templates";
 import { readSettingsAt, type HostModels, type ModelPick } from "./settings";
 import { parseRunner, resolveRunner, type CompactorRunner } from "./cc/compactor-runner";
+import { ccCompactorPick } from "./cc/setup-models";
 import { AVATAR_PACK, AvatarJsonSchema, parseAvatar, randomDefaultAvatar, type AvatarJson } from "../shared/avatar";
 import {
   AVATAR_JSON_FILE,
@@ -229,7 +230,9 @@ export function signInCompactor(input: { chatProvider?: string | null; piSignIns
 export const defaultPiAgentDir = (env: NodeJS.ProcessEnv = process.env) => env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent");
 
 /** A settings ModelPick as an OptChat ModelChoice (a model without effort runs with "off"). */
-export function choiceOf(pick: ModelPick | null): CompactorChoice | null {
+export function choiceOf(raw: ModelPick | null): CompactorChoice | null {
+  // A Claude Code pick (setup's "Choose models") as the anthropic/claude-… model Claude Code runs (server/cc/setup-models.ts).
+  const pick = raw ? ccCompactorPick(raw) : null;
   return pick ? { provider: pick.provider, model: pick.model, thinking: (pick.thinking ?? "off") as CompactorChoice["thinking"] } : null;
 }
 

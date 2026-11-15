@@ -308,7 +308,7 @@ main() {
       _bw=$(( $(cols) - 34 )); [ "$_bw" -le 20 ] || _bw=20
       if [ -n "$PC" ] && [ "$_bw" -ge 5 ]; then
         _h=$((PC * _bw / 100)); _bar=""; _j=0
-        while [ "$_j" -lt "$_bw" ]; do if [ "$_j" -lt "$_h" ]; then _bar="$_bar━"; else _bar="$_bar─"; fi; _j=$((_j + 1)); done
+        while [ "$_j" -lt "$_bw" ]; do if [ "$_j" -lt "$_h" ]; then _bar="${_bar}━"; else _bar="${_bar}─"; fi; _j=$((_j + 1)); done
         status "Downloading  $C$_bar$N  $(printf '%3d' "$PC")%  $_s"
       else status "Downloading  ${PC:+$PC%  }$_s"; fi
       return

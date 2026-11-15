@@ -91,14 +91,16 @@ fs.writeFileSync(dir + "/settings.json", JSON.stringify(settings, null, 2) + "\n
 fs.chmodSync(dir + "/settings.json", 0o600);
 ' "$CCDIR" "$HERE/cc-status.mjs" "${CC_WORKER_BASE_URL:-}" "${CC_WORKER_AUTH_TOKEN:-}" || fail "cannot write $CCDIR/settings.json"
 
-# Model: CC_WORKER_MODEL, else the worker model when it is a Claude one (provider/model:thinking).
+# Model: CC_WORKER_MODEL, else the worker model when it is a Claude one (anthropic/, claude-code/ or claude-…; :thinking).
 EFFORT=${CC_WORKER_EFFORT:-}
 if [ -n "${CC_WORKER_MODEL:-}" ]; then
   MODEL=$CC_WORKER_MODEL
 elif [ -n "$MODEL" ]; then
   case $MODEL in
-    anthropic/* | claude-*)
+    anthropic/* | claude-code/* | claude-*)
+      # claude-code/<model>: a Claude Code model picked in setup's "Choose models" (an alias such as sonnet, or an id).
       M=${MODEL#anthropic/}
+      M=${M#claude-code/}
       case $M in *:*) EFFORT=${M##*:} M=${M%%:*} ;; esac
       MODEL=$M
       ;;

@@ -46,6 +46,7 @@ import type {
   AgentSlashCommand,
   AgentStreamEvent,
   AgentTimelineItem,
+  AgentUsageSession,
   FetchCatalogOptions,
   ImportableProviderSession,
   ImportedProviderSession,
@@ -906,7 +907,10 @@ class PluginAgentClient implements AgentClient {
 
   readonly getCatalogCacheKey?: AgentClient["getCatalogCacheKey"];
 
-  constructor(registration: ProviderRegistration, runtimeSettings?: ProviderRuntimeSettings) {
+  constructor(
+    registration: ProviderRegistration,
+    private readonly runtimeSettings?: ProviderRuntimeSettings,
+  ) {
     this.provider = registration.id;
     this.runtime = new ProviderRuntime(registration, runtimeSettings);
     if (registration.getCatalogCacheKey)
@@ -1041,15 +1045,22 @@ class PluginAgentClient implements AgentClient {
     persist: boolean;
   }): Promise<PluginAgentSession> {
     const sessionId = randomUUID();
+    const config = mapSessionConfig(input.config, input.launchContext, input.persist);
     const bridge = await this.runtime.openSession({
       sessionId,
-      config: mapSessionConfig(input.config, input.launchContext, input.persist),
+      config,
       persistence: input.persistence,
       history: input.history,
     });
-    const session = new PluginAgentSession(this.provider, bridge, () => {
-      this.rootsBySession.delete(bridge.id);
-    });
+    const session = new PluginAgentSession(
+      this.provider,
+      bridge,
+      () => {
+        this.rootsBySession.delete(bridge.id);
+      },
+      // As built-in providers give their harness env: the provider's env with this session's launch env on top.
+      definedEnv(createProviderEnv({ runtimeSettings: this.runtimeSettings, overlays: [config.env] })),
+    );
     this.rootsBySession.set(bridge.id, session);
     this.attachPendingChildren();
     return session;
@@ -1104,11 +1115,14 @@ class PluginAgentSession implements AgentSession {
   private unsubscribe: (() => void) | null = null;
   private currentTurnId: string | null = null;
   private closed = false;
+  private readonly usageSessionKey = randomUUID();
 
   constructor(
     readonly provider: string,
     private readonly bridge: ProviderRuntimeSession,
     private readonly onClose: () => void,
+    /** The usage scope's env: the provider's env plus the session's launch env (PASEO_AGENT_ID, PASEO_AGENT_CWD). */
+    private readonly usageEnv: Record<string, string> = {},
   ) {
     this.subagentIdsBySession.set(bridge.id, null);
     for (const event of bridge.history) this.accept(event, false);
@@ -1196,6 +1210,17 @@ class PluginAgentSession implements AgentSession {
 
   async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
     for (const event of this.history) yield event;
+  }
+
+  /** Usage sources match plugin sessions on the provider id, current model and launch env, as built-in ones. */
+  usageSession(): AgentUsageSession | null {
+    if (this.closed) return null;
+    return {
+      provider: this.provider,
+      model: this.bridge.config.model ?? undefined,
+      env: { ...this.usageEnv },
+      sessionKey: this.usageSessionKey,
+    };
   }
 
   async getRuntimeInfo() {
@@ -1634,6 +1659,12 @@ function mapSessionConfig(
     title: config.title ?? undefined,
     persist,
   };
+}
+
+function definedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
 }
 
 function combineSystemPrompts(

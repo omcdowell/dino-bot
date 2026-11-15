@@ -59,8 +59,14 @@ export function createSignInMemory<O>(): SignInMemory<O> {
  * providers in the same order. pi's provider ids when the two lists do not line up.
  */
 export function providerLabels(providers: readonly string[], signedIn: readonly string[] | null) {
-  if (!signedIn || signedIn.length !== providers.length || signedIn.some((l) => !l.trim())) {
-    return [...providers];
+  // "claude-code": Claude Code's own login (its models joined pi's in v0.1.12); signin.options lists pi's only.
+  const pi = providers.filter((p) => p !== CLAUDE_CODE_PROVIDER);
+  const cc = pi.length !== providers.length ? ["Claude Code"] : [];
+  if (!signedIn || signedIn.length !== pi.length || signedIn.some((l) => !l.trim())) {
+    return [...pi, ...cc];
   }
-  return [...signedIn];
+  return [...signedIn, ...cc];
 }
+
+/** setup.models' provider for Claude Code's models (plugins/bots/server/cc/setup-models.ts CC_SETUP_PROVIDER). */
+export const CLAUDE_CODE_PROVIDER = "claude-code";

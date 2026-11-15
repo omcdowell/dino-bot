@@ -276,6 +276,12 @@ export async function claudeSignedIn(env: NodeJS.ProcessEnv = process.env, run =
   return (await claudeAuthStatus(env, run))?.loggedIn === true;
 }
 
+/** Whether Claude Code is signed in, and its plan (`subscriptionType`, e.g. "max"), for setup's "Choose models". */
+export async function claudeLogin(env: NodeJS.ProcessEnv = process.env, run = runFile): Promise<{ loggedIn: boolean; plan: string | null }> {
+  const s = await claudeAuthStatus(env, run);
+  return { loggedIn: s?.loggedIn === true, plan: typeof s?.subscriptionType === "string" ? s.subscriptionType : null };
+}
+
 /** Test hook: forget the cached `claude auth status`. */
 export function resetClaudeAuthCache(): void {
   authCache = null;

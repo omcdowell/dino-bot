@@ -99,9 +99,10 @@ export function setClaudeCodeReady(check: () => Promise<boolean>): void {
 
 /** Config for a new bot chat when no "bot" agent profile names a model. */
 export function defaultChatConfig(): ChatConfig {
-  return defaultModel
-    ? { provider: `${OPTCHAT_PROVIDER}/${defaultModel}`, ...(defaultThinking ? { thinkingOptionId: defaultThinking } : {}) }
-    : DEFAULT_CHAT_CONFIG;
+  if (!defaultModel) return DEFAULT_CHAT_CONFIG;
+  // A Claude Code pick from setup ("claude-code/<model>", server/cc/setup-models.ts) runs on optchat-cc.
+  const provider = defaultModel.startsWith("claude-code/") ? `${CC_CHAT_PROVIDER}/${defaultModel.slice("claude-code/".length)}` : `${OPTCHAT_PROVIDER}/${defaultModel}`;
+  return { provider, ...(defaultThinking ? { thinkingOptionId: defaultThinking } : {}) };
 }
 
 /** Agent profile id whose provider/model/thinking new bot chats use. */

@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.1.12
+
+### Choose models with Claude Code
+
+- On a computer signed in to Claude Code, setup's "Choose models" (and Settings › Bot models) lists
+  Claude Code's models: its aliases (Opus, Sonnet, Haiku, Fable: each follows the newest model of
+  its family), then the model ids your login can use, each with Claude Code's effort levels. They
+  sit next to pi's models when pi is signed in too.
+- Suggestions for a Claude login: Opus for bot chats on a Max plan (Sonnet on Pro), Sonnet at
+  medium effort for summaries and workers. pi's suggestions still win when pi has some.
+- A Claude Code pick runs where Claude Code runs: bot chats on Claude Code, summaries in the bot's
+  own Claude Code session, workers with `claude --model`. pi's own defaults are left alone.
+
+### Usage cards for Claude Code bots
+
+- A Claude Code bot's chat shows its rate limits (Session, Weekly, spend limit) as usage cards,
+  read from what the bot's Claude Code reports. A bot behind an API key or proxy gets no card.
+
+### Fixed
+
+- Setup looped on a computer signed in only to Claude Code: the sign-in step said "Already signed
+  in", "Choose models" found no models and sent you back to sign in. Now the models are listed;
+  and if a computer lists none while you are signed in, the screen says so and goes on
+  ("Continue", with "Add another sign-in" as the second choice), never back to sign-in first.
+- The installer stopped with "_bar…: unbound variable" while downloading on macOS (its /bin/sh,
+  bash 3.2, read part of the progress bar's character as a variable name). A test now checks
+  every shipped shell script for the pattern.
+- `dinobot doctor` printed "FAIL sign-in: no AI sign-in found" on Claude-Code-only setups. A
+  Claude Code login now counts, and is named on the sign-in line.
+
 ## v0.1.11
 
 ### Bots can run on Claude Code

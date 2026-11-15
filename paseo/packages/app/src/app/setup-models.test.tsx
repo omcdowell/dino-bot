@@ -145,3 +145,53 @@ describe("Choose models with no models (SR1 fix 1: no dead end)", () => {
     expect(container!.textContent).toContain("Suggested for ChatGPT (Codex). Change any of them.");
   });
 });
+
+describe("Choose models after a Claude Code sign-in (v0.1.12: the setup loop)", () => {
+  it("Claude Code's models listed: role cards, Continue, the lead names Claude Code", async () => {
+    h.params = { serverId: "s" };
+    const m = { provider: "claude-code", id: "sonnet", name: "Sonnet", levels: ["low", "medium", "high", "xhigh", "max"] };
+    const pick = { provider: "claude-code", model: "sonnet", thinking: "medium" };
+    h.invoke.mockImplementation(async (_p: string, method: string) => {
+      if (method === "signin.options") return { signedIn: [] };
+      if (method === "setup.models")
+        return { ...EMPTY, providers: ["claude-code"], models: [m], suggested: { bots: pick, compaction: pick, workers: pick } };
+      throw new Error(method);
+    });
+    await render();
+    expect(byId("setup-models-empty")).toBeNull();
+    expect(container!.textContent).toContain("Suggested for Claude Code. Change any of them.");
+    expect(byId("setup-models-continue")).not.toBeNull();
+  });
+
+  it("signed in but no models (an older computer): never back to sign-in first; Continue goes on", async () => {
+    h.params = { serverId: "s" };
+    h.invoke.mockImplementation(async (_p: string, method: string) => {
+      if (method === "signin.options") return { signedIn: [] };
+      if (method === "engines.status") return { available: true, pi: null, claudeCode: { installed: true, loggedIn: true, plan: "Max plan" }, error: null };
+      if (method === "setup.models") return EMPTY;
+      throw new Error(method);
+    });
+    await render();
+    expect(container!.textContent).not.toContain("No models yet: sign in");
+    expect(container!.textContent).toContain("You're signed in");
+    expect(byId("setup-models-sign-in")).toBeNull();
+    await act(async () => byId("setup-models-skip")!.click());
+    await flush();
+    expect(h.router.replace).toHaveBeenCalledWith("/setup?serverId=s");
+    // Another sign-in stays possible, as the second choice.
+    expect(byId("setup-models-add-signin")).not.toBeNull();
+  });
+
+  it("a pi sign-in the list cannot use (signedIn from signin.options): the same way on", async () => {
+    h.params = { serverId: "s" };
+    h.invoke.mockImplementation(async (_p: string, method: string) => {
+      if (method === "signin.options") return { signedIn: ["Some plugin"] };
+      if (method === "setup.models") return EMPTY;
+      throw new Error(method);
+    });
+    await render();
+    expect(byId("setup-models-sign-in")).toBeNull();
+    expect(byId("setup-models-skip")!.textContent).toContain("Continue");
+  });
+});
+

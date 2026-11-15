@@ -63,6 +63,9 @@ describe("providerLabels (Choose models: the sign-in's own name, not pi's provid
       "anthropic",
     ]);
     expect(providerLabels(["openai-codex"], [""])).toEqual(["openai-codex"]);
+    // Claude Code's models (v0.1.12): named "Claude Code", next to pi's labels.
+    expect(providerLabels(["claude-code"], [])).toEqual(["Claude Code"]);
+    expect(providerLabels(["openai-codex", "claude-code"], ["ChatGPT (Codex)"])).toEqual(["ChatGPT (Codex)", "Claude Code"]);
   });
 });
 

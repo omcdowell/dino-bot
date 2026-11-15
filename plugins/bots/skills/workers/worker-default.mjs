@@ -55,6 +55,8 @@ const engine = engineOf(env.WORKER_ENGINE) || engineOf(own.engine) || engineOf(s
 const pick = settings.models?.workers;
 const hostModel =
   pick && str(pick.provider) && str(pick.model) ? `${str(pick.provider)}/${str(pick.model)}${str(pick.thinking) ? `:${str(pick.thinking)}` : ""}` : str(env.BOTS_WORKER_MODEL);
-const model = str(env.WORKER_MODEL) || str(own.model) || hostModel;
+let model = str(env.WORKER_MODEL) || str(own.model) || hostModel;
+// A Claude Code model from setup (claude-code/<model>) means nothing to pi: a pi worker then runs on pi's own default.
+if (engine === "pi" && model.startsWith("claude-code/")) model = "";
 
 process.stdout.write(`${engine}\n${model}\n`);
