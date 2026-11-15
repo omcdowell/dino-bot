@@ -1179,6 +1179,7 @@ test("advertises client capabilities in hello", async () => {
     protocolVersion: 1,
     capabilities: {
       session_tokens: true,
+      device_tokens: true,
       all_providers: true,
       selective_agent_timeline: true,
       timeline_replacement_invalidation: true,

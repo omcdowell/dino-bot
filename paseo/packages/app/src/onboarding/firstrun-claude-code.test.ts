@@ -48,10 +48,13 @@ const opt = (
 });
 
 describe("first-run Claude Code card", () => {
-  it("hidden on a daemon without engines.* (no Claude Code login there either)", () => {
-    expect(firstRunClaudeCode({ unsupported: true, card: card() })).toEqual({
-      kind: "hidden",
+  it("a daemon without engines.* (no Claude Code login there): the card asks to update, not pressable, never hidden", () => {
+    const s = firstRunClaudeCode({ unsupported: true, card: card() });
+    expect(s).toEqual({
+      kind: "update-host",
+      message: CLAUDE_CODE_FIRST_RUN_COPY.updateHost,
     });
+    expect(claudeCodeCardPressable(s)).toBe(false);
   });
 
   it("usable while engines.status is still on its way", () => {

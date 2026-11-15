@@ -10,6 +10,7 @@ in with, workers run in the plugin's own herdr session, and no add-ons load.
   "user": { "name": "Sam", "aliases": ["sam"] },
   "escalation": "coordinator",
   "defaultModel": "anthropic/claude-sonnet-5-5",
+  "compactorRunner": "pi",
   "herdr": { "session": "paseo-bots" },
   "rooms": { "fullTools": false },
   "extensions": ["/abs/path/to/addon/index.ts"],
@@ -23,6 +24,8 @@ in with, workers run in the plugin's own herdr session, and no add-ons load.
 | `user.aliases` | `[]` | Other party ids that mean the user: `bot-dm <alias>` and old ledger lines read as `user`. OptChat: `BOTS_USER_ALIASES`. | – |
 | `escalation` | `null` | Bot that receives `bot-dm --kind escalate` (the "FC" in the DM rules). OptChat: `BOTS_ESCALATE_TO`. | `BOT_DM_FC` (bot-dm) |
 | `defaultModel` | `null` | OptChat model for a bot's first chat when neither the bot's `.bot.json` `chat` nor a "bot" agent profile picks one. | – |
+| `workerEngine` | absent (automatic) | Engine herdr workers start on: `"cc"` (Claude Code) or `"pi"`; absent = Claude Code when it is signed in, else pi (owner, 15 Nov). The global default only: set from the app (Settings > host > Agents > "Workers", RPCs `workers.settings` / `workers.settings.set`). A bot's own default is `"workers": {"engine", "model"}` in its `.bot.json`, which the bot sets when the user asks (the workers skill, section 2a). The workers skill's `launch.sh` reads both at every launch (`worker-default.mjs`), so a change needs no reload. | `--engine`, `WORKER_ENGINE` (one launch) |
+| `compactorRunner` | `null` | Where Claude Code bots' memory summaries run by default (FF1): `"in-session"` (alias `"cc"`; the bot's own Claude Code session, Claude models only) or `"pi"` (the host's `pi` CLI on its own pi sign-in, any model pi has). `null` = automatic: pi when the bot's compaction model is not a Claude one, else in-session. A bot's own OptChat profile `config.json` `compactorRunner` (same values; the app's Edit sheet "Summaries run on") wins. When pi fails (not installed, not signed in, unknown model, provider error, 5 min timeout) the summary runs in-session instead and pi rests 5 min; each fallback is a line in the profile's `compactor-runner.jsonl`. Usage per runner goes to the profile's `compactor-usage.jsonl` (`runner`; pi lines carry pi's usage with `$` cost). Read at every summary: no reload. `pi` binary: `DINOBOT_PI_BIN`, else PATH, else `~/.local/bin`. | – |
 | `herdr.session` | `"paseo-bots"` | Named herdr session for workers; `null` = the user's own default herdr server. | – |
 | `rooms.fullTools` | `false` | Group chat tools (27 Oct: "A for groupchats with a toggle in settings to go to B"). `false` (A): room sessions talk and look things up, read-only (files only in the room folder and the bots folder, no credentials, public web pages only). `true` (B): the same tools as a bot's main chat (never `ask_user_question`). Set from the app (Settings > host > Agents > "Group chats: full tools", RPCs `rooms.settings` / `rooms.settings.set`). pi-optchat reads this key itself on every room turn (`OPTCHAT_ROOM_SETTINGS`), so a change applies from the next room turn without a reload. | – |
 | `extensions` | `[]` | Add-on modules (absolute, or relative to this file) loaded by `server/extensions.ts`. | – |

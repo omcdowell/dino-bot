@@ -178,6 +178,11 @@ describe("Settings → Providers: two engines", () => {
     // The pi card comes before the Claude Code card.
     const html = container!.innerHTML;
     expect(html.indexOf("engine-pi")).toBeLessThan(html.indexOf("engine-claude-code"));
+    // LO1: Claude Code is marked recommended; both say which terminal app the bots run in.
+    expect(byId("engine-claude-recommended")!.textContent).toContain("(recommended)");
+    expect(byId("engine-claude-code")!.textContent).toContain("Claude Code terminal app (CC TUI)");
+    expect(byId("engine-pi")!.textContent).toContain("pi terminal app (pi TUI)");
+    expect(byId("engine-pi")!.textContent).not.toContain("(recommended)");
   });
 
   it("pi: sign in again opens that sign-in outside onboarding", async () => {

@@ -1,11 +1,11 @@
 ---
 name: workers
-description: Run herdr worker agents (pi sessions, or Claude Code with --engine cc, in herdr panes) for a bot. Use when a task is big enough to hand off to a worker; covers the brief, starting (launch.sh), reporting, steering, budgets, checking the result, recovery after a crash or stall, and closing.
+description: Run herdr worker agents (Claude Code or pi sessions in herdr panes) for a bot. Use when a task is big enough to hand off to a worker; covers the brief, starting (launch.sh), the default engine and model (and changing them for this bot), reporting, steering, budgets, checking the result, recovery after a crash or stall, and closing.
 ---
 
 # Workers
 
-A worker is a pi session (or, with `--engine cc`, an interactive Claude Code session; section 9)
+A worker is an interactive Claude Code session (section 9) or a pi session
 in a herdr pane that does one task for you and reports back with `bot-dm`. You brief it, start it, check on it, verify what it did and close it. Its report is
 a claim, not a result: the task is done only when you have checked the work yourself.
 
@@ -42,17 +42,17 @@ Use the bundled script (run it in your own shell, not in a worker's pane):
 sh <this skill dir>/launch.sh [--engine pi|cc] <name> <brief-file> <minutes> [cwd]
 ```
 
-- `--engine`: `pi` (the default; also `$WORKER_ENGINE`) or `cc` for Claude Code (section 9). Use
-  `cc` only when the user asks for Claude Code workers; other providers run through pi.
+- `--engine`: `cc` for Claude Code (section 9) or `pi` (any other provider). Leave it out to use the
+  default (section 2a); give it only when the user asks for a different engine for this one task.
 
 - `<name>`: the worker and tab name, `[a-z][a-z0-9_-]{0,31}`, unique among live workers.
 - `<cwd>`: the folder the worker runs in (default: the current directory). Its last path
   part is the project, i.e. the workspace label (override with `PROJECT=<label>`).
 - Your bot name (the folder under the bots root) comes from `$BOT`, or from the current
   directory when you run it from your bot folder.
-- Model: `$WORKER_MODEL` if set, else `$BOTS_WORKER_MODEL` (the model and effort the user
-  chose for workers in setup, as `provider/model:thinking`). If both are empty, `pi` uses its
-  own defaults from setup. Pick another model only when the user asks.
+- Model: `$WORKER_MODEL` if set, else the default (section 2a): the model and effort chosen for
+  workers, as `provider/model:thinking`. If none is set, the engine uses its own default. Pick
+  another model only when the user asks.
 - Sign-ins: the worker's pi uses the same pi folder as the bots (`$PI_CODING_AGENT_DIR`, else
   DinoBot's own, where the app's Providers page signs in), so a sign-in there reaches workers
   too. When none is set, pi's default `~/.pi/agent`.
@@ -63,13 +63,38 @@ sh <this skill dir>/launch.sh [--engine pi|cc] <name> <brief-file> <minutes> [cw
   start workers). `WORKER_SKILLS=<skill folder>[:<another>]` adds more (each becomes
   `--skill <path>`); an entry `none` drops the shortlist (`WORKER_SKILLS=none`: no skills).
 
+### 2a. Default engine and model
+
+With no `--engine`, launch.sh (its `worker-default.mjs`) takes the first of:
+
+1. `WORKER_ENGINE` / `WORKER_MODEL` in your shell (this launch only);
+2. **your own default**: `"workers": {"engine": "cc" | "pi", "model": "provider/model:thinking"}` in
+   `.bot.json` in your bot folder (either key may be left out);
+3. **the user's global default**: the app's Settings (Host › Agents › Workers), saved as
+   `workerEngine` in the bots settings file (`<bots root>/.settings.json`), and the worker model
+   from setup (`models.workers` there);
+4. automatic: Claude Code when it is signed in on this computer, else pi.
+
+The app changes only the global default. When the user asks you to use another engine or model
+for *your* workers ("use pi for your workers", "your workers should run Sonnet"), set yours in
+`.bot.json` and keep every other key, for example:
+
+```sh
+node -e 'const f=".bot.json",fs=require("fs"),j=JSON.parse(fs.readFileSync(f,"utf8"));j.workers={...j.workers,engine:"cc"};fs.writeFileSync(f,JSON.stringify(j)+"\n")'
+```
+
+Remove `workers` (or one of its keys) to follow the global default again. Change it only when the
+user asks, tell them what you set, and never change `.settings.json` (the global default) yourself:
+point the user to the app's Settings. If they want something finer (per project, per kind of
+task), write it down in a skill of your own and pass `--engine` / `WORKER_MODEL` accordingly.
+
 What it does, so you can do it by hand if needed:
 
 ```sh
 herdr workspace create --cwd <cwd> --label <project> --no-focus   # once per project: .result.workspace.workspace_id, .result.tab.tab_id, .result.root_pane.pane_id
 herdr tab create --workspace <workspace_id> --cwd <cwd> --label <name> --no-focus   # each further task: .result.root_pane.pane_id
 herdr pane run <pane_id> "export PI_CODING_AGENT_DIR='$PI_CODING_AGENT_DIR'"   # only when it is set
-herdr agent start <name> --kind pi --pane <pane_id> --timeout 60000 -- --model "$BOTS_WORKER_MODEL" --no-skills --skill <skills dir>/diagnose --skill <skills dir>/tdd --skill <skills dir>/screenshot-app --skill <skills dir>/herdr --session-id <session-id> --name <name>
+herdr agent start <name> --kind pi --pane <pane_id> --timeout 60000 -- --model "<worker model>" --no-skills --skill <skills dir>/diagnose --skill <skills dir>/tdd --skill <skills dir>/screenshot-app --skill <skills dir>/herdr --session-id <session-id> --name <name>
 herdr agent prompt <name> "Read and carry out <brief> (about <minutes> min). When done, report with: bot-dm <bot> --from worker:<name> --kind report --text \"...\"" --wait --until working --until blocked --timeout 60000
 bot-worker add <name>          # in YOUR shell, right after the first prompt
 ```
@@ -144,7 +169,7 @@ quietly; then check again.
   re-prompt. `--session-id` reopens the existing session, so the worker keeps its context:
 
   ```sh
-  herdr agent start <name> --kind pi --pane <pane> --timeout 60000 -- --model "$BOTS_WORKER_MODEL" --no-skills --skill <skills dir>/diagnose --skill <skills dir>/tdd --skill <skills dir>/screenshot-app --skill <skills dir>/herdr --session-id <session_id> --name <name>
+  herdr agent start <name> --kind pi --pane <pane> --timeout 60000 -- --model "<worker model>" --no-skills --skill <skills dir>/diagnose --skill <skills dir>/tdd --skill <skills dir>/screenshot-app --skill <skills dir>/herdr --session-id <session_id> --name <name>
   herdr agent prompt <name> "pi restarted. Carry on with <brief> from where you stopped; check git status first." --wait --until working --until blocked --timeout 60000
   ```
 
@@ -189,7 +214,7 @@ Differences:
   `DINOBOT_CLAUDE_CONFIG_DIR`, when set, comes first: the login the app's Claude Code card shows.
   `CC_WORKER_BASE_URL=<url>` (with `CC_WORKER_AUTH_TOKEN`) sends it through a proxy that holds
   the login. A folder Claude Code has not trusted yet is accepted for it at start.
-- **Model**: `CC_WORKER_MODEL` (`--model`), else the worker model when it is `anthropic/...`
+- **Model**: `CC_WORKER_MODEL` (`--model`), else the worker model (section 2a) when it is `anthropic/...`
   (its `:thinking` becomes `--effort`), else Claude Code's default.
 - **Session**: `session_id` in the launch JSON is a UUID; `session_file` is Claude Code's
   transcript (`<config dir>/projects/<cwd with / as ->/<uuid>.jsonl`).

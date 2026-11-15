@@ -13,6 +13,20 @@
  * POLL_MS itself; the activity is then live while the app is in use and greys out at its stale
  * date after. Hosts that push (or older add-ons, which leave the field out) are not polled.
  *
+ * One host owns the activity (la-vanish). The app runs one sync per host profile, and they all
+ * drive the same native activity. A host whose answer is null (its own busy set is empty, or a
+ * busy-set blip) used to end the activity another host had just started; that host then started a
+ * new one, every ~3 s while the app was open. Now the first host that answers with a busy state
+ * owns the activity (a host that pushes takes it over from a local-mode one); only the owner
+ * applies its answers, and only the owner's null ends it. The owner lets go on its own null and
+ * when its sync stops. With no owner (fresh launch, an activity left from before) a null answer
+ * still ends what is there.
+ *
+ * End reasons (diagnostics): the native module keeps a ring of why it ended activities
+ * (`ends` in getState: endOthers, apply-null, system end/dismiss), the owner ring adds which host's
+ * null ended them; each sync sends the reasons this host has not sent yet (`ends`), which
+ * paseo-apns logs (an older one strips the field).
+ *
  * Bot icons (./icons.ts): on connect and foreground, at most every ICONS_MIN_INTERVAL_MS, the app
  * refreshes the icons the widget reads (after the sync in flight, busy bots first); when one changed
  * it syncs again, so a running activity is redrawn with it. Each state it shows carries the bots'
@@ -45,6 +59,8 @@ export interface NativeLiveActivityState {
    * the appearance. Absent on older native builds.
    */
   dinoLayers?: number | null;
+  /** Recent activity-end reasons, oldest first (native ring, la-vanish). Absent on older builds. */
+  ends?: string[] | null;
 }
 
 export interface LiveActivityNative {
@@ -88,7 +104,62 @@ export interface SyncDeps {
    * push plugin is not called at all (rel-demo bug 8). Default: assume it does.
    */
   hasPlugin?: (pluginId: string) => Promise<boolean>;
+  /** Which host's sync may drive the activity; default: the one shared by the whole app. */
+  owner?: ActivityOwner;
+  /** The host's id (server id), for ownership and end reasons. Default: a per-sync id. */
+  hostId?: string;
 }
+
+/** Max end reasons kept by the owner ring and sent per sync (paseo-apns accepts 16 of 160 chars). */
+export const MAX_ENDS = 16;
+const END_CHARS = 160;
+
+/**
+ * Which host's sync drives the one native activity (la-vanish). One per app (`sharedActivityOwner`);
+ * tests make their own.
+ */
+export interface ActivityOwner {
+  /** The owning host id, or null. */
+  current(): string | null;
+  /**
+   * A busy answer from `host`: true when it may apply it (it owns the activity now). Taken when
+   * nobody owns it, or from a local-mode owner by a host that pushes.
+   */
+  claim(host: string, pushes: boolean): boolean;
+  /** A null answer from `host`: true when it may end the activity (it owns it, or nobody does). */
+  mayEnd(host: string): boolean;
+  release(host: string): void;
+  /** Records why the app ended its activity (ring, newest last). */
+  recordEnd(reason: string): void;
+  ends(): string[];
+}
+
+export function createActivityOwner(now: () => number = Date.now): ActivityOwner {
+  let owner: { host: string; pushes: boolean } | null = null;
+  const ring: string[] = [];
+  return {
+    current: () => owner?.host ?? null,
+    claim(host, pushes) {
+      if (owner === null || owner.host === host || (!owner.pushes && pushes)) {
+        owner = { host, pushes };
+        return true;
+      }
+      return false;
+    },
+    mayEnd: (host) => owner === null || owner.host === host,
+    release(host) {
+      if (owner?.host === host) owner = null;
+    },
+    recordEnd(reason) {
+      ring.push(`${new Date(now()).toISOString()} ${reason}`.slice(0, END_CHARS));
+      if (ring.length > MAX_ENDS) ring.splice(0, ring.length - MAX_ENDS);
+    },
+    ends: () => [...ring],
+  };
+}
+
+export const sharedActivityOwner: ActivityOwner = createActivityOwner();
+let hostSeq = 0;
 
 interface SyncAnswer {
   ok: boolean;
@@ -166,6 +237,11 @@ export function startLiveActivitySync(client: SyncClient, deps: SyncDeps): () =>
   let busy: string[] = [];
   let poll: ReturnType<typeof setInterval> | null = null;
   const isActive = deps.isActive ?? (() => true);
+  const owner = deps.owner ?? sharedActivityOwner;
+  hostSeq += 1;
+  const me = deps.hostId ?? `host-${hostSeq}`;
+  /** End reasons already sent to this host. */
+  const sentEnds = new Set<string>();
   const setPolling = (on: boolean) => {
     if (on && poll === null && !stopped) {
       poll = setInterval(() => {
@@ -189,6 +265,10 @@ export function startLiveActivitySync(client: SyncClient, deps: SyncDeps): () =>
       return;
     }
     const local = await native.getState();
+    const ends = [...(Array.isArray(local.ends) ? local.ends : []), ...owner.ends()]
+      .filter((e): e is string => typeof e === "string" && !sentEnds.has(e))
+      .slice(-MAX_ENDS)
+      .map((e) => e.slice(0, END_CHARS));
     const answer = await client.invokePluginRpc(APNS_PLUGIN_ID, SYNC_METHOD, {
       installId: await id,
       environment: deps.environment,
@@ -202,7 +282,9 @@ export function startLiveActivitySync(client: SyncClient, deps: SyncDeps): () =>
         ? { appearance: local.appearance }
         : {}),
       ...(local.dinoLayers === 3 || local.dinoLayers === 6 ? { dinoLayers: local.dinoLayers } : {}),
+      ...(ends.length ? { ends } : {}),
     });
+    for (const e of ends) sentEnds.add(e);
     if (stopped || !isAnswer(answer)) return;
     if (!answer.ok) {
       if (!warned) {
@@ -213,11 +295,22 @@ export function startLiveActivitySync(client: SyncClient, deps: SyncDeps): () =>
     }
     setPolling(answer.pushes === false);
     busy = botIds(answer.state);
-    await namesLoaded;
-    await native.apply(
-      answer.state ? JSON.stringify(withIconNames(answer.state, names)) : null,
-      answer.staleDate ?? null,
-    );
+    if (answer.state) {
+      // Another host owns the activity: leave it alone (la-vanish).
+      if (!owner.claim(me, answer.pushes !== false)) return;
+      await namesLoaded;
+      if (stopped) return;
+      await native.apply(
+        JSON.stringify(withIconNames(answer.state, names)),
+        answer.staleDate ?? null,
+      );
+      return;
+    }
+    // Only the owner's null ends the activity (or anyone's when nobody owns it).
+    if (!owner.mayEnd(me)) return;
+    owner.release(me);
+    const result = await native.apply(null, null);
+    if (result === "ended") owner.recordEnd(`apply-null:${me}`);
   };
 
   const sync = (): Promise<void> => {
@@ -287,6 +380,7 @@ export function startLiveActivitySync(client: SyncClient, deps: SyncDeps): () =>
 
   return () => {
     stopped = true;
+    owner.release(me);
     setPolling(false);
     unsubscribeConnection();
     nativeListener.remove();

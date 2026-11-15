@@ -26,6 +26,7 @@ import {
   readInitialDaemonConnectionHint,
   type HostRuntimeControllerDeps,
   type HostRuntimeStorage,
+  sessionTokenScope,
 } from "./host-runtime";
 import type { ReplicaRow, ReplicaRowStore } from "./replica-cache/row-store";
 
@@ -4626,5 +4627,87 @@ describe("HostRuntimeStore initial connection hint bootstrap", () => {
 
     expect(seenProbes).not.toContainEqual(expect.objectContaining({ endpoint: "metro-host:8081" }));
     expect(store.getHosts()).toHaveLength(0);
+  });
+});
+
+describe("one-use pairing code (QR2)", () => {
+  function directOfferUrl(extra: Record<string, unknown>): string {
+    return encodeOfferUrl({
+      v: 3,
+      serverId: "srv_qr2",
+      daemonPublicKeyB64: "a2V5",
+      endpoints: ["box.tail1.ts.net:6767", "100.64.0.7:6767"],
+      ...extra,
+    });
+  }
+
+  function ticketStore(seen: Array<{ ticket?: string; password?: string }>) {
+    let announce: (serverId: string) => void = () => undefined;
+    const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage(),
+      deviceTokens: {
+        onDeviceToken: (listener) => {
+          announce = listener;
+          return () => undefined;
+        },
+      },
+      deps: {
+        createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
+        connectToDaemon: async ({ host, pairingTicket }) => {
+          seen.push({ ticket: pairingTicket, password: host.password });
+          return {
+            client: makeConnectedProbeClient(5) as unknown as DaemonClient,
+            serverId: host.serverId,
+            hostname: "box",
+          };
+        },
+        getClientId: async () => "cid_qr2",
+        readInitialConnectionHint: () => null,
+      },
+    });
+    return { store, announce: (serverId: string) => announce(serverId) };
+  }
+
+  it("sends the code's ticket to the pairing probes and never stores it", async () => {
+    const seen: Array<{ ticket?: string; password?: string }> = [];
+    const { store } = ticketStore(seen);
+    answerHostConfirmations(store, true);
+    await store.beginLinkPairing().submit(directOfferUrl({ pairingTicket: "ppt1.x.y.z" }));
+    // The pairing race (one probe per address) carries the ticket; later probes (the host's own
+    // probe cycle) use the device token the pairing got, never the ticket again.
+    expect(seen.map((probe) => probe.ticket)).toContain("ppt1.x.y.z");
+    expect(new Set(seen.map((probe) => probe.password))).toEqual(new Set([undefined]));
+    const host = store.getHosts().find((h) => h.serverId === "srv_qr2");
+    expect(host?.password).toBeUndefined();
+    expect(JSON.stringify(store.getHosts())).not.toContain("ppt1.x.y.z");
+    store.syncHosts([]);
+  });
+
+  it("drops the stored password once the device holds a device token (migration)", async () => {
+    const seen: Array<{ ticket?: string; password?: string }> = [];
+    const { store, announce } = ticketStore(seen);
+    answerHostConfirmations(store, true);
+    await store
+      .beginLinkPairing()
+      .submit(directOfferUrl({ pairingTicket: "ppt1.x.y.z", password: "pw" }));
+    expect(store.getHosts().find((h) => h.serverId === "srv_qr2")?.password).toBe("pw");
+    const probesBefore = seen.length;
+    announce("srv_qr2");
+    await vi.waitFor(() =>
+      expect(store.getHosts().find((h) => h.serverId === "srv_qr2")?.password).toBeUndefined(),
+    );
+    // No reconnect or new probe for it: the live client is on its token.
+    expect(seen.length).toBe(probesBefore);
+    announce("srv_unknown");
+    store.syncHosts([]);
+  });
+
+  it("every direct address of a host shares one session token", () => {
+    expect(
+      sessionTokenScope({ id: "direct:a:1", type: "directTcp", endpoint: "a:1" } as HostConnection),
+    ).toBe("direct");
+    expect(
+      sessionTokenScope({ id: "direct:b:1", type: "directTcp", endpoint: "b:1" } as HostConnection),
+    ).toBe("direct");
   });
 });

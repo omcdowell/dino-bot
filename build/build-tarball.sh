@@ -247,6 +247,40 @@ archive_tree "$BOTS_REPO" "$BOTS_REF" "$STAGE/bots"
 rm -rf "$STAGE/bots/test"
 mkdir -p "$STAGE/bots/node_modules"
 cp -a "$BOTS_ZOD_DIR" "$STAGE/bots/node_modules/zod"
+# Bots on Claude Code (server/cc/) import OptChat's memory from the bundled optchat/ through this link, as the
+# repo's `pi-optchat: file:../../optchat` does (the daemon's plugin compiler follows a linked package).
+ln -s ../../optchat "$STAGE/bots/node_modules/pi-optchat"
+# resvg-js (MPL-2.0, unmodified) renders designed avatars. A native module cannot be in the plugin bundle, so
+# server/avatar-store.ts loads it at run time from this folder (Paseo's plugins.bots.path). The JS package plus
+# the target's binary package: the repo's install when it is the target's, else npm's (cached).
+RESVG_DIR=${RESVG_DIR:-$HERE/plugins/bots/node_modules/@resvg/resvg-js}
+case "$OS-$ARCH" in
+  linux-x64|linux-arm64) RESVG_PLATFORM=$OS-$ARCH-gnu ;;
+  darwin-x64|darwin-arm64) RESVG_PLATFORM=$OS-$ARCH ;;
+  *) RESVG_PLATFORM= ;;
+esac
+stage_resvg() {
+  [ -f "$RESVG_DIR/package.json" ] || { echo "no resvg-js at $RESVG_DIR (npm ci in plugins/bots, or set RESVG_DIR)" >&2; exit 1; }
+  [ -n "$RESVG_PLATFORM" ] || { echo "no resvg-js binary for $OS-$ARCH" >&2; exit 1; }
+  rv=$(node -p "require('$RESVG_DIR/package.json').version")
+  mkdir -p "$STAGE/bots/node_modules/@resvg"
+  cp -a "$RESVG_DIR" "$STAGE/bots/node_modules/@resvg/resvg-js"
+  rpkg=@resvg/resvg-js-$RESVG_PLATFORM
+  rdir=$STAGE/bots/node_modules/$rpkg
+  local_bin=$(dirname "$RESVG_DIR")/resvg-js-$RESVG_PLATFORM
+  if [ -f "$local_bin/package.json" ] && [ "$(node -p "require('$local_bin/package.json').version")" = "$rv" ]; then
+    cp -a "$local_bin" "$rdir"
+  else
+    mkdir -p "$CACHE/npm" "$rdir"
+    tgz=$(cd "$CACHE/npm" && ls "resvg-resvg-js-$RESVG_PLATFORM-$rv.tgz" 2>/dev/null || (cd "$CACHE/npm" && npm pack --silent "$rpkg@$rv" 2>/dev/null | tail -1))
+    [ -n "$tgz" ] && [ -f "$CACHE/npm/$tgz" ] || { echo "no $rpkg@$rv on npm" >&2; exit 1; }
+    tar -xzf "$CACHE/npm/$tgz" -C "$rdir" --strip-components=1
+  fi
+  # The binary package ships no licence file of its own; it is resvg-js's (MPL-2.0).
+  [ -f "$rdir/LICENSE" ] || cp "$STAGE/bots/node_modules/@resvg/resvg-js/LICENSE" "$rdir/LICENSE"
+  say "         resvg-js $rv + $rpkg"
+}
+stage_resvg
 
 # The push add-on (paseo-apns, plugin id "apns"): its files only, from addons/paseo-apns in this
 # repo (no history, no tests). Shipped OFF: the installer never registers it, so a stock install

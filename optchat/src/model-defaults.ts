@@ -7,7 +7,10 @@ import type { ModelChoice } from './compactor.ts';
  *
  * - main: the bot you chat with.
  * - worker: delegated work (subagents / herdr workers).
- * - compaction: the ongoing memory compactor (one short call per message and per merge).
+ * - compaction: the ongoing memory compactor (one short call per message and per merge). Only the common sign-ins
+ *   have one (the owner, 15 Nov: "default compactor model should be sonnet 5.5 medium if claude, sol 6.1 low if
+ *   chatgpt. anything else is not common enough to need defaults we can just let the user choose"): Claude (login or
+ *   API key) Sonnet 5.5 medium, ChatGPT (Codex login) GPT-6.1 Sol low. Elsewhere none: setup asks the user to pick.
  * - importCompaction: the one-off compactor for the first import of old chats. It makes ~9 calls per imported
  *   message, so it is the cheapest model that still writes a usable 512-byte summary line.
  *
@@ -27,7 +30,8 @@ export interface Defaults {
   provider: string;
   main: ModelChoice;
   worker: ModelChoice;
-  compaction: ModelChoice;
+  /** The ongoing compactor; none (the user picks one in setup) outside the common sign-ins. */
+  compaction?: ModelChoice;
   importCompaction: ModelChoice;
   /** Price of importCompaction, for the estimate. */
   importPrice: Price;
@@ -57,7 +61,7 @@ export const MODEL_DEFAULTS = {
     provider: 'anthropic',
     main: m('anthropic', 'claude-sonnet-5-5'),
     worker: m('anthropic', 'claude-sonnet-5-5'),
-    compaction: m('anthropic', 'claude-sonnet-5-5', 'low'),
+    compaction: m('anthropic', 'claude-sonnet-5-5', 'medium'),
     importCompaction: m('anthropic', ANTHROPIC_IMPORT_MODEL, 'off'),
     importPrice: HAIKU,
     billing: 'plan',
@@ -69,7 +73,7 @@ export const MODEL_DEFAULTS = {
     provider: 'anthropic',
     main: m('anthropic', 'claude-opus-5-5'),
     worker: m('anthropic', 'claude-sonnet-5-5'),
-    compaction: m('anthropic', 'claude-sonnet-5-5', 'low'),
+    compaction: m('anthropic', 'claude-sonnet-5-5', 'medium'),
     importCompaction: m('anthropic', ANTHROPIC_IMPORT_MODEL, 'off'),
     importPrice: HAIKU,
     billing: 'plan',
@@ -81,7 +85,7 @@ export const MODEL_DEFAULTS = {
     provider: 'anthropic',
     main: m('anthropic', 'claude-sonnet-5-5'),
     worker: m('anthropic', 'claude-sonnet-5-5'),
-    compaction: m('anthropic', 'claude-sonnet-5-5', 'low'),
+    compaction: m('anthropic', 'claude-sonnet-5-5', 'medium'),
     importCompaction: m('anthropic', ANTHROPIC_IMPORT_MODEL, 'off'),
     importPrice: HAIKU,
     billing: 'api',
@@ -91,7 +95,7 @@ export const MODEL_DEFAULTS = {
     provider: 'openai-codex',
     main: m('openai-codex', 'gpt-6-sol'),
     worker: m('openai-codex', 'gpt-6-sol'),
-    compaction: m('openai-codex', 'gpt-5.6-terra', 'low'),
+    compaction: m('openai-codex', 'gpt-6.1-sol', 'low'),
     importCompaction: m('openai-codex', 'gpt-6-luna', 'low'),
     importPrice: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
     billing: 'plan',
@@ -103,7 +107,6 @@ export const MODEL_DEFAULTS = {
     provider: 'openai',
     main: m('openai', 'gpt-6-sol'),
     worker: m('openai', 'gpt-6-sol'),
-    compaction: m('openai', 'gpt-5.6-terra', 'low'),
     importCompaction: m('openai', 'gpt-6-luna', 'low'),
     importPrice: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
     billing: 'api',
@@ -113,9 +116,6 @@ export const MODEL_DEFAULTS = {
     provider: 'github-copilot',
     main: m('github-copilot', 'claude-sonnet-5.5'),
     worker: m('github-copilot', 'claude-sonnet-5.5'),
-    // Copilot bills premium requests, not tokens: compaction makes thousands of calls, so it uses a model
-    // included in the plan at no premium-request cost.
-    compaction: m('github-copilot', 'gpt-5-mini', 'low'),
     importCompaction: m('github-copilot', 'gpt-5-mini', 'low'),
     importPrice: { input: 0.25, output: 2, cacheRead: 0.025, cacheWrite: 0 },
     billing: 'requests',
@@ -126,7 +126,6 @@ export const MODEL_DEFAULTS = {
     provider: 'openrouter',
     main: m('openrouter', 'anthropic/claude-sonnet-5.5'),
     worker: m('openrouter', 'anthropic/claude-sonnet-5.5'),
-    compaction: m('openrouter', 'anthropic/claude-haiku-4.5', 'low'),
     importCompaction: m('openrouter', 'google/gemini-3.8-flash', 'off'),
     importPrice: { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 },
     billing: 'api',
@@ -136,7 +135,6 @@ export const MODEL_DEFAULTS = {
     provider: 'google',
     main: m('google', 'gemini-3.1-pro-preview'),
     worker: m('google', 'gemini-3.8-flash'),
-    compaction: m('google', 'gemini-3.8-flash', 'low'),
     importCompaction: m('google', 'gemini-3.1-flash-lite', 'off'),
     importPrice: { input: 0.25, output: 1.5, cacheRead: 0.025, cacheWrite: 0 },
     billing: 'api',
@@ -146,7 +144,6 @@ export const MODEL_DEFAULTS = {
     provider: 'openrouter',
     main: m('openrouter', 'nvidia/nemotron-3-ultra-550b-a55b:free'),
     worker: m('openrouter', 'nvidia/nemotron-3-ultra-550b-a55b:free'),
-    compaction: m('openrouter', 'qwen/qwen3.8-27b:free', 'low'),
     importCompaction: m('openrouter', 'qwen/qwen3.8-27b:free', 'off'),
     importPrice: FREE,
     billing: 'free',
@@ -157,7 +154,6 @@ export const MODEL_DEFAULTS = {
     provider: 'opencode',
     main: m('opencode', 'nemotron-3-ultra-free'),
     worker: m('opencode', 'nemotron-3-ultra-free'),
-    compaction: m('opencode', 'nemotron-3.5-lightning-free', 'low'),
     importCompaction: m('opencode', 'nemotron-3.5-lightning-free', 'off'),
     importPrice: FREE,
     billing: 'free',

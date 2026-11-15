@@ -14,6 +14,7 @@ import { setBotEvents, type BotEvents } from "./client/push";
 import * as pluginReactNative from "@getpaseo/plugin/client/react-native";
 import { HOME_MENU } from "./client/manage-data";
 import { registerAvatarSvg } from "./client/host-svg";
+import { setDmsDefaultClient } from "./client/dms-default";
 
 export default function contribute(client: PluginClientContext) {
   // Bots-home data pushed by the host (Paseo plugin events); older apps: undefined, keep polling.
@@ -55,8 +56,9 @@ export default function contribute(client: PluginClientContext) {
     title: (params) => params.name ?? "Bot",
     Component: BotScreen,
   });
-  // DMs live in the Explorer sidebar of each bot's workspace (next to Files and Changes); add it
-  // once per workspace with the Explorer's "+" menu. Explorer only, so the main area's New tab page
+  // DMs live in the Explorer sidebar of each bot's workspace (next to Files and Changes). A new bot
+  // gets it opened once on its first open from the sidebar (client/dms-default.ts); older bots add
+  // it once per workspace with the Explorer's "+" menu. Explorer only, so the main area's New tab page
   // of every workspace does not offer it. A non-bot workspace shows "Not a bot workspace".
   client.addWorkspacePanel({
     id: DMS_PANEL_ID,
@@ -66,6 +68,7 @@ export default function contribute(client: PluginClientContext) {
     locations: ["explorer"],
     Component: DmsPanel,
   });
+  setDmsDefaultClient(client);
   // Phone fallback: the iOS app's Explorer shows built-in tabs only, so there the DMs stay a screen,
   // reached from DMs rows in the Bots sidebar (shown only where the panel is unavailable).
   client.addScreen({

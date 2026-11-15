@@ -127,6 +127,7 @@ export class ConnectionSubscriptions extends OwnedSubscriptions {
 export const DEFAULT_CLIENT_CAPABILITIES = {
   [CLIENT_CAPS.helloRejection]: true,
   [CLIENT_CAPS.sessionTokens]: true,
+  [CLIENT_CAPS.deviceTokens]: true,
   [CLIENT_CAPS.ownedSubscriptions]: true,
   [CLIENT_CAPS.allProviders]: true,
   [CLIENT_CAPS.selectiveAgentTimeline]: true,

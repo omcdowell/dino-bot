@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createActivityOwner,
   ICONS_MIN_INTERVAL_MS,
   INSTALL_ID_KEY,
   POLL_MS,
@@ -79,6 +80,7 @@ function setup(
     topic: "com.example.paseo",
     randomId: () => "install-0001",
     warn: vi.fn(),
+    owner: createActivityOwner(),
   };
   return {
     client,
@@ -401,6 +403,303 @@ describe("startLiveActivitySync", () => {
     const stop = startLiveActivitySync(t.client, { ...t.deps, hasPlugin: async () => true });
     await flush();
     expect(t.client.invokePluginRpc).toHaveBeenCalled();
+    stop();
+  });
+});
+
+/**
+ * la-vanish (LV1 §5): a fake ActivityKit shared by several host syncs. apply(state) updates the
+ * running activity or requests one; apply(null) ends them; each start/end fires onChange (as the
+ * native activityUpdates / activityStateUpdates watchers do).
+ */
+function fakeActivityKit() {
+  let seq = 0;
+  let activities: Array<{ id: string; token: string | null }> = [];
+  const listeners = new Set<() => void>();
+  const log = { requests: 0, ends: 0, applies: [] as Array<{ host: string; json: string | null }> };
+  const emit = () => queueMicrotask(() => listeners.forEach((l) => l()));
+  const nativeFor = (host: string, ends: string[] = []): LiveActivityNative => ({
+    isSupported: () => true,
+    getState: async () => ({ enabled: true, startToken: START, activities: [...activities], ends }),
+    apply: async (json) => {
+      log.applies.push({ host, json });
+      if (json === null) {
+        if (activities.length === 0) return "none";
+        activities = [];
+        log.ends += 1;
+        emit();
+        return "ended";
+      }
+      if (activities.length) return "updated";
+      seq += 1;
+      log.requests += 1;
+      activities = [{ id: `act-${seq}`, token: ACT }];
+      emit();
+      return "started";
+    },
+    addListener: (_e, l) => {
+      listeners.add(l);
+      return { remove: () => void listeners.delete(l) };
+    },
+  });
+  return {
+    log,
+    nativeFor,
+    activities: () => activities,
+    change: () => listeners.forEach((l) => l()),
+  };
+}
+
+const BUSY = {
+  bots: [{ id: "emmet", name: "Emmet", working: true, workers: 0, since: 1 }],
+  more: 0,
+};
+
+function host(
+  kit: ReturnType<typeof fakeActivityKit>,
+  owner: ReturnType<typeof createActivityOwner>,
+  name: string,
+  answer: () => unknown,
+  ends?: string[],
+) {
+  const calls: unknown[] = [];
+  const client: SyncClient = {
+    isConnected: true,
+    invokePluginRpc: vi.fn(async (_p: string, _m: string, input: unknown) => {
+      calls.push(input);
+      return answer();
+    }),
+    subscribeConnectionStatus: () => () => undefined,
+  };
+  const store = new Map<string, string>();
+  const deps: SyncDeps = {
+    native: kit.nativeFor(name, ends),
+    storage: {
+      getItem: async (k) => store.get(k) ?? null,
+      setItem: async (k, v) => void store.set(k, v),
+    },
+    onForeground: () => () => undefined,
+    environment: "development",
+    topic: "com.example.paseo",
+    randomId: () => "install-0001",
+    warn: vi.fn(),
+    owner,
+    hostId: name,
+  };
+  return { client, deps, calls };
+}
+
+describe("one host owns the activity (la-vanish)", () => {
+  it("host A (pushes, busy) and host B (local, null): one request across 10 onChange events; B never ends it", async () => {
+    vi.useFakeTimers();
+    try {
+      const kit = fakeActivityKit();
+      const owner = createActivityOwner();
+      const a = host(kit, owner, "A", () => ({
+        ok: true,
+        reason: null,
+        state: BUSY,
+        staleDate: 99,
+        pushes: true,
+      }));
+      const b = host(kit, owner, "B", () => ({
+        ok: true,
+        reason: null,
+        state: null,
+        staleDate: null,
+        pushes: false,
+      }));
+      const stopA = startLiveActivitySync(a.client, a.deps);
+      await flush();
+      const stopB = startLiveActivitySync(b.client, b.deps);
+      await flush();
+      for (let i = 0; i < 10; i += 1) {
+        kit.change();
+        await flush();
+      }
+      expect(kit.log.requests).toBe(1);
+      expect(kit.log.ends).toBe(0);
+      expect(kit.log.applies.filter((x) => x.host === "B")).toEqual([]);
+      expect(kit.activities()).toEqual([{ id: "act-1", token: ACT }]);
+      expect(a.calls.length).toBeGreaterThanOrEqual(10);
+      stopA();
+      stopB();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a second push-capable host answering null does not end the owner's activity either", async () => {
+    const kit = fakeActivityKit();
+    const owner = createActivityOwner();
+    const a = host(kit, owner, "A", () => ({
+      ok: true,
+      reason: null,
+      state: BUSY,
+      staleDate: 99,
+      pushes: true,
+    }));
+    const b = host(kit, owner, "B", () => ({
+      ok: true,
+      reason: null,
+      state: null,
+      staleDate: null,
+      pushes: true,
+    }));
+    const stopA = startLiveActivitySync(a.client, a.deps);
+    await flush();
+    const stopB = startLiveActivitySync(b.client, b.deps);
+    for (let i = 0; i < 10; i += 1) {
+      kit.change();
+      await flush();
+    }
+    expect(kit.log.requests).toBe(1);
+    expect(kit.log.ends).toBe(0);
+    stopA();
+    stopB();
+  });
+
+  it("a busy answer from a non-owner is not applied (no tug of war over the content)", async () => {
+    const kit = fakeActivityKit();
+    const owner = createActivityOwner();
+    const a = host(kit, owner, "A", () => ({
+      ok: true,
+      reason: null,
+      state: BUSY,
+      staleDate: 99,
+      pushes: true,
+    }));
+    const other = {
+      bots: [{ id: "flint", name: "Flint", working: true, workers: 0, since: 1 }],
+      more: 0,
+    };
+    const b = host(kit, owner, "B", () => ({
+      ok: true,
+      reason: null,
+      state: other,
+      staleDate: 99,
+      pushes: true,
+    }));
+    const stopA = startLiveActivitySync(a.client, a.deps);
+    await flush();
+    const stopB = startLiveActivitySync(b.client, b.deps);
+    await flush();
+    expect(kit.log.applies.filter((x) => x.host === "B")).toEqual([]);
+    stopA();
+    stopB();
+  });
+
+  it("the owner's own null ends the activity and frees it; stopping the owner frees it too", async () => {
+    const kit = fakeActivityKit();
+    const owner = createActivityOwner();
+    let aBusy = true;
+    const a = host(kit, owner, "A", () => ({
+      ok: true,
+      reason: null,
+      state: aBusy ? BUSY : null,
+      staleDate: 99,
+      pushes: true,
+    }));
+    const b = host(kit, owner, "B", () => ({
+      ok: true,
+      reason: null,
+      state: BUSY,
+      staleDate: 99,
+      pushes: true,
+    }));
+    const stopA = startLiveActivitySync(a.client, a.deps);
+    await flush();
+    expect(owner.current()).toBe("A");
+    aBusy = false;
+    kit.change();
+    await flush();
+    expect(kit.log.ends).toBe(1);
+    // B (busy) took it over after A let go.
+    const stopB = startLiveActivitySync(b.client, b.deps);
+    await flush();
+    expect(owner.current()).toBe("B");
+    stopB();
+    expect(owner.current()).toBeNull();
+    stopA();
+  });
+
+  it("a push-capable host takes over from a local-mode owner", async () => {
+    const kit = fakeActivityKit();
+    const owner = createActivityOwner();
+    const local = host(kit, owner, "L", () => ({
+      ok: true,
+      reason: null,
+      state: BUSY,
+      staleDate: 99,
+      pushes: false,
+    }));
+    const push = host(kit, owner, "P", () => ({
+      ok: true,
+      reason: null,
+      state: BUSY,
+      staleDate: 99,
+      pushes: true,
+    }));
+    const stopL = startLiveActivitySync(local.client, local.deps);
+    await flush();
+    expect(owner.current()).toBe("L");
+    const stopP = startLiveActivitySync(push.client, push.deps);
+    await flush();
+    expect(owner.current()).toBe("P");
+    expect(kit.log.requests).toBe(1);
+    stopL();
+    stopP();
+  });
+
+  it("with no owner a null answer still ends a left-over activity (single host, as before)", async () => {
+    const kit = fakeActivityKit();
+    const owner = createActivityOwner();
+    const seed = host(kit, owner, "S", () => ({
+      ok: true,
+      reason: null,
+      state: BUSY,
+      staleDate: 99,
+    }));
+    const stopSeed = startLiveActivitySync(seed.client, seed.deps);
+    await flush();
+    stopSeed();
+    const b = host(kit, owner, "B", () => ({
+      ok: true,
+      reason: null,
+      state: null,
+      staleDate: null,
+    }));
+    const stopB = startLiveActivitySync(b.client, b.deps);
+    await flush();
+    expect(kit.log.ends).toBe(1);
+    stopB();
+  });
+
+  it("reports activity-end reasons (native ring + its own apply-null) once each in the sync input", async () => {
+    const kit = fakeActivityKit();
+    const owner = createActivityOwner();
+    let busy = true;
+    const nativeEnds = ["2026-11-15T06:18:09.000Z endOthers:act-0 keep:act-1"];
+    const a = host(
+      kit,
+      owner,
+      "A",
+      () => ({ ok: true, reason: null, state: busy ? BUSY : null, staleDate: 99 }),
+      nativeEnds,
+    );
+    const stop = startLiveActivitySync(a.client, a.deps);
+    await flush();
+    expect(a.calls[0]).toMatchObject({ ends: nativeEnds });
+    busy = false;
+    kit.change();
+    await flush();
+    expect(a.calls[1]).not.toHaveProperty("ends");
+    kit.change();
+    await flush();
+    const later = a.calls.slice(2) as Array<{ ends?: string[] }>;
+    const sent = later.flatMap((c) => c.ends ?? []);
+    expect(sent.length).toBe(1);
+    expect(sent[0]).toMatch(/apply-null:A$/);
     stop();
   });
 });

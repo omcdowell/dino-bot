@@ -15,6 +15,10 @@
  *       "compaction": { "provider": "openai-codex", "model": "gpt-5.6-terra", "thinking": "low" },
  *       "workers":    { "provider": "openai-codex", "model": "gpt-6-sol", "thinking": "high" }
  *     },
+ *     "workerEngine": "cc",                 // herdr workers: "cc" (Claude Code) or "pi"; absent = automatic
+ *                                           // (Claude Code when signed in, else pi). A bot's own default:
+ *                                           // .bot.json "workers" (skills/workers/worker-default.mjs)
+ *     "compactorRunner": "pi",              // Claude Code bots' summaries: "in-session" | "pi"; absent = automatic
  *     "herdr": { "session": "paseo-bots" }, // own herdr instance; null = the user's default server
  *     "rooms": { "fullTools": false },      // group chats: false = read-only lookups (A), true = main chat tools (B)
  *     "extensions": ["/path/to/private-addon/index.ts"],
@@ -29,6 +33,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, dirname } from "node:path";
 import { USER, setUserAliases } from "../shared/party.ts";
+import { parseRunner, type CompactorRunner } from "../shared/compactor-runner.ts";
 
 export { USER };
 /** Herdr session the plugin starts for workers when the settings name none. */
@@ -37,6 +42,8 @@ export const DEFAULT_HERDR_SESSION = "paseo-bots";
 /** A pi model with its effort (thinking level; null when the model has none). */
 export type ModelPick = { provider: string; model: string; thinking: string | null };
 /** The three roles setup asks about (27 Oct): bot chats, OptChat compaction, herdr workers. */
+export type WorkerEngine = "cc" | "pi";
+export const WORKER_ENGINES: readonly WorkerEngine[] = ["cc", "pi"];
 export type HostModels = { bots: ModelPick | null; compaction: ModelPick | null; workers: ModelPick | null };
 export const MODEL_ROLES = ["bots", "compaction", "workers"] as const;
 
@@ -53,6 +60,18 @@ export type BotsSettings = {
   defaultModel: string | null;
   /** Models and effort per role, from setup (no hard-coded defaults: null until chosen). */
   models: HostModels;
+  /**
+   * The engine herdr workers start on (owner, 15 Nov: "claude code if signed in, pi if signed in"): "cc" or "pi", or
+   * null for automatic (Claude Code when it is signed in, else pi). The app's Settings change only this global default;
+   * a bot keeps its own in its .bot.json `workers` when the user asks it to. launch.sh reads both at every launch.
+   */
+  workerEngine: WorkerEngine | null;
+  /**
+   * Where Claude Code bots' memory summaries run by default (FF1, server/cc/compactor-runner.ts): "in-session" (the
+   * bot's own Claude Code session) or "pi" (the host's pi sign-in). null: automatic (in-session, or pi when a bot's
+   * compaction model is not a Claude one). A bot's profile config.json `compactorRunner` overrides it.
+   */
+  compactorRunner: CompactorRunner | null;
   /** Herdr named session for workers. null: the user's own default herdr server (opt-in). */
   herdr: { session: string | null };
   /**
@@ -72,6 +91,8 @@ export const DEFAULT_SETTINGS: BotsSettings = {
   escalation: null,
   defaultModel: null,
   models: { bots: null, compaction: null, workers: null },
+  workerEngine: null,
+  compactorRunner: null,
   herdr: { session: DEFAULT_HERDR_SESSION },
   rooms: { fullTools: false },
   extensions: [],
@@ -122,6 +143,8 @@ export function parseSettings(raw: unknown, baseDir = process.cwd()): BotsSettin
     escalation,
     defaultModel: str(obj.defaultModel),
     models: { bots: parseModelPick(models.bots), compaction: parseModelPick(models.compaction), workers: parseModelPick(models.workers) },
+    workerEngine: obj.workerEngine === "cc" || obj.workerEngine === "pi" ? obj.workerEngine : null,
+    compactorRunner: parseRunner(obj.compactorRunner),
     herdr: { session },
     rooms: { fullTools: rooms.fullTools === true },
     extensions,
@@ -169,6 +192,27 @@ export function writeRoomFullTools(root: string, fullTools: boolean, env: NodeJS
   writeFileSync(tmp, `${JSON.stringify(raw, null, 2)}\n`, { mode: 0o644 });
   renameSync(tmp, path);
   return { fullTools };
+}
+
+/**
+ * Sets `workerEngine` in the settings file for `root` ("cc", "pi", or null: automatic, the key removed), keeping every
+ * other key as written. Atomic; a file that is not a JSON object is refused rather than overwritten.
+ */
+export function writeWorkerEngine(root: string, engine: WorkerEngine | null, env: NodeJS.ProcessEnv = process.env): { engine: WorkerEngine | null } {
+  const path = settingsPath({ ...env, PASEO_BOTS_ROOT: root });
+  let raw: Record<string, unknown> = {};
+  if (existsSync(path)) {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${path} is not a JSON object; not changed.`);
+    raw = parsed as Record<string, unknown>;
+  }
+  if (engine) raw.workerEngine = engine;
+  else delete raw.workerEngine;
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(raw, null, 2)}\n`, { mode: 0o644 });
+  renameSync(tmp, path);
+  return { engine };
 }
 
 /** Reads the settings and registers the user's aliases for party parsing (shared/party.ts). */

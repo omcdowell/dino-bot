@@ -124,6 +124,10 @@ test("create: template + purpose + chosen model, AGENTS.md without any bot-dm bl
     const own = readFileSync(join(h.optchatHome, "profiles", "own", "AGENTS.md"), "utf8");
     assert.match(own, /^# Own\nMine.\n$/);
     await assert.rejects(files.create({ name: "Bad", agentsMd: "", chat: { provider: "claude/opus" } }), ManageError);
+    // A bot on Claude Code (optchat-cc) can be made the same way.
+    await files.create({ name: "Cody", agentsMd: "", chat: { provider: "optchat-cc" } });
+    assert.deepEqual(await botChatConfig(join(h.root, "cody")), { provider: "optchat-cc" });
+    await assert.rejects(files.create({ name: "Bad2", agentsMd: "", chat: { provider: "optchat-ccx" } }), ManageError);
   } finally {
     h.done();
   }

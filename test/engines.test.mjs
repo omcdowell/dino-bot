@@ -174,15 +174,19 @@ describe("Claude Code card", () => {
     assert.equal(st.error, null);
   });
 
-  it("lists the bots whose CC-OptChat host is running (registry, live pid only)", () => {
+  it("lists the bots whose OptChat engine runs on Claude Code (bots root .cc/<bot>/engine.json, bot folder still there)", () => {
     const h = mkdtempSync(join(TMP, "cc-"));
-    const dir = join(h, "agents");
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "cc-tweety.json"), JSON.stringify({ id: "cc-tweety", bot: "tweety", hostPid: process.pid }));
-    writeFileSync(join(dir, "cc-gone.json"), JSON.stringify({ id: "cc-gone", bot: "gone", hostPid: 2 ** 22 + 12345 }));
-    writeFileSync(join(dir, "other.json"), JSON.stringify({ bot: "nope" }));
-    assert.deepEqual(claudeCodeBots({ CC_OPTCHAT_AGENTS: dir }), ["tweety"]);
-    assert.deepEqual(claudeCodeBots({ HOME: h }), []);
+    const root = join(h, "bots");
+    for (const bot of ["kit", "gone"]) {
+      mkdirSync(join(root, ".cc", bot), { recursive: true });
+      writeFileSync(join(root, ".cc", bot, "engine.json"), "{}");
+    }
+    mkdirSync(join(root, "kit"), { recursive: true });
+    writeFileSync(join(root, "kit", ".optchat-profile"), "kit\n");
+    mkdirSync(join(root, ".cc", "half"), { recursive: true });
+    assert.deepEqual(claudeCodeBots({ PASEO_BOTS_ROOT: root }), ["kit"]);
+    assert.deepEqual(claudeCodeBots({ HOME: h }), ["kit"]);
+    assert.deepEqual(claudeCodeBots({ HOME: join(h, "nope") }), []);
   });
 
   it("login from the phone end to end: the link, the pasted code to claude's stdin, then logged in; logout", async () => {

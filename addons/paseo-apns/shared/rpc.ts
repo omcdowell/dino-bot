@@ -73,6 +73,12 @@ export const liveActivitySyncRpc = defineRpc({
      * Optional: older apps do not send it.
      */
     dinoLayers: DinoLayers.nullable().optional(),
+    /**
+     * The app's recent Live Activity end reasons (diagnostics, la-vanish), e.g.
+     * "<iso time> endOthers:<id> keep:<id>". Only logged (la-sync). Optional: older apps do not send
+     * it, and older add-ons strip it.
+     */
+    ends: z.array(z.string().max(160)).max(16).optional(),
   }),
   output: z.object({
     ok: z.boolean(),

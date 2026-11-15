@@ -245,9 +245,26 @@ export async function run(argv: string[], deps: Deps): Promise<Result> {
       deps.err(`bot-dm: ${error.message}`);
       return { exit: 2, output: null };
     }
-    deps.err(`bot-dm: ${error instanceof Error ? error.message : String(error)}`);
+    deps.err(`bot-dm: ${errorText(error)}`);
     return { exit: 1, output: null };
   }
+}
+
+/**
+ * The text of anything thrown: its message (an Error, or a plain object with a message, as the Paseo CLI throws
+ * `{ code, message }`), else JSON, else String. Never `[object Object]`.
+ */
+export function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const { message, code } = error as { message?: unknown; code?: unknown };
+    if (typeof message === "string" && message) return typeof code === "string" && code ? `${message} (${code})` : message;
+    try {
+      const json = JSON.stringify(error);
+      if (json) return json;
+    } catch {}
+  }
+  return String(error);
 }
 
 async function runInner(argv: string[], deps: Deps): Promise<Result> {

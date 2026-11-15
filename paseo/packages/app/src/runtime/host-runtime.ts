@@ -8,7 +8,7 @@ import {
   type ConnectionState,
   type FetchAgentsOptions,
 } from "@getpaseo/client/internal/daemon-client";
-import { getSessionTokenRegistry } from "./session-token-store";
+import { getSessionTokenRegistry, type SessionTokenRegistry } from "./session-token-store";
 import { getFeatureCacheRegistry } from "./feature-cache-store";
 import {
   connectionFromListen,
@@ -221,6 +221,8 @@ export interface HostRuntimeControllerDeps {
     host: HostProfile;
     connection: HostConnection;
     timeoutMs?: number;
+    /** QR2: the pairing code's one-use ticket (pairing probes only; never stored). */
+    pairingTicket?: string;
   }) => Promise<{
     client: DaemonClient;
     serverId: string;
@@ -565,11 +567,23 @@ function probeIntervalForConnection(
   return PROBE_MAX_BACKOFF_MS;
 }
 
-/** One session token per host connection, shared by its main client and its probes. */
+/**
+ * One session token per host and path, shared by its main client and its probes. The daemon binds
+ * a token to the clientId and the channel (direct or relay), not to the address, and keeps one
+ * current token per clientId: so every direct address of a host (MagicDNS name, tailnet IP) shares
+ * one token. With a token per address, each address's fresh token retired the other's, which the
+ * stored password used to hide; a phone moved off the password (QR2) must not depend on that.
+ */
+export function sessionTokenScope(connection: HostConnection): string {
+  if (connection.type === "directTcp") return "direct";
+  if (connection.type === "relay") return "relay";
+  return connection.id;
+}
+
 function sessionTokensFor(host: HostProfile, connection: HostConnection) {
   return getSessionTokenRegistry().storeFor({
     serverId: host.serverId,
-    connectionId: connection.id,
+    connectionId: sessionTokenScope(connection),
   });
 }
 
@@ -663,10 +677,11 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
         },
       });
     },
-    connectToDaemon: ({ host, connection, timeoutMs }) =>
+    connectToDaemon: ({ host, connection, timeoutMs, pairingTicket }) =>
       connectToDaemon(connection, {
         ...(host.serverId ? { serverId: host.serverId } : {}),
         ...(host.password ? { password: host.password } : {}),
+        ...(pairingTicket ? { pairingTicket } : {}),
         sessionTokens: sessionTokensFor(host, connection),
         featureCache: getFeatureCacheRegistry().cacheFor(host.serverId),
         localCredential: () => readDesktopManagedLocalCredential(connection),
@@ -827,6 +842,15 @@ export class HostRuntimeController {
       ...toSnapshotConnectionPatch(this.connectionMachineState, this.connectionEpoch),
       client: null,
     });
+  }
+
+  /**
+   * QR2: the host lost only its stored password because this device now holds a device token.
+   * The live client keeps working on its token: no reconnect, no probe reset.
+   */
+  adoptHostWithoutPassword(host: HostProfile): void {
+    if (host.serverId !== this.host.serverId) return;
+    this.host = host;
   }
 
   async updateHost(host: HostProfile): Promise<void> {
@@ -1636,8 +1660,13 @@ export class HostRuntimeStore {
     storage?: HostRuntimeStorage;
     replicaRowStore?: ReplicaRowStore;
     revokePushNotifications?: typeof revokePushNotifications;
+    /** QR2: where device tokens are announced (default: the app's session token registry). */
+    deviceTokens?: Pick<SessionTokenRegistry, "onDeviceToken">;
   }) {
     this.deps = input?.deps ?? createDefaultDeps();
+    (input?.deviceTokens ?? getSessionTokenRegistry()).onDeviceToken((serverId) => {
+      void this.forgetPasswordAfterDeviceToken(serverId).catch(() => undefined);
+    });
     this.storage = input?.storage ?? AsyncStorage;
     const rowStore = input?.replicaRowStore ?? createReplicaRowStore();
     this.replicaCache = new ReplicaCache(rowStore, {
@@ -2095,7 +2124,11 @@ export class HostRuntimeStore {
             if (!(await this.confirmDirectLink(direct))) return { status: "cancelled" };
             approvedDirect = key;
           }
-          const result = await this.pairDirectOffer(direct, password ?? direct.password);
+          const result = await this.pairDirectOffer(
+            direct,
+            password ?? direct.password,
+            direct.pairingTicket,
+          );
           return { status: "connected", ...result };
         }
         // Public flavour: direct / Tailscale only, no relay (ReleasePolicy.relayPairing).
@@ -2146,6 +2179,7 @@ export class HostRuntimeStore {
   private async pairDirectOffer(
     offer: DirectConnectionOffer,
     password: string | undefined,
+    pairingTicket?: string,
   ): Promise<{ profile: HostProfile; serverId: string; hostname: string | null }> {
     const connections = directConnectionsFromOffer(offer);
     const probeHost = (connection: HostConnection): HostProfile => ({
@@ -2163,7 +2197,12 @@ export class HostRuntimeStore {
       serverId: offer.serverId,
       connections,
       probe: (connection) =>
-        this.deps.connectToDaemon({ host: probeHost(connection), connection, timeoutMs: 6000 }),
+        this.deps.connectToDaemon({
+          host: probeHost(connection),
+          connection,
+          timeoutMs: 6000,
+          ...(pairingTicket ? { pairingTicket } : {}),
+        }),
       close: (client) => client.close().catch(() => undefined),
     });
     // Others first, winner last: the last upsert carries the live client and becomes preferred.
@@ -2271,6 +2310,24 @@ export class HostRuntimeStore {
 
   async renameHost(serverId: string, label: string): Promise<void> {
     await this.updateHost(serverId, (host) => ({ ...host, label }));
+  }
+
+  /**
+   * QR2 migration: once this device holds a stored device token for a host, the host's stored
+   * password goes (a password on the phone was the long-lived secret the one-use pairing code
+   * replaces). Without a reconnect: the running client is already on its token.
+   */
+  async forgetPasswordAfterDeviceToken(serverId: string): Promise<void> {
+    const host = this.hosts.find((candidate) => candidate.serverId === serverId);
+    if (!host?.password) return;
+    const { password: _password, ...rest } = host;
+    const updated: HostProfile = { ...rest, updatedAt: new Date().toISOString() };
+    this.hosts = this.hosts.map((candidate) =>
+      candidate.serverId === serverId ? updated : candidate,
+    );
+    this.controllers.get(serverId)?.adoptHostWithoutPassword(updated);
+    this.emitHostList();
+    await this.persistHosts();
   }
 
   async setHostPassword(serverId: string, password: string): Promise<void> {

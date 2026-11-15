@@ -37,3 +37,28 @@ export function stalledCount(workers: readonly Pick<WorkerViewDto, "state">[] | 
 }
 
 export const WORKERS_POLL_MS = 10_000;
+
+/**
+ * The default engine for herdr workers (Settings › Host › Agents › Workers). `engine` is the host's setting ("auto":
+ * Claude Code when it is signed in, else pi); `effective` is what a worker starts on now with no bot default.
+ * Per-bot defaults are not set here: the user asks the bot (its .bot.json `workers`; the workers skill says how).
+ */
+export const WorkerDefaultSchema = z.object({
+  engine: z.enum(["auto", "cc", "pi"]),
+  effective: z.enum(["cc", "pi"]),
+  claudeCode: z.boolean(),
+  pi: z.boolean(),
+});
+export type WorkerDefaultDto = z.infer<typeof WorkerDefaultSchema>;
+
+export const workersSettingsRpc = defineRpc({
+  name: "workers.settings",
+  input: z.object({}),
+  output: WorkerDefaultSchema,
+});
+
+export const workersSettingsSetRpc = defineRpc({
+  name: "workers.settings.set",
+  input: z.object({ engine: z.enum(["auto", "cc", "pi"]) }),
+  output: WorkerDefaultSchema,
+});

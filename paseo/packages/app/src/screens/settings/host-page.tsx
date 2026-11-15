@@ -14,6 +14,7 @@ import {
 import type { TFunction } from "i18next";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { APP_LINK_SCHEME } from "@/constants/flavour";
 import { Alert, Pressable, Text, View } from "react-native";
 import { StyleSheet, useUnistyles, withUnistyles } from "react-native-unistyles";
 import type { TerminalProfile } from "@getpaseo/protocol/messages";
@@ -67,6 +68,7 @@ import type { Theme } from "@/styles/theme";
 import { useProviderIcon } from "@/components/provider-icons";
 import { BrowserToolsOptInCard } from "./browser-tools-card";
 import { GroupChatToolsCard } from "./group-chat-tools-card";
+import { WorkerEngineCard } from "./worker-engine-card";
 import { restartDaemonFromSettings, updateDaemonFromSettings } from "./daemon-lifecycle";
 import { branded } from "@/constants/flavour";
 
@@ -220,9 +222,24 @@ function HostStatusBadges({ serverId }: { serverId: string }) {
   );
 }
 
+/**
+ * QR2: a host this device keeps no password for (paired with a one-use code, or moved to a device
+ * token) needs a new pairing code, not a password.
+ */
+function authGuidance(
+  reason: string | null,
+  hasPassword: boolean,
+  t: ReturnType<typeof useTranslation>["t"],
+): string | undefined {
+  if (!reason) return undefined;
+  if (hasPassword) return t("settings.host.password.guidance");
+  return t("settings.host.pairing.guidance", { command: `${APP_LINK_SCHEME} pair` });
+}
+
 function HostConnectionError({ serverId }: { serverId: string }) {
   const { t } = useTranslation();
   const snapshot = useHostRuntimeSnapshot(serverId);
+  const host = useHostProfile(serverId);
   const lastError = snapshot?.lastError ?? null;
   const connectionError =
     typeof lastError === "string" && lastError.trim().length > 0 ? lastError.trim() : null;
@@ -233,7 +250,7 @@ function HostConnectionError({ serverId }: { serverId: string }) {
         size="sm"
         variant="error"
         title={connectionError}
-        description={snapshot?.authFailureReason ? t("settings.host.password.guidance") : undefined}
+        description={authGuidance(snapshot?.authFailureReason ?? null, Boolean(host?.password), t)}
         testID="host-connection-error"
       />
     </View>
@@ -286,6 +303,7 @@ export function HostAgentsPage({ serverId }: { serverId: string }) {
           <InjectPaseoToolsCard serverId={serverId} />
           <BrowserToolsOptInCard serverId={serverId} />
           <GroupChatToolsCard serverId={serverId} />
+          <WorkerEngineCard serverId={serverId} />
           <AppendSystemPromptCard serverId={serverId} />
         </SettingsSection>
       ) : (

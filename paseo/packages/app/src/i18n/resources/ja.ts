@@ -2433,6 +2433,10 @@ export const ja: TranslationResources = {
       },
     },
     host: {
+      pairing: {
+        guidance:
+          "もう一度ペアリングしてください：コンピューターで `{{command}}` を実行し、新しいコードをスキャンします。",
+      },
       password: {
         guidance:
           "このホストを削除し、このデーモンが求めるパスワードを入力して追加し直してください。",

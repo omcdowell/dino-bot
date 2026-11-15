@@ -69,3 +69,50 @@ describe("session token registry", () => {
     expect(registry.storeFor({ serverId: "srv_a", connectionId: "direct" }).get()).toBeNull();
   });
 });
+
+describe("device tokens (QR2)", () => {
+  test("a device token is kept with its kind and announced only once it is stored", async () => {
+    const storage = memoryStorage();
+    let release: () => void = () => undefined;
+    const written = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    storage.setItem.mockImplementationOnce(async (key: string, value: string) => {
+      await written;
+      storage.items.set(key, value);
+    });
+    const registry = createSessionTokenRegistry(storage);
+    await registry.ready;
+    const announced: string[] = [];
+    registry.onDeviceToken((serverId) => announced.push(serverId));
+    registry
+      .storeFor({ serverId: "srv_a", connectionId: "direct" })
+      .set("pst1.d.v", { device: true });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(announced).toEqual([]);
+    release();
+    await vi.waitFor(() => expect(announced).toEqual(["srv_a"]));
+    expect(JSON.parse(storage.items.get("@paseo:session-tokens-v1")!)).toEqual({
+      '["srv_a","direct"]': { token: "pst1.d.v", device: true },
+    });
+    const next = createSessionTokenRegistry(storage);
+    await next.ready;
+    expect(next.storeFor({ serverId: "srv_a", connectionId: "direct" }).get()).toBe("pst1.d.v");
+  });
+
+  test("a 24-hour token or a failed write announces nothing", async () => {
+    const storage = memoryStorage();
+    const registry = createSessionTokenRegistry(storage);
+    await registry.ready;
+    const announced: string[] = [];
+    registry.onDeviceToken((serverId) => announced.push(serverId));
+    registry.storeFor({ serverId: "srv_a", connectionId: "direct" }).set("pst1.s.t");
+    await vi.waitFor(() => expect(storage.setItem).toHaveBeenCalledTimes(1));
+    storage.setItem.mockRejectedValueOnce(new Error("disk full"));
+    registry
+      .storeFor({ serverId: "srv_b", connectionId: "direct" })
+      .set("pst1.d.v", { device: true });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(announced).toEqual([]);
+  });
+});

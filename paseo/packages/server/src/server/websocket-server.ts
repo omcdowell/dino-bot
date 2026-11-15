@@ -111,7 +111,7 @@ import {
   isBearerTokenValidAsync,
   type DaemonAuthConfig,
 } from "./auth.js";
-import { resolveSessionAdmission } from "./session-admission-auth.js";
+import { type AdmissionMethod, resolveSessionAdmission } from "./session-admission-auth.js";
 import {
   WebSocketRuntimeMetricsWindow,
   type WebSocketRuntimeCounters,
@@ -128,6 +128,7 @@ import {
   SessionTokenStore,
   type SessionTokenBinding,
 } from "./session-tokens.js";
+import { PairingTicketVerifier } from "./pairing-tickets.js";
 
 import {
   readUpgradeCarrier,
@@ -210,6 +211,8 @@ interface PendingConnection {
   authenticating: boolean;
   /** The hello proved the password (or a token due for renewal): send a fresh session token. */
   issueSessionToken?: boolean;
+  /** ...as a long-lived device token (client capability device_tokens). */
+  issueDeviceToken?: boolean;
 }
 
 interface WebSocketConnectionIdentity {
@@ -668,6 +671,8 @@ export class VoiceAssistantWebSocketServer {
    * keeps paired devices signed in (RU1); a password change still invalidates them all.
    */
   private readonly sessionTokens: SessionTokenStore;
+  /** One-use pairing tickets from the pairing QR (QR2). */
+  private readonly pairingTickets: PairingTicketVerifier;
   /** Sockets admitted by a password in the upgrade headers (COMPAT(headerAuth)). */
   private readonly passwordHeaderSockets = new WeakSet<WebSocketLike>();
   /**
@@ -834,6 +839,10 @@ export class VoiceAssistantWebSocketServer {
       persistPath: join(paseoHome, SESSION_TOKEN_FILE_NAME),
       onPersistError: (err, action) =>
         this.logger.warn({ err, action }, "session_tokens.persist_failed"),
+    });
+    this.pairingTickets = new PairingTicketVerifier({
+      paseoHome,
+      onPersistError: (err) => this.logger.warn({ err }, "pairing_tickets.persist_failed"),
     });
     this.worktreesRoot = daemonRuntimeConfig?.worktreesRoot;
     this.daemonConfigStore = daemonConfigStore;
@@ -2268,6 +2277,16 @@ export class VoiceAssistantWebSocketServer {
         localCredential: this.credentialSource?.localCredential?.() ?? null,
         transport: pending.identity.transport === "relay" ? "relay" : "direct",
         verifySessionToken: (token) => this.sessionTokens.verify(token, binding),
+        verifyPairingTicket: (ticket) => {
+          const checked = this.pairingTickets.check(ticket, binding.clientId);
+          if (!checked.ok) {
+            pending.connectionLogger.warn(
+              { reason: checked.reason },
+              "Rejected hello with a pairing ticket",
+            );
+          }
+          return checked.ok;
+        },
       });
       if (this.pendingConnections.get(ws) !== pending) return false;
       if ("rejection" in resolved) {
@@ -2280,10 +2299,7 @@ export class VoiceAssistantWebSocketServer {
       }
       pending.admission = resolved.admission;
       if (resolved.method === "sessionToken") this.incrementRuntimeCounter("helloSessionToken");
-      pending.issueSessionToken =
-        message.capabilities?.[CLIENT_CAPS.sessionTokens] === true &&
-        (resolved.method === "password" ||
-          (resolved.method === "sessionToken" && resolved.renewToken === true));
+      this.noteTokenIssue(message, pending, resolved);
       return true;
     } catch (error) {
       pending.connectionLogger.error({ err: error }, "Failed to resolve hello credential");
@@ -2293,6 +2309,34 @@ export class VoiceAssistantWebSocketServer {
       }
       return false;
     }
+  }
+
+  /** Whether this hello gets a fresh token, and of which kind (device tokens: QR2). */
+  private noteTokenIssue(
+    message: WSHelloMessage,
+    pending: PendingConnection,
+    resolved: { method: AdmissionMethod; renewToken?: boolean; deviceToken?: boolean },
+  ): void {
+    const wantsDevice = message.capabilities?.[CLIENT_CAPS.deviceTokens] === true;
+    const takesTokens = message.capabilities?.[CLIENT_CAPS.sessionTokens] === true || wantsDevice;
+    pending.issueDeviceToken = wantsDevice;
+    if (resolved.method === "pairingTicket") {
+      pending.issueSessionToken = true;
+      return;
+    }
+    if (!takesTokens) {
+      pending.issueSessionToken = false;
+      return;
+    }
+    if (resolved.method === "password") {
+      pending.issueSessionToken = true;
+      return;
+    }
+    // A token due for renewal; or a device-capable client still on a 24-hour token moves to a
+    // device token now.
+    pending.issueSessionToken =
+      resolved.method === "sessionToken" &&
+      (resolved.renewToken === true || (wantsDevice && resolved.deviceToken !== true));
   }
 
   /**
@@ -2333,7 +2377,10 @@ export class VoiceAssistantWebSocketServer {
     pending: PendingConnection,
   ): void {
     if (!this.passwordHeaderSockets.has(ws)) return;
-    pending.issueSessionToken = message.capabilities?.[CLIENT_CAPS.sessionTokens] === true;
+    const wantsDevice = message.capabilities?.[CLIENT_CAPS.deviceTokens] === true;
+    pending.issueDeviceToken = wantsDevice;
+    pending.issueSessionToken =
+      message.capabilities?.[CLIENT_CAPS.sessionTokens] === true || wantsDevice;
   }
 
   /** Sends a fresh per-device session token before server_info (never logged). */
@@ -2347,10 +2394,19 @@ export class VoiceAssistantWebSocketServer {
     if (lifecycle !== "reconnectable") return;
     if (!pending.issueSessionToken || !pending.identity.clientId) return;
     pending.issueSessionToken = false;
-    const issued = this.sessionTokens.issue(admission, {
-      clientId: pending.identity.clientId,
-      channel: sessionTokenChannel(pending.identity),
-    });
+    const issued = this.sessionTokens.issue(
+      admission,
+      { clientId: pending.identity.clientId, channel: sessionTokenChannel(pending.identity) },
+      {
+        device: pending.issueDeviceToken === true,
+        label: [
+          pending.identity.appVersion ? `app ${pending.identity.appVersion}` : null,
+          pending.identity.remoteAddress ? `from ${pending.identity.remoteAddress}` : null,
+        ]
+          .filter(Boolean)
+          .join(", "),
+      },
+    );
     if (!issued) return;
     this.incrementRuntimeCounter("sessionTokenIssued");
     this.sendToClient(ws, { type: "session.token", ...issued });
@@ -2373,7 +2429,8 @@ export class VoiceAssistantWebSocketServer {
       | "password_required"
       | "incorrect_password"
       | "incompatible_protocol"
-      | "session_token_invalid",
+      | "session_token_invalid"
+      | "pairing_ticket_invalid",
   ): Promise<void> {
     // Older clients discard unknown frames, then use the close code and reason.
     // They never send hello.auth, so avoid sending an unknown envelope to them.
@@ -2389,6 +2446,7 @@ export class VoiceAssistantWebSocketServer {
       incorrect_password: "Incorrect password",
       incompatible_protocol: "Incompatible protocol version",
       session_token_invalid: "Session token invalid",
+      pairing_ticket_invalid: "Pairing code expired or already used",
     }[reason];
     try {
       ws.close(

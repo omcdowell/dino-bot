@@ -1,12 +1,17 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { BotsService, setDefaultChatModel, type BotsPaseo } from "./server/bots";
+import { BotsService, setClaudeCodeReady, setDefaultChatModel, type BotsPaseo } from "./server/bots";
 import { DmsService, type DmsPaseo } from "./server/dms";
 import { WorkersService } from "./server/workers";
 import { botDmSender } from "./server/bot-dm-send";
 import { Extensions } from "./server/extensions";
 import { HerdrInstance } from "./server/herdr-instance";
+import { CcHost } from "./server/cc/engine";
+import { CcLauncher, ccModsDir, claudePlanReady, claudeSignedIn } from "./server/cc/launch";
+import { setWorkerDefault, workerDefault } from "./server/worker-default";
+import { pluginSkillsDirFor } from "./server/cc/skills";
+import { CC_PROVIDER, createCcProvider } from "./server/cc/provider";
 import { BotPrompts, onPath } from "./server/bot-prompt";
 import { stripProfiles } from "./server/bot-dm-block";
 import { botEnv, loadSettings, readSettingsAt, writeRoomFullTools } from "./server/settings";
@@ -17,7 +22,7 @@ import { httpPush } from "./server/apns-push";
 import { dmsReplyRpc, dmsSummaryRpc, dmsThreadRpc, dmsThreadsRpc } from "./shared/dm-rpc";
 import { DmTurnsService, TIMELINE_TAIL } from "./server/dm-turns";
 import { botsListRpc, botsNewChatRpc, botsOpenRpc, botsQuietRpc } from "./shared/rpc";
-import { botsWorkersRpc } from "./shared/workers-rpc";
+import { botsWorkersRpc, workersSettingsRpc, workersSettingsSetRpc } from "./shared/workers-rpc";
 import { botsAvatarRpc, botsPreviewsRpc } from "./shared/home-rpc";
 import { dmPreview, latestPreview, newestTime, PreviewsService } from "./server/previews";
 import { AvatarsService, avatarAnswer, withAvatarHashes } from "./server/avatars";
@@ -36,7 +41,7 @@ import { GroupsFile } from "./server/rooms/groups";
 import { roomsRoot } from "./server/rooms/ledger";
 import { CHECK_MS as ROOMS_CHECK_MS, procMemAvailable, RoomSessions, type RoomsPaseo } from "./server/rooms/sessions";
 import { RoomsService } from "./server/rooms/service";
-import { BotFiles, HomeStateFile } from "./server/manage";
+import { BotFiles, HomeStateFile, defaultPiAgentDir, piSignIns } from "./server/manage";
 import { createGroup, renameGroup } from "./server/rooms/groups";
 import { groupIdFor } from "./shared/manage";
 import {
@@ -92,6 +97,22 @@ export default function contribute(server: PluginServerContext) {
   // Workers run in the plugin's own herdr instance unless the settings pick the user's server.
   const herdr = HerdrInstance.fromSettings(settings);
   void herdr.ready();
+
+  // Bots on Claude Code (provider optchat-cc): OptChat memory here, the TUI in herdr (server/cc/). A host with no pi
+  // model chosen and a Claude plan login starts new bot chats there.
+  setClaudeCodeReady(() => claudePlanReady(process.env));
+  const ccHost = new CcHost(join(root, ".cc"));
+  const ccMods = ccModsDir(process.env);
+  server.registerProvider(
+    createCcProvider({
+      host: ccHost,
+      launcher: new CcLauncher({ herdrEnv: () => herdr.env, herdrBin: process.env.PASEO_BOTS_HERDR, script: join(ccMods, "start-bot.sh") }),
+      skillsDir: pluginSkillsDirFor(ccMods),
+      botsRoot: root,
+      optchatHome: process.env.OPTCHAT_HOME ?? join(homedir(), ".optchat"),
+      warn: (message) => console.warn(message),
+    }),
+  );
   const service = new BotsService(root);
   // PaseoApi is structurally wider than the slices the services need.
   const sdk = (paseo: unknown) => paseo as BotsPaseo;
@@ -318,6 +339,7 @@ export default function contribute(server: PluginServerContext) {
   const botPrompts = new BotPrompts({
     root,
     settings,
+    optchatHome: process.env.OPTCHAT_HOME ?? join(homedir(), ".optchat"),
     herdr: () => onPath(process.env.PASEO_BOTS_HERDR ?? "herdr"),
     seated: () => {
       try {
@@ -371,6 +393,10 @@ export default function contribute(server: PluginServerContext) {
   server.handle(roomsBotPostRpc, (input, { paseo }) => rooms.botPost(roomsSdk(paseo), input));
   // Group chat tools (settings `rooms.fullTools`): read fresh from the file, written keeping every other key.
   // pi-optchat reads the same file on each room turn, so no plugin reload or daemon restart is needed.
+  // Settings › Host › Agents › Workers: the global default engine for herdr workers (server/worker-default.ts).
+  const workerDeps = { claudeSignedIn: () => claudeSignedIn(process.env), piSignIns: () => piSignIns(defaultPiAgentDir()) };
+  server.handle(workersSettingsRpc, () => workerDefault(root, workerDeps));
+  server.handle(workersSettingsSetRpc, ({ engine }) => setWorkerDefault(root, engine, workerDeps));
   server.handle(roomsSettingsRpc, () => ({ fullTools: readSettingsAt(root).rooms.fullTools }));
   server.handle(roomsSettingsSetRpc, ({ fullTools }) => {
     const out = writeRoomFullTools(root, fullTools);
@@ -416,7 +442,7 @@ export default function contribute(server: PluginServerContext) {
   });
   // Compaction model (OptChat profile config.json `compactor`): the Edit sheet's model + thinking.
   server.handle(botsCompactorRpc, ({ botId }) => botFiles.compactor(botId));
-  server.handle(botsSetCompactorRpc, ({ botId, compactor }) => botFiles.setCompactor(botId, compactor));
+  server.handle(botsSetCompactorRpc, ({ botId, compactor, runner }) => botFiles.setCompactor(botId, compactor, runner));
   server.handle(botsUpdateRpc, async ({ botId, name, agentsMd, avatar, avatarJson }) => {
     if (avatar && avatarJson) throw new Error("Send a picture or a designed avatar, not both.");
     // AGENTS.md first: it is the one write that can be refused (changed on the host).
@@ -435,9 +461,14 @@ export default function contribute(server: PluginServerContext) {
   server.handle(botsAvatarSaveRpc, ({ botId, avatar }) => botFiles.saveAvatarJson(botId, avatar));
   server.handle(botsAvatarJsonRpc, async ({ botId }, { paseo }) => {
     const avatar = await botFiles.avatarJson(botId);
-    if (!avatar) return { avatar: null, hash: null, live: false };
-    const hash = avatarJsonHash(avatar);
     const bot = (await service.list(sdk(paseo))).find((candidate) => candidate.id === botId);
+    if (!avatar) {
+      // DA1: a bot without avatar.json shows a default avatar; the designer starts from it (revision 0).
+      if (!bot || (await avatars.hasOwnPng(bot))) return { avatar: null, hash: null, live: false };
+      const fallback = await avatars.defaultDesign(bot);
+      return { avatar: fallback.avatar, hash: fallback.hash, live: true };
+    }
+    const hash = avatarJsonHash(avatar);
     const live = !!bot && (await avatars.hashForBot(bot)) === hash;
     return { avatar, hash, live };
   });
@@ -484,7 +515,7 @@ export default function contribute(server: PluginServerContext) {
   // the bots' herdr instance, so `herdr agent start` from a bot never lands in the user's herdr.
   before?.("agent.session_open", async ({ request }) => {
     const roomed = rooms.sessionOpen(request);
-    if (request.provider !== OPTCHAT_PROVIDER) return roomed;
+    if (request.provider !== OPTCHAT_PROVIDER && request.provider !== CC_PROVIDER) return roomed;
     const base = roomed ?? request;
     // A bot's main chat (not a room session) also gets its "DinoBot bot" prompt section.
     const prompt = roomed ? null : botPrompts.envFor(request.cwd);
@@ -500,6 +531,7 @@ export default function contribute(server: PluginServerContext) {
   roomsTimer.unref?.();
 
   return () => {
+    void ccHost.close();
     clearInterval(roomsTimer);
     clearInterval(slotTimer);
     push.stop();

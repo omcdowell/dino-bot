@@ -101,6 +101,8 @@ export function startLiveActivity(input: { client: DaemonClient; serverId: strin
       return () => sub.remove();
     },
     isActive: () => AppState.currentState === "active",
+    // One host owns the activity (sync.ts, la-vanish); the server id names it in end reasons.
+    hostId: input.serverId,
     environment: apnsEnvironment(),
     topic: typeof bundleId === "string" && bundleId ? bundleId : null,
     randomId,

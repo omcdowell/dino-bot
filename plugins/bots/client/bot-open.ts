@@ -18,6 +18,8 @@ export interface SidebarOpenDeps {
   onCreated(): void;
   /** The first open is slow (the host is creating the chat): say so (openChatPatiently). */
   onStarting?(bot: { id: string; name: string }): void;
+  /** The bot's chat was opened in the app (our build only): e.g. a new bot gets its DMs tab. */
+  afterOpen?(bot: { id: string; name: string }, agentId: string): void;
   now?: () => number;
   /** Bots whose chat is being opened; a second tap meanwhile does nothing. */
   inFlight?: Set<string>;
@@ -50,6 +52,7 @@ export async function openBotFromSidebar(
   }
   if (bot.agentId) {
     navigation.openAgent({ agentId: bot.agentId });
+    deps.afterOpen?.(bot, bot.agentId);
     return;
   }
   const inFlight = deps.inFlight ?? opening;
@@ -59,6 +62,7 @@ export async function openBotFromSidebar(
     const result = await openChatPatiently(() => deps.openChat(bot.id), { onStarting: () => deps.onStarting?.(bot) });
     if (result.created) deps.onCreated();
     navigation.openAgent({ agentId: result.agentId });
+    deps.afterOpen?.(bot, result.agentId);
   } catch {
     // The bot page (no nonce, so no jump) offers Open chat / New chat, which show the error.
     deps.openScreen({ screenId: "bot", params: { botId: bot.id, name: bot.name } });

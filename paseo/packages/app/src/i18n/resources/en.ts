@@ -2538,6 +2538,9 @@ export const en = {
       },
     },
     host: {
+      pairing: {
+        guidance: "Pair again: on your computer, run `{{command}}` and scan the new code.",
+      },
       password: {
         guidance: "Remove this host and add it again with the password this daemon asks for.",
       },

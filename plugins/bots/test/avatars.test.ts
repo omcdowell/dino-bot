@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { AVATAR_MAX_BYTES, AvatarsService, avatarPath, withAvatarHashes } from "../server/avatars";
+import { AVATAR_MAX_BYTES, AvatarsService, DEFAULT_AVATAR_REF, avatarPath, withAvatarHashes } from "../server/avatars";
+import { avatarJsonHash } from "../server/avatar-store";
+import { AVATAR_PACK, stableDefaultAvatar } from "../shared/avatar";
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("rest")]);
 
@@ -52,7 +54,7 @@ test("AvatarsService.read gives a content hash: same bytes same hash (even after
   assert.deepEqual(await service.read(join(dir, "missing.png")), { dataUri: null, hash: null });
 });
 
-test("withAvatarHashes adds each bot's avatar hash for bots.list; null without a usable avatar", async () => {
+test("withAvatarHashes adds each bot's avatar hash for bots.list; a stable default (DA1) without a usable avatar", async () => {
   const dir = mkdtempSync(join(tmpdir(), "avatars-"));
   writeFileSync(join(dir, "avatar.png"), PNG);
   const service = new AvatarsService();
@@ -65,11 +67,11 @@ test("withAvatarHashes adds each bot's avatar hash for bots.list; null without a
     service,
   );
   assert.deepEqual(
-    bots.map((bot) => [bot.id, bot.avatarHash]),
+    bots.map((bot) => [bot.id, bot.avatar, bot.avatarHash]),
     [
-      ["flint", (await service.read(join(dir, "avatar.png"))).hash],
-      ["scrat", null],
-      ["peggy", null],
+      ["flint", "avatar.png", (await service.read(join(dir, "avatar.png"))).hash],
+      ["scrat", DEFAULT_AVATAR_REF, avatarJsonHash(stableDefaultAvatar(AVATAR_PACK, "scrat"))],
+      ["peggy", "missing.png", avatarJsonHash(stableDefaultAvatar(AVATAR_PACK, "peggy"))],
     ],
   );
   assert.ok(bots[0]?.avatarHash);

@@ -121,16 +121,33 @@ const CompactorSchema = z.object({
 });
 export type Compactor = z.infer<typeof CompactorSchema>;
 
+/**
+ * Where a Claude Code bot's summaries run (FF1): "in-session" (its own Claude Code session), "pi" (the host's pi
+ * sign-in, any pi model), or "auto" (pi for a non-Claude model, else the host default, else in-session).
+ */
+export const COMPACTOR_RUNNERS = ["auto", "in-session", "pi"] as const;
+export type CompactorRunnerSetting = (typeof COMPACTOR_RUNNERS)[number];
+/** Optional: an older host sends none (the app then shows no runner choice). */
+const CompactorOutputSchema = CompactorSchema.extend({
+  isDefault: z.boolean(),
+  runner: z.enum(COMPACTOR_RUNNERS).optional(),
+  effectiveRunner: z.enum(["in-session", "pi"]).optional(),
+  /** The bot runs on Claude Code (only those have a runner choice). */
+  ccBot: z.boolean().optional(),
+  /** The host default (bots settings `compactorRunner`); null: none (automatic). */
+  hostRunner: z.enum(["in-session", "pi"]).nullable().optional(),
+});
+
 /** The bot's compaction model (OptChat profile config.json `compactor`; `isDefault` when it has none). */
 export const botsCompactorRpc = defineRpc({
   name: "bots.compactor",
   input: z.object({ botId: BotIdSchema }),
-  output: CompactorSchema.extend({ isDefault: z.boolean() }),
+  output: CompactorOutputSchema,
 });
 
-/** Sets the compaction model; every other key of config.json stays. Used from the next summary. */
+/** Sets the compaction model (and, given, the runner); every other key of config.json stays. Used from the next summary. */
 export const botsSetCompactorRpc = defineRpc({
   name: "bots.set-compactor",
-  input: z.object({ botId: BotIdSchema, compactor: CompactorSchema }),
-  output: CompactorSchema.extend({ isDefault: z.boolean() }),
+  input: z.object({ botId: BotIdSchema, compactor: CompactorSchema, runner: z.enum(COMPACTOR_RUNNERS).optional() }),
+  output: CompactorOutputSchema,
 });

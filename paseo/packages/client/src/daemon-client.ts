@@ -8,7 +8,7 @@ import {
   type TimelineSubscription,
 } from "./connection/index.js";
 import { CreationClient } from "./creation/index.js";
-import type { CreationSnapshot } from "@getpaseo/protocol/messages";
+import type { CreationSnapshot, WSHelloRejectedMessage } from "@getpaseo/protocol/messages";
 import type { z } from "zod";
 import type { SessionEventSubscription } from "@getpaseo/protocol/messages";
 import {
@@ -264,6 +264,7 @@ type HelloAuth =
   | { kind: "password"; password: string }
   | { kind: "localCredential"; token: string }
   | { kind: "sessionToken"; token: string }
+  | { kind: "pairingTicket"; ticket: string }
   | undefined;
 
 /**
@@ -274,7 +275,8 @@ type HelloAuth =
  */
 export interface DaemonSessionTokenStore {
   get(): string | null;
-  set(token: string | null): void;
+  /** `info.device`: a long-lived device token (client capability device_tokens). */
+  set(token: string | null, info?: { device?: boolean }): void;
 }
 
 export function createMemorySessionTokenStore(
@@ -289,13 +291,23 @@ export function createMemorySessionTokenStore(
   };
 }
 
-export type DaemonAuthFailureReason = "password_required" | "incorrect_password";
+export type DaemonAuthFailureReason =
+  | "password_required"
+  | "incorrect_password"
+  // QR2: the pairing code's one-use ticket expired or was used by another device.
+  | "pairing_ticket_invalid";
+
+const AUTH_FAILURE_MESSAGES: Record<DaemonAuthFailureReason, string> = {
+  password_required: "Password required",
+  incorrect_password: "Incorrect password",
+  pairing_ticket_invalid: "Pairing code expired or already used",
+};
 
 export class DaemonAuthenticationError extends Error {
   readonly reason: DaemonAuthFailureReason;
 
   constructor(reason: DaemonAuthFailureReason) {
-    super(reason === "password_required" ? "Password required" : "Incorrect password");
+    super(AUTH_FAILURE_MESSAGES[reason]);
     this.name = "DaemonAuthenticationError";
     this.reason = reason;
   }
@@ -316,6 +328,7 @@ function chooseConnectionAuth(
   config: DaemonClientConfig,
   localCredential: string | undefined,
   sessionToken: string | null,
+  pairingTicket: string | null = null,
 ): { helloAuth: HelloAuth; headers: Record<string, string>; protocols?: string[] } {
   const password = normalizePassword(config.password);
   let helloAuth: HelloAuth;
@@ -323,6 +336,9 @@ function chooseConnectionAuth(
   else if (sessionToken) {
     // Only a daemon that issued the token reads it, so no bearer header for older daemons.
     return { helloAuth: { kind: "sessionToken", token: sessionToken }, headers: {} };
+  } else if (pairingTicket) {
+    // QR2: the pairing code's one-use ticket; never the password beside it.
+    return { helloAuth: { kind: "pairingTicket", ticket: pairingTicket }, headers: {} };
   } else if (password) helloAuth = { kind: "password", password };
   const headers: Record<string, string> = {};
   const compatibleBearer = localCredential ? null : compatibleBearerPassword(password);
@@ -339,14 +355,15 @@ function chooseConnectionAuth(
 function resolveConnectionAuth(
   config: DaemonClientConfig,
   sessionTokens: DaemonSessionTokenStore,
+  pairingTicket: string | null = null,
 ): ReturnType<typeof chooseConnectionAuth> | Promise<ReturnType<typeof chooseConnectionAuth>> {
   const resolution = config.localCredential?.();
   if (resolution instanceof Promise) {
     return resolution.then((credential) =>
-      chooseConnectionAuth(config, credential, sessionTokens.get()),
+      chooseConnectionAuth(config, credential, sessionTokens.get(), pairingTicket),
     );
   }
-  return chooseConnectionAuth(config, resolution, sessionTokens.get());
+  return chooseConnectionAuth(config, resolution, sessionTokens.get(), pairingTicket);
 }
 
 type SelectedConnectionAuth = ReturnType<typeof chooseConnectionAuth>;
@@ -528,6 +545,11 @@ export interface DaemonClientConfig {
   };
   /** Per-device session token storage (default: in memory for this client only). */
   sessionTokens?: DaemonSessionTokenStore;
+  /**
+   * QR2: the one-use pairing ticket from a pairing code. Presented (instead of the password) while
+   * the client holds no session token; dropped once the daemon refuses it. Never stored.
+   */
+  pairingTicket?: string;
   /**
    * compact_v2: where the daemon's feature map is kept between connects (default: in memory for
    * this client). Persist it per host so even a cold launch sends only the hash.
@@ -1537,6 +1559,8 @@ export class DaemonClient {
   private readonly compactV2: CompactV2Decoder;
   private helloAuth: HelloAuth;
   private readonly sessionTokens: DaemonSessionTokenStore;
+  /** QR2: the pairing code's ticket until the daemon refuses it (config.pairingTicket). */
+  private pairingTicket: string | null;
   /** The next reconnect goes at once (a stale session token was dropped; a stuck socket was replaced). */
   private immediateReconnect = false;
   /** Until then (perfNow ms), reconnect fast: see FAST_RETRY_WINDOW_MS. */
@@ -1607,6 +1631,7 @@ export class DaemonClient {
   constructor(private config: DaemonClientConfig) {
     this.logger = config.logger ?? consoleLogger;
     this.sessionTokens = config.sessionTokens ?? createMemorySessionTokenStore();
+    this.pairingTicket = normalizePassword(config.pairingTicket);
     this.compactV2 = new CompactV2Decoder(config.featureCache ?? createMemoryFeatureCache());
     this.relaySecurityFloorValue = config.e2ee?.minimumMode;
     this.logConnectionPath = isRelayClientWebSocketUrl(this.config.url) ? "relay" : "direct";
@@ -1872,7 +1897,7 @@ export class DaemonClient {
   private selectAttemptAuth(
     adopted: RaceCandidate | null,
   ): SelectedConnectionAuth | Promise<SelectedConnectionAuth> {
-    const current = resolveConnectionAuth(this.config, this.sessionTokens);
+    const current = resolveConnectionAuth(this.config, this.sessionTokens, this.pairingTicket);
     if (adopted && current instanceof Promise) {
       current.catch(() => undefined);
       return adopted.selected;
@@ -7277,6 +7302,37 @@ export class DaemonClient {
     this.fastRetryOpenTimeout = null;
   }
 
+  private handleHelloRejected(reason: WSHelloRejectedMessage["reason"]): void {
+    const reasonMessage = {
+      password_required: "Password required",
+      incorrect_password: "Incorrect password",
+      incompatible_protocol: "Incompatible protocol version",
+      session_token_invalid: "Session token invalid",
+      pairing_ticket_invalid: "Pairing code expired or already used",
+    };
+    this.lastErrorValue = reasonMessage[reason];
+    if (reason === "pairing_ticket_invalid") {
+      this.pairingTicket = null;
+      // A pairing code that also carries the password (transition QR): go on with that.
+      if (normalizePassword(this.config.password)) {
+        this.immediateReconnect = true;
+        this.authFailureReasonValue = null;
+        return;
+      }
+      this.authFailureReasonValue = "pairing_ticket_invalid";
+      return;
+    }
+    if (reason === "session_token_invalid") {
+      // Expired, revoked or from before a daemon restart: not an auth failure. Drop it and
+      // reconnect at once with the password.
+      this.sessionTokens.set(null);
+      this.immediateReconnect = true;
+      this.authFailureReasonValue = null;
+      return;
+    }
+    this.authFailureReasonValue = reason === "incompatible_protocol" ? null : reason;
+  }
+
   /**
    * A daemon that does not know session tokens (downgraded) closes a token hello as invalid.
    * Drop the token and go again with the password at once.
@@ -7358,7 +7414,7 @@ export class DaemonClient {
     if (this.raceCandidate || !this.raceTargetLive(transport)) return;
     let resolution: ReturnType<typeof resolveConnectionAuth>;
     try {
-      resolution = resolveConnectionAuth(this.config, this.sessionTokens);
+      resolution = resolveConnectionAuth(this.config, this.sessionTokens, this.pairingTicket);
     } catch {
       return;
     }
@@ -7833,28 +7889,12 @@ export class DaemonClient {
     }
 
     if (parsed.data.type === "hello.rejected") {
-      const reasonMessage = {
-        password_required: "Password required",
-        incorrect_password: "Incorrect password",
-        incompatible_protocol: "Incompatible protocol version",
-        session_token_invalid: "Session token invalid",
-      };
-      this.lastErrorValue = reasonMessage[parsed.data.reason];
-      if (parsed.data.reason === "session_token_invalid") {
-        // Expired, revoked or from before a daemon restart: not an auth failure. Drop it and
-        // reconnect at once with the password.
-        this.sessionTokens.set(null);
-        this.immediateReconnect = true;
-        this.authFailureReasonValue = null;
-        return;
-      }
-      this.authFailureReasonValue =
-        parsed.data.reason === "incompatible_protocol" ? null : parsed.data.reason;
+      this.handleHelloRejected(parsed.data.reason);
       return;
     }
 
     if (parsed.data.type === "session.token") {
-      this.sessionTokens.set(parsed.data.token);
+      this.sessionTokens.set(parsed.data.token, parsed.data.device ? { device: true } : undefined);
       return;
     }
 

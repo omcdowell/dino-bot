@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DM_ENVELOPE_RE, parseLedgerLine, type DmRecord } from "../shared/dm-schema.ts";
-import { run, type Deps } from "../bot-dm/cli.ts";
+import { errorText, run, type Deps } from "../bot-dm/cli.ts";
 import type { AgentInfo, PaseoPort, ScheduleInfo } from "../bot-dm/paseo.ts";
 
 export const TEST_SETTINGS = { user: { name: "Sam", aliases: ["sam"] }, escalation: "the-fat-controller" };
@@ -322,6 +322,29 @@ test("attachments must be absolute existing files and are listed after the body"
   assert.ok(w.sent[0].text.includes(`see file\nAttachments:\n- ${file}\n(No answer needed.`));
   const m = w.ledger("bitzer", "inbox")[0];
   assert.ok(m.type === "message" && m.attachments[0] === file && m.body === "see file");
+});
+
+test("errors the Paseo CLI throws as plain objects print their message, never [object Object]", async () => {
+  assert.equal(errorText(new Error("boom")), "boom");
+  assert.equal(
+    errorText({ code: "TARGET_AMBIGUOUS", message: "PASEO_HOME and PASEO_HOST are both set. Choose --home or --host explicitly." }),
+    "PASEO_HOME and PASEO_HOST are both set. Choose --home or --host explicitly. (TARGET_AMBIGUOUS)",
+  );
+  assert.equal(errorText({ message: "just this" }), "just this");
+  assert.equal(errorText({ code: "X", detail: 1 }), '{"code":"X","detail":1}');
+  assert.equal(errorText("text"), "text");
+  assert.equal(errorText({}), "{}");
+  const w = world();
+  const d = {
+    ...w.deps({ PASEO_AGENT_ID: "agent-bitzer" }),
+    connect: async () => {
+      throw { code: "TARGET_AMBIGUOUS", message: "PASEO_HOME and PASEO_HOST are both set." };
+    },
+  };
+  const r = await run(["flint", "--text", "hi"], d);
+  assert.equal(r.exit, 1);
+  assert.ok(w.errs.some((l) => l.includes("PASEO_HOME and PASEO_HOST are both set.")), w.errs.join("\n"));
+  assert.ok(!w.errs.some((l) => l.includes("[object Object]")), w.errs.join("\n"));
 });
 
 test("usage errors exit 2 without touching Paseo", async () => {

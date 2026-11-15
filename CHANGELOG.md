@@ -1,5 +1,85 @@
 # Changelog
 
+## v0.1.11
+
+### Bots can run on Claude Code
+
+- A bot can now run on your own Claude Code login (your Claude Pro/Max plan): its chat is Claude
+  Code's terminal app, with the bot's memory, tools and DMs as before. A new chat with no pi model
+  and a Claude plan login starts on Claude Code; `bots.create` can make a Claude Code bot directly.
+- The app shows what a Claude Code bot is doing: its thinking, each tool call with the command,
+  file or search it used, a context meter, the chat's cost (summaries included) and rate limits.
+- The model picker lists the Claude models your login can use, newest first; picking a model or
+  effort restarts the bot's Claude Code once it is not mid-turn.
+- Messages are typed into the bot's Claude Code only when it is idle, checked against its
+  transcript, and never typed twice; a message sent just as a turn starts joins that turn. Bot DMs
+  and room messages still arrive after you press Stop.
+- A Claude Code bot sees the same skills a pi bot does (the bots plugin's, its own and your
+  global ones), and finds its own AGENTS.md.
+- Optional: a bot (or every bot) can send Claude Code through an Anthropic API proxy you run
+  (`.bot.json` `cc.baseUrl`/`cc.authToken`, or `DINOBOT_CC_BASE_URL`/`DINOBOT_CC_AUTH_TOKEN`).
+  Unset, nothing changes.
+
+### Sign-in, defaults, workers
+
+- Sign-in reads as two options: Claude Code (recommended) or pi with its providers, and says which
+  terminal app your bots run in. The old pi-only first-run screen is gone; an older computer gets
+  both options and is asked to update. Settings › Providers matches.
+- Summaries (compaction) default to Claude Sonnet 5.5 at medium effort, or GPT-6.1 Sol at low for a
+  ChatGPT sign-in; other sign-ins are asked during setup. A Claude Code bot can run its summaries
+  on the computer's pi instead ("Summaries run on" in the Edit sheet); if pi fails it falls back.
+- Workers default to Claude Code when it is signed in, else pi. Settings › Host › Agents › Workers
+  sets the one default for all bots; a bot can keep its own default when you ask it to.
+- New bots get a random default avatar (one of the 27 pack characters in its own look), and the
+  first time you open a new bot its DMs tab opens once.
+
+### One-use pairing codes, and devices stay paired without the password (QR2)
+
+- Every pairing code (setup, `dinobot pair`, `dinobot pair --link`) carries a fresh one-use
+  ticket: it works for one phone or computer, for 10 minutes. A second device needs its own code
+  (`dinobot pair` again). A used ticket stays used after a restart.
+- The app trades the ticket (or, on a phone paired before, its stored password) for a device
+  token that keeps it paired: it lasts 180 days and is renewed whenever the device connects, so it
+  ends only after about 180 days unused. A renewal lost with a dropped connection no longer signs
+  a device out (the previous token stays valid for 7 days). Restarts and updates keep it.
+- Once the app holds a device token, it deletes the password it stored for that computer.
+- **For now the code still carries the password too**, so app builds without ticket support keep
+  pairing. Once the TestFlight build that understands tickets is approved, one setting
+  (`pairingQr` in `lib/product.json`: `"ticket"`) takes the password out of the code.
+- New: `dinobot devices` lists the paired phones and computers; `dinobot devices --revoke <n>`
+  unpairs one, `--revoke-all` unpairs all and voids every unused code. A revoked device is refused
+  at its next connect.
+- A refused code says so in the app ("expired or already used, run `dinobot pair`") instead of
+  asking for a password.
+
+### The installer's terminal screens give the important parts room
+
+- At a real terminal, the install shows three steps (Download, Set up this computer, Connect your
+  phone), one progress line redrawn in place, and a `✓` line per finished part. Paths, retries,
+  checksum and signature detail go to `~/.dinobot/logs/install.log` and `~/.dinobot/logs/setup.log`,
+  named only when something fails; an error is one sentence, the next step and the log path.
+- Step 3 starts on a fresh screen with the pairing code and the one instruction beside or under it.
+  When the window is too small for the whole code (macOS Terminal's default 80×24 cannot hold it),
+  no partial code is shown: the screen says so, how big the window must be, and where the picture is
+  (on a Mac it is already open in Preview); the code appears as soon as the window is resized.
+  After the phone opens sign-in, the screen changes to "Now finish on your phone", then "Your bots
+  are ready", then notes that need you ("Good to know").
+- Text is wrapped to a readable column (at most 76 wide) read from the window each time; words,
+  commands and paths are never broken. Sized for 80×24 up to 240×70; 60×20 still works.
+- `update`, `uninstall` and `doctor` use the same look at a terminal.
+- Piped output, CI and `TERM=dumb` print the plain lines as before; `NO_COLOR` keeps the layout
+  without colour.
+
+### Fixed
+
+- Saving an avatar from the phone failed on every installed computer ("Cannot find package
+  '@resvg/resvg-js'").
+- `bot-dm` refused to run inside a Claude Code bot or worker; its errors now print their message
+  instead of `[object Object]`.
+- A background task finishing inside Claude Code is shown as a task note, not as your own words.
+- The iPhone Live Activity no longer disappears and comes back every few seconds while the app is
+  open (needs the next app build for the app half).
+
 ## v0.1.10
 
 ### The pairing QR picture is gone within 10 minutes, whatever happens

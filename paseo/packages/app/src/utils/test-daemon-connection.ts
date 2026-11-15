@@ -19,7 +19,7 @@ import {
 } from "@/desktop/daemon/desktop-daemon-transport";
 import type { DesktopDaemonTransportTarget } from "@/desktop/daemon/desktop-daemon";
 import { directEndpointProblem } from "./direct-endpoint-policy";
-import { RELEASE_POLICY } from "@/constants/flavour";
+import { APP_LINK_SCHEME, RELEASE_POLICY } from "@/constants/flavour";
 import { directTcpE2eeConfig } from "./direct-e2ee";
 
 export interface DaemonProbeClient {
@@ -114,9 +114,21 @@ export class DaemonConnectionTestError extends Error {
   }
 }
 
-export function getConnectionAuthFailureReason(error: unknown): DaemonAuthFailureReason | null {
-  if (error instanceof DaemonConnectionTestError) return error.authFailureReason;
-  return getDaemonAuthFailureReason(error);
+/** What a refused one-use pairing code (QR2) tells the user. */
+export const PAIRING_CODE_USED_MESSAGE = `This pairing code has expired or was already used. On your computer, run \`${APP_LINK_SCHEME} pair\` for a new one.`;
+
+/**
+ * A password failure (ask for the password). A refused pairing code is not one: no password
+ * helps, the user needs a new code, so it stays a plain error with PAIRING_CODE_USED_MESSAGE.
+ */
+export function getConnectionAuthFailureReason(
+  error: unknown,
+): Exclude<DaemonAuthFailureReason, "pairing_ticket_invalid"> | null {
+  const reason =
+    error instanceof DaemonConnectionTestError
+      ? error.authFailureReason
+      : getDaemonAuthFailureReason(error);
+  return reason === "pairing_ticket_invalid" ? null : reason;
 }
 
 function resolveConnectionCredentials(
@@ -124,15 +136,20 @@ function resolveConnectionCredentials(
   options:
     | {
         password?: string;
+        pairingTicket?: string;
         localCredential?: DaemonClientConfig["localCredential"];
         sessionTokens?: DaemonClientConfig["sessionTokens"];
         featureCache?: DaemonClientConfig["featureCache"];
       }
     | undefined,
-): Pick<DaemonClientConfig, "password" | "localCredential" | "sessionTokens" | "featureCache"> {
+): Pick<
+  DaemonClientConfig,
+  "password" | "pairingTicket" | "localCredential" | "sessionTokens" | "featureCache"
+> {
   const password = options?.password;
   return {
     ...(password ? { password } : {}),
+    ...(options?.pairingTicket ? { pairingTicket: options.pairingTicket } : {}),
     ...(options?.localCredential ? { localCredential: options.localCredential } : {}),
     ...(options?.sessionTokens ? { sessionTokens: options.sessionTokens } : {}),
     ...(options?.featureCache ? { featureCache: options.featureCache } : {}),
@@ -157,6 +174,8 @@ export async function buildClientConfig(
     capabilities?: DaemonClientConfig["capabilities"];
     trace?: DaemonClientConfig["trace"];
     password?: string;
+    /** QR2: the one-use ticket of the pairing code being used (pairing probes only). */
+    pairingTicket?: string;
     localCredential?: DaemonClientConfig["localCredential"];
     /** The host connection's session token store, shared with its main client. */
     sessionTokens?: DaemonClientConfig["sessionTokens"];
@@ -298,9 +317,10 @@ export function connectAndProbe(
           const lastError = normalizeNonEmptyString(client.lastError);
           const authFailureReason =
             getDaemonAuthFailureReason(error) ?? client.authFailureReason ?? null;
-          const message = authFailureReason
+          let message = authFailureReason
             ? new DaemonAuthenticationError(authFailureReason).message
             : pickBestReason(reason, lastError);
+          if (authFailureReason === "pairing_ticket_invalid") message = PAIRING_CODE_USED_MESSAGE;
           void client.close().catch(() => undefined);
           reject(new DaemonConnectionTestError(message, { reason, lastError, authFailureReason }));
         });
@@ -312,6 +332,7 @@ interface ProbeOptions {
   serverId?: string;
   timeoutMs?: number;
   password?: string;
+  pairingTicket?: string;
   sessionTokens?: DaemonClientConfig["sessionTokens"];
   featureCache?: DaemonClientConfig["featureCache"];
   localCredential?: DaemonClientConfig["localCredential"];

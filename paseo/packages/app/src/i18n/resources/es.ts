@@ -2466,6 +2466,10 @@ export const es: TranslationResources = {
       },
     },
     host: {
+      pairing: {
+        guidance:
+          "Vuelve a emparejar: en tu ordenador, ejecuta `{{command}}` y escanea el nuevo código.",
+      },
       password: {
         guidance: "Elimina este host y vuelve a añadirlo con la contraseña que pide este daemon.",
       },

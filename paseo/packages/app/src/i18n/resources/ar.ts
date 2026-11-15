@@ -2412,6 +2412,9 @@ export const ar: TranslationResources = {
       },
     },
     host: {
+      pairing: {
+        guidance: "أعد الإقران: شغّل `{{command}}` على حاسوبك ثم امسح الرمز الجديد.",
+      },
       password: {
         guidance: "أزل هذا المضيف ثم أضفه مرة أخرى بكلمة المرور التي يطلبها هذا الخادم.",
       },

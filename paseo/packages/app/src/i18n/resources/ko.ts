@@ -2422,6 +2422,9 @@ export const ko: TranslationResources = {
       },
     },
     host: {
+      pairing: {
+        guidance: "다시 페어링하세요: 컴퓨터에서 `{{command}}`를 실행하고 새 코드를 스캔하세요.",
+      },
       password: {
         guidance: "이 호스트를 제거한 뒤 이 데몬이 요구하는 비밀번호로 다시 추가하세요.",
       },

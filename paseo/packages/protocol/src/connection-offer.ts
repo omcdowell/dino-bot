@@ -42,6 +42,8 @@ export const DirectConnectionOfferSchema = z.object({
   endpoints: z.array(z.string().min(1)).min(1),
   useTls: z.boolean().optional(),
   password: z.string().min(1).optional(),
+  // QR2: a one-use pairing ticket (10 minutes, one device). Old apps ignore it.
+  pairingTicket: z.string().min(1).max(256).optional(),
   tsLoginUrl: z.string().url().optional(),
 });
 

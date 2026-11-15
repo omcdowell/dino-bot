@@ -20,6 +20,7 @@ import { openGroupScreen } from "./group-nav";
 import type { RoomSummary } from "./group-types";
 import { rowWorkerCount, showWorkerCount, statusText, type BotStatus } from "./status";
 import { accentText } from "./accent";
+import { maybeOpenDmsForNewBot, seedSeenBots, seenStore } from "./dms-default";
 
 export { BOTS_QUERY_KEY, BOTS_WORKERS_KEY, BOTS_QUIET_KEY } from "./bot-data";
 
@@ -207,6 +208,11 @@ export function BotsSidebarItem({ theme, layout, currentScreen, openScreen, navi
   const now = useMinuteNow();
   const { groups } = useRoomsList();
   const { state: homeState } = useHomeState();
+  // DMs tab by default: bots listed on this client's first run are old; later ones get it once.
+  const botIds = bots.map((b) => b.id).join("\n");
+  useEffect(() => {
+    if (botIds) seedSeenBots(seenStore(), botIds.split("\n"));
+  }, [botIds]);
   if (!bots.length) return null;
   // Same order as the phone home: The Fat Controller pinned on top, then bots and group chats
   // together, newest activity first (a group's time is its last room message).
@@ -231,6 +237,9 @@ export function BotsSidebarItem({ theme, layout, currentScreen, openScreen, navi
       openChat: (botId) => openChat({ botId }),
       onCreated: () => void queryClient.invalidateQueries({ queryKey: BOTS_QUERY_KEY }),
       onStarting: (b) => toast.show(startingLabel(b.name)),
+      afterOpen: (b, agentId) => {
+        if (!dmsRows) maybeOpenDmsForNewBot(b.id, agentId);
+      },
     });
   const row = (bot: Bot) => {
     const summary = summaries.get(bot.id);

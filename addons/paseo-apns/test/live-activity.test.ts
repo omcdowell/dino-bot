@@ -457,3 +457,53 @@ test("endpoint: POST /live-activity needs the bearer and a valid body", async (t
 });
 
 void TOKEN_B;
+
+// la-vanish (LV1 §4 fixes 5-6): an idle blip shorter than the push window must not make the open
+// app end its activity, and every sync leaves one log row.
+test("idle blip: a sync inside MIN_INTERVAL_MS of going idle answers the last busy state and keeps the activity; no start after", async (t) => {
+  const s = await service(t);
+  await withActivity(s);
+  s.la.setBots([]);
+  await s.step(500);
+  const out = sync(s, [{ id: "act-1", token: ACT }]);
+  assert.notEqual(out.state, null, "a sub-window idle is not idle yet");
+  assert.equal(out.state!.bots[0]!.id, "seed");
+  assert.equal(s.la.status().activities, 1, "the install keeps its activity");
+  s.la.setBots([bot("seed")]);
+  await s.step(MIN_INTERVAL_MS);
+  const events = logOf(s.dir).map((e) => e.event);
+  assert.equal(events.filter((e) => e === "la-start" || e === "la-end").length, 0, "no start, no end");
+  assert.equal(s.seen.length, 0, "the blip settled back: nothing pushed");
+});
+
+test("idle: once idle has lasted MIN_INTERVAL_MS the sync answers null and the activities are cleared", async (t) => {
+  const s = await service(t);
+  await withActivity(s);
+  s.la.setBots([]);
+  await s.step(MIN_INTERVAL_MS);
+  const out = sync(s, [{ id: "act-1", token: ACT }]);
+  assert.equal(out.state, null);
+  assert.equal(s.la.status().activities, 0);
+});
+
+test("sync log: every sync appends one la-sync row with what the app reported and what it was answered", async (t) => {
+  const s = await service(t);
+  sync(s, []);
+  sync(s, []);
+  s.la.setBots([bot("a")]);
+  sync(s, [{ id: "act-1", token: ACT }]);
+  s.svc.liveActivitySync({ installId: "install-1", environment: "development", topic: "com.example.app", startToken: START, activities: [], ends: ["2026-10-11T07:00:00.000Z endOthers:act-0 keep:act-1"] });
+  const rows = logOf(s.dir).filter((e) => e.event === "la-sync");
+  assert.equal(rows.length, 4, "one row per sync, token change or not");
+  assert.deepEqual(rows.map((r) => [r.reported, r.busy, r.answer]), [[0, 0, "null"], [0, 0, "null"], [1, 1, "busy"], [0, 1, "busy"]]);
+  assert.deepEqual(rows[3]!.ends, ["2026-10-11T07:00:00.000Z endOthers:act-0 keep:act-1"]);
+  assert.equal("ends" in rows[0]!, false, "no ends field when the app sent none");
+});
+
+test("sync RPC: accepts an optional ends list (app diagnostics), bounded", () => {
+  const base = { installId: "install-1", environment: "development", topic: "com.example.app", startToken: null, activities: [] };
+  assert.ok(liveActivitySyncRpc.input.safeParse(base).success);
+  assert.ok(liveActivitySyncRpc.input.safeParse({ ...base, ends: ["x"] }).success);
+  assert.equal(liveActivitySyncRpc.input.safeParse({ ...base, ends: Array.from({ length: 40 }, () => "x") }).success, false);
+  assert.equal(liveActivitySyncRpc.input.safeParse({ ...base, ends: ["x".repeat(500)] }).success, false);
+});

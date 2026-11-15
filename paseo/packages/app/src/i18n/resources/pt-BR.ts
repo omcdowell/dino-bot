@@ -2448,6 +2448,9 @@ export const ptBR: TranslationResources = {
       },
     },
     host: {
+      pairing: {
+        guidance: "Pareie de novo: no computador, execute `{{command}}` e escaneie o novo código.",
+      },
       password: {
         guidance: "Remova este host e adicione-o novamente com a senha que este daemon pede.",
       },

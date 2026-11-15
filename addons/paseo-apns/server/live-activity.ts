@@ -9,11 +9,15 @@
  *     (rate-limit.ts, restored from "sent" only) neither counts nor blocks them.
  *
  * Flow:
- *   - The bots plugin POSTs the busy set to /live-activity whenever it changes (it debounces 5 s).
+ *   - The bots plugin POSTs the busy set to /live-activity whenever it changes (it checks every
+ *     second and does not debounce; the MIN_INTERVAL_MS window below is the only debounce).
  *   - The app calls the `live-activity.sync` RPC on every connect and token change with its install
  *     id, its push-to-start token and the activities it has (id + update token). The answer is the
  *     current state, which the app applies locally (start/update/end), so an open app never waits
- *     for a push. It also reports the phone's light/dark setting, which goes into the content state
+ *     for a push. An idle that has not lasted MIN_INTERVAL_MS yet is answered with the last busy
+ *     state, not null: a busy-set blip must not make the open app end its activity (la-vanish).
+ *     Every sync is logged (`la-sync`: what the app reported, what it was answered, and the app's
+ *     recent activity-end reasons when it sends them). It also reports the phone's light/dark setting, which goes into the content state
  *     of that install's pushes (`appearance`): on iOS 26 the widget cannot see it itself. Likewise
  *     its Lock Screen dino setting (`dinoLayers`, 3 or 6 fps): the widget cannot read the app's copy
  *     on the phone, so a push without it would draw 3 fps until the app next updates the card.
@@ -48,6 +52,9 @@ export const MAX_ROWS = 12;
 const NAME_CHARS = 40;
 const MAX_ACTIVITIES_PER_INSTALL = 4;
 const MAX_INSTALLS = 10;
+/** The app's end reasons kept per sync log row (shared/rpc.ts bounds the input the same). */
+export const MAX_ENDS = 16;
+export const MAX_END_CHARS = 160;
 
 export type LaBot = {
   id: string;
@@ -184,6 +191,8 @@ export interface SyncInput {
   appearance?: LaAppearance | null;
   /** Absent or null: keep the last one reported. */
   dinoLayers?: LaDinoLayers | null;
+  /** The app's recent activity-end reasons (diagnostics, la-vanish); logged, nothing else. */
+  ends?: string[];
 }
 
 export interface SyncOutput {
@@ -224,6 +233,9 @@ export class LiveActivityService {
   private readonly timers: Timers;
   private readonly minIntervalMs: number;
   private desired: LaState = { bots: [], more: 0 };
+  /** The busy state before the set went idle, and since when it is idle (ms); null while busy. */
+  private lastBusy: LaState | null = null;
+  private idleSince: number | null = null;
   private lastFlushAt = -Infinity;
   private timer: unknown = null;
   private timerAt: number | null = null;
@@ -253,8 +265,26 @@ export class LiveActivityService {
   setBots(bots: LaBot[]): { changed: boolean; flushAt: string | null } {
     const next = normaliseState(bots);
     if (stateHash(next) === stateHash(this.desired)) return { changed: false, flushAt: null };
+    if (next.bots.length === 0 && this.desired.bots.length > 0) {
+      this.lastBusy = this.desired;
+      this.idleSince = this.now();
+    } else if (next.bots.length > 0) {
+      this.lastBusy = null;
+      this.idleSince = null;
+    }
     this.desired = next;
     return { changed: true, flushAt: new Date(this.schedule()).toISOString() };
+  }
+
+  /**
+   * What a sync answers: the busy set, or while it has been idle for less than the push window the
+   * last busy state (flush() sends the end once the window is over; a blip that settles back sends
+   * nothing), else null.
+   */
+  private answerState(now: number): LaState | null {
+    if (this.busy) return this.desired;
+    if (this.lastBusy && this.idleSince !== null && now - this.idleSince < this.minIntervalMs) return this.lastBusy;
+    return null;
   }
 
   /** The app's view: registers its tokens and activities; answers with the state to show. */
@@ -262,11 +292,12 @@ export class LiveActivityService {
     const installs = this.store.read();
     const now = this.now();
     const held = installs[input.installId];
-    const busy = this.busy;
+    const shown = this.answerState(now);
+    const busy = shown !== null;
     const appearance = input.appearance ?? held?.appearance ?? null;
     const dinoLayers = input.dinoLayers ?? held?.dinoLayers ?? null;
     // The app applies the answer with its own appearance and dino setting, which it just reported.
-    const hash = busy ? stateHash(contentFor(this.desired, { appearance, dinoLayers })) : null;
+    const hash = shown ? stateHash(contentFor(shown, { appearance, dinoLayers })) : null;
     const known = new Map((held?.activities ?? []).map((a) => [a.id, a]));
     const activities: LaActivity[] = input.activities.slice(0, MAX_ACTIVITIES_PER_INSTALL).map((a) => {
       const prev = known.get(a.id);
@@ -289,16 +320,19 @@ export class LiveActivityService {
       dinoLayers,
     };
     this.write(installs);
-    const changedTokens =
-      held?.startToken !== startToken || activities.some((a) => known.get(a.id)?.token !== a.token);
-    if (changedTokens) {
-      this.deps.log.append("la-sync", {
-        install: input.installId.slice(0, 8),
-        startToken: startToken ? tokenTail(startToken) : null,
-        activities: activities.map((a) => ({ id: a.id.slice(0, 8), token: a.token ? tokenTail(a.token) : null })),
-      });
-    }
-    return busy ? { state: this.desired, staleDate: Math.floor(now / 1000) + STALE_AFTER_S } : { state: null, staleDate: null };
+    // One row per sync (la-vanish): an open app that keeps losing its activity shows here as
+    // null answers (idle, or another host) or as busy answers followed by `reported: 0`.
+    const ends = (input.ends ?? []).slice(0, MAX_ENDS).map((e) => String(e).slice(0, MAX_END_CHARS));
+    this.deps.log.append("la-sync", {
+      install: input.installId.slice(0, 8),
+      startToken: startToken ? tokenTail(startToken) : null,
+      activities: activities.map((a) => ({ id: a.id.slice(0, 8), token: a.token ? tokenTail(a.token) : null })),
+      reported: input.activities.length,
+      busy: this.desired.bots.length + this.desired.more,
+      answer: shown === null ? "null" : this.busy ? "busy" : "idle-grace",
+      ...(ends.length ? { ends } : {}),
+    });
+    return shown ? { state: shown, staleDate: Math.floor(now / 1000) + STALE_AFTER_S } : { state: null, staleDate: null };
   }
 
   status() {

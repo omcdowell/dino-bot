@@ -6,7 +6,7 @@
  * `.home.json.bak` before each write; .bot.json and avatar.png keep a `.bak` of the version they
  * replace.
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
@@ -25,7 +25,8 @@ import {
 import { BOT_ID_RE } from "../shared/rooms/schema";
 import { agentsMdFor } from "../shared/templates";
 import { readSettingsAt, type HostModels, type ModelPick } from "./settings";
-import { AVATAR_PACK, AvatarJsonSchema, parseAvatar, type AvatarJson } from "../shared/avatar";
+import { parseRunner, resolveRunner, type CompactorRunner } from "./cc/compactor-runner";
+import { AVATAR_PACK, AvatarJsonSchema, parseAvatar, randomDefaultAvatar, type AvatarJson } from "../shared/avatar";
 import {
   AVATAR_JSON_FILE,
   AVATAR_PNG_SIZE,
@@ -184,6 +185,10 @@ export interface BotFilesOptions {
   optchatHome?: string;
   /** SVG -> PNG for designed avatars (default: resvg-js, loaded on first use). */
   renderer?: () => Promise<AvatarRenderer>;
+  /** Picks the default avatar of a bot created without one (DA1; default Math.random). */
+  random?: () => number;
+  /** pi's folder (sign-ins in auth.json) for the compactor a bot gets before setup chose one (signInCompactor). */
+  piAgentDir?: string;
 }
 
 /**
@@ -191,6 +196,37 @@ export interface BotFilesOptions {
  * (setup's "Choose models", settings `models.compaction`) names a compactor.
  */
 export const DEFAULT_COMPACTOR = { provider: "anthropic", model: "claude-sonnet-5-5", thinking: "medium" } as const;
+
+/**
+ * The compactor a new bot gets when the host has none chosen yet (setup's "Choose models" not done), from what is
+ * signed in (the owner, 15 Nov: "default compactor model should be sonnet 5.5 medium if claude, sol 6.1 low if
+ * chatgpt. anything else is not common enough to need defaults we can just let the user choose"):
+ *   a bot on Claude Code (optchat-cc), or pi signed in to Anthropic   Sonnet 5.5, medium
+ *   pi signed in to ChatGPT (openai-codex)                            GPT-6.1 Sol, low
+ *   anything else                                                     none: the user picks (no config.json yet)
+ * Claude first when both are signed in (as pi-optchat's model-defaults.ts PREFERENCE).
+ */
+export const CLAUDE_COMPACTOR: CompactorChoice = { provider: "anthropic", model: "claude-sonnet-5-5", thinking: "medium" };
+export const CHATGPT_COMPACTOR: CompactorChoice = { provider: "openai-codex", model: "gpt-6.1-sol", thinking: "low" };
+
+/** Providers pi is signed in to: the keys of auth.json in pi's folder (PI_CODING_AGENT_DIR, else ~/.pi/agent). */
+export function piSignIns(piAgentDir: string): string[] {
+  try {
+    const auth = JSON.parse(readFileSync(join(piAgentDir, "auth.json"), "utf8")) as unknown;
+    return auth && typeof auth === "object" && !Array.isArray(auth) ? Object.keys(auth) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function signInCompactor(input: { chatProvider?: string | null; piSignIns: readonly string[] }): CompactorChoice | null {
+  const cc = !!input.chatProvider && (input.chatProvider === "optchat-cc" || input.chatProvider.startsWith("optchat-cc/"));
+  if (cc || input.piSignIns.includes("anthropic")) return { ...CLAUDE_COMPACTOR };
+  if (input.piSignIns.includes("openai-codex")) return { ...CHATGPT_COMPACTOR };
+  return null;
+}
+
+export const defaultPiAgentDir = (env: NodeJS.ProcessEnv = process.env) => env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent");
 
 /** A settings ModelPick as an OptChat ModelChoice (a model without effort runs with "off"). */
 export function choiceOf(pick: ModelPick | null): CompactorChoice | null {
@@ -214,6 +250,19 @@ export interface CompactorChoice {
   thinking: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 }
 
+/**
+ * Where a Claude Code bot's summaries run (FF1, server/cc/compactor-runner.ts): `runner` is the bot's own setting
+ * (profile config.json `compactorRunner`, "auto" when it has none), `effectiveRunner` what that means now (with the
+ * model and the host default), `ccBot` whether the bot runs on Claude Code (it has a Claude Code engine state).
+ */
+export type RunnerSetting = "auto" | CompactorRunner;
+export interface CompactorRunnerInfo {
+  runner: RunnerSetting;
+  effectiveRunner: CompactorRunner;
+  ccBot: boolean;
+  hostRunner: CompactorRunner | null;
+}
+
 function compactorOf(value: unknown): CompactorChoice | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
@@ -226,12 +275,16 @@ export class BotFiles {
   private readonly root: string;
   private readonly optchatHome: string;
   private readonly renderer: () => Promise<AvatarRenderer>;
+  private readonly random: () => number;
+  private readonly piAgentDir: string;
   /** avatar.json saves run one at a time per bot, so the revision check and the writes cannot interleave. */
   private readonly avatarTails = new Map<string, Promise<unknown>>();
   constructor(options: BotFilesOptions) {
     this.root = options.root;
     this.renderer = options.renderer ?? resvgRenderer;
+    this.random = options.random ?? Math.random;
     this.optchatHome = resolve(options.optchatHome ?? process.env.OPTCHAT_HOME ?? join(homedir(), ".optchat"));
+    this.piAgentDir = options.piAgentDir ?? defaultPiAgentDir();
   }
 
   private botDir(botId: string): string {
@@ -277,21 +330,34 @@ export class BotFiles {
     await atomicWrite(path, text, await modeOf(path, 0o600));
   }
 
-  /** The profile's compactor (config.json), or pi-optchat's default when there is none. */
-  async compactor(botId: string): Promise<CompactorChoice & { isDefault: boolean }> {
+  /** The profile's compactor (config.json), or pi-optchat's default when there is none; and where it runs. */
+  async compactor(botId: string): Promise<CompactorChoice & { isDefault: boolean } & CompactorRunnerInfo> {
     const path = join(await this.profileDir(botId), "config.json");
     let raw: unknown;
     try {
       raw = JSON.parse(await readFile(path, "utf8"));
     } catch {
-      return { ...this.hostCompactor(), isDefault: true };
+      return this.withRunner(botId, { ...(await this.hostCompactor(botId)), isDefault: true }, null);
     }
-    const choice = compactorOf((raw as Record<string, unknown> | null)?.compactor);
-    return choice ? { ...choice, isDefault: false } : { ...this.hostCompactor(), isDefault: true };
+    const record = raw as Record<string, unknown> | null;
+    const choice = compactorOf(record?.compactor);
+    const bot = parseRunner(record?.compactorRunner);
+    return this.withRunner(botId, choice ? { ...choice, isDefault: false } : { ...(await this.hostCompactor(botId)), isDefault: true }, bot);
   }
 
-  private hostCompactor(): CompactorChoice {
-    return choiceOf(readSettingsAt(this.root).models.compaction) ?? { ...DEFAULT_COMPACTOR };
+  private withRunner<T extends CompactorChoice>(botId: string, choice: T, bot: CompactorRunner | null): T & CompactorRunnerInfo {
+    const host = readSettingsAt(this.root).compactorRunner;
+    const { runner } = resolveRunner({ bot, compactor: choice, host });
+    return { ...choice, runner: bot ?? "auto", effectiveRunner: runner, ccBot: existsSync(join(this.root, ".cc", botId, "engine.json")), hostRunner: host };
+  }
+
+  /** The host's compactor (setup), else the sign-in default for this bot (signInCompactor), else pi-optchat's own. */
+  private async hostCompactor(botId: string): Promise<CompactorChoice> {
+    const chat = (await this.readMeta(botId)).chat as { provider?: unknown } | undefined;
+    return (
+      choiceOf(readSettingsAt(this.root).models.compaction) ??
+      signInCompactor({ chatProvider: typeof chat?.provider === "string" ? chat.provider : null, piSignIns: piSignIns(this.piAgentDir) }) ?? { ...DEFAULT_COMPACTOR }
+    );
   }
 
   /**
@@ -300,7 +366,7 @@ export class BotFiles {
    * that does not parse is refused, never replaced. pi-optchat (feat/model-scope) re-reads it on
    * the next summary; older pi-optchat on the next start of the bot.
    */
-  async setCompactor(botId: string, choice: CompactorChoice): Promise<CompactorChoice & { isDefault: boolean }> {
+  async setCompactor(botId: string, choice: CompactorChoice, runner?: RunnerSetting): Promise<CompactorChoice & { isDefault: boolean } & CompactorRunnerInfo> {
     const next = compactorOf(choice);
     if (!next) throw new ManageError("Pick a model and a thinking level.");
     const dir = await this.profileDir(botId);
@@ -329,8 +395,12 @@ export class BotFiles {
       config.compactor = next;
       await copyFile(path, `${path}.bak`);
     }
+    // The runner (FF1): "auto" removes the key, a runner sets it, none given leaves it as it is.
+    if (runner === "auto") delete config.compactorRunner;
+    else if (runner === "in-session" || runner === "pi") config.compactorRunner = runner;
+    else if (runner !== undefined) throw new ManageError(`Not a compactor runner: ${String(runner)}`);
     await atomicWrite(path, `${JSON.stringify(config, null, 2)}\n`, await modeOf(path, 0o600));
-    return { ...next, isDefault: false };
+    return this.withRunner(botId, { ...next, isDefault: false }, parseRunner(config.compactorRunner));
   }
 
   private async readMeta(botId: string): Promise<Record<string, unknown>> {
@@ -457,17 +527,31 @@ export class BotFiles {
       const parsed = parseAvatar(input.avatarJson, AVATAR_PACK);
       if (!parsed.ok) throw new ManageError(`The avatar is not valid: ${parsed.error}`);
       designed = { avatar: parsed.avatar, rendered: await renderAvatar(parsed.avatar, await this.renderer()) };
+    } else if (!input.avatar) {
+      // DA1: no picture and no design: one of the pack's characters at random, in its default look (own colours, own
+      // accessory), saved as a phone save is (revision 0, so the app's own save right after create replaces it).
+      const fallback = randomDefaultAvatar(AVATAR_PACK, this.random);
+      try {
+        designed = { avatar: fallback, rendered: await renderAvatar(fallback, await this.renderer()) };
+      } catch {
+        designed = null; // no resvg on this host: the bot is still made, and bots.list shows a stable default
+      }
     }
     const avatar = designed ? designed.rendered.pngs[AVATAR_PNG_SIZE] : input.avatar ? decodePng(input.avatar) : null;
-    if (input.chat && !input.chat.provider.startsWith("optchat/")) throw new ManageError("Pick an OptChat model.");
+    // OptChat on pi (optchat/<model>) or on Claude Code (optchat-cc, optchat-cc/<model>: server/cc/provider.ts).
+    const chatOk = (p: string) => p.startsWith("optchat/") || p === "optchat-cc" || p.startsWith("optchat-cc/");
+    if (input.chat && !chatOk(input.chat.provider)) throw new ManageError("Pick an OptChat model.");
     const body = input.agentsMd?.trim() ? input.agentsMd : agentsMdFor({ name, template: input.template, purpose: input.purpose });
     // Only the bot's own text: the bot-dm, worker, room and house rules are the "DinoBot bot" prompt section (bot-prompt.ts).
     const agentsMd = body.endsWith("\n") ? body : `${body}\n`;
     await mkdir(profile, { recursive: true, mode: 0o700 });
     await atomicWrite(join(profile, "AGENTS.md"), agentsMd);
-    // The host's compaction and worker models (setup), so a new bot never falls back to a fixed model.
+    // The host's compaction and worker models (setup), so a new bot never falls back to a fixed model; before setup
+    // chose them, the sign-in default (Claude: Sonnet 5.5 medium, ChatGPT: GPT-6.1 Sol low; else none, the user picks).
     // `setup: true`: copied from the host, so a later "Choose models" updates it (onboarding.applyToBots).
-    const hostConfig = hostProfileConfig(readSettingsAt(this.root).models);
+    const hostModels = readSettingsAt(this.root).models;
+    const signedIn = signInCompactor({ chatProvider: input.chat?.provider ?? null, piSignIns: piSignIns(this.piAgentDir) });
+    const hostConfig = hostProfileConfig(hostModels) ?? (signedIn ? { compactor: signedIn, subagent: choiceOf(hostModels.workers) ?? signedIn } : null);
     if (hostConfig) await atomicWrite(join(profile, "config.json"), `${JSON.stringify({ ...hostConfig, setup: true }, null, 2)}\n`, 0o600);
     await mkdir(join(dir, "dm"), { recursive: true, mode: 0o700 });
     if (avatar && !designed) await atomicWrite(join(dir, "avatar.png"), avatar, 0o644);

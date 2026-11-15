@@ -86,6 +86,17 @@ export function setDefaultChatModel(model: string | null, thinking: string | nul
   defaultThinking = thinking;
 }
 
+/** Provider of bots on Claude Code (server/cc/provider.ts). */
+export const CC_CHAT_PROVIDER = "optchat-cc";
+let claudeCodeReady: () => Promise<boolean> = async () => false;
+/**
+ * Whether new bot chats with no model chosen run on Claude Code: true when the host's Claude Code is logged in with a
+ * plan (server/cc/launch.ts claudePlanReady). A host with a pi model chosen (setup's "Choose models") keeps pi.
+ */
+export function setClaudeCodeReady(check: () => Promise<boolean>): void {
+  claudeCodeReady = check;
+}
+
 /** Config for a new bot chat when no "bot" agent profile names a model. */
 export function defaultChatConfig(): ChatConfig {
   return defaultModel
@@ -226,6 +237,11 @@ export async function chatConfig(paseo: Pick<BotsPaseo, "config">): Promise<Chat
  * app. Null when the chat is not OptChat or reports no model.
  */
 export function carriedChatConfig(agent: AgentLike | undefined): ChatConfig | null {
+  if (agent?.provider === CC_CHAT_PROVIDER) {
+    const model = agent.runtimeInfo?.model || agent.model;
+    const thinking = agent.effectiveThinkingOptionId || agent.runtimeInfo?.thinkingOptionId || agent.thinkingOptionId;
+    return { provider: model ? `${CC_CHAT_PROVIDER}/${model}` : CC_CHAT_PROVIDER, ...(thinking ? { thinkingOptionId: thinking } : {}) };
+  }
   if (!agent || agent.provider !== OPTCHAT_PROVIDER) return null;
   const model = agent.runtimeInfo?.model || agent.model;
   if (!model) return null;
@@ -238,7 +254,8 @@ export async function botChatConfig(cwd: string): Promise<ChatConfig | null> {
   try {
     const meta = JSON.parse(await readFile(join(cwd, META_FILE), "utf8")) as { chat?: unknown };
     const chat = meta.chat as { provider?: unknown; thinkingOptionId?: unknown } | undefined;
-    if (!chat || typeof chat.provider !== "string" || !chat.provider.startsWith(`${OPTCHAT_PROVIDER}/`)) return null;
+    const ok = (p: string) => p === CC_CHAT_PROVIDER || p.startsWith(`${CC_CHAT_PROVIDER}/`) || p.startsWith(`${OPTCHAT_PROVIDER}/`);
+    if (!chat || typeof chat.provider !== "string" || !ok(chat.provider)) return null;
     return {
       provider: chat.provider,
       ...(typeof chat.thinkingOptionId === "string" && chat.thinkingOptionId ? { thinkingOptionId: chat.thinkingOptionId } : {}),
@@ -250,8 +267,11 @@ export async function botChatConfig(cwd: string): Promise<ChatConfig | null> {
 
 export async function createChat(bot: Bot, paseo: BotsPaseo, carried?: ChatConfig | null): Promise<string> {
   const workspace = await paseo.workspaces.open(bot.cwd);
+  let config = carried ?? (await botChatConfig(bot.cwd)) ?? (await chatConfig(paseo));
+  // No model chosen anywhere (a fresh host that logged in to Claude Code only): the bot runs on Claude Code.
+  if (config === DEFAULT_CHAT_CONFIG && (await claudeCodeReady().catch(() => false))) config = { provider: CC_CHAT_PROVIDER };
   const agent = await workspace.agents.create({
-    config: carried ?? (await botChatConfig(bot.cwd)) ?? (await chatConfig(paseo)),
+    config,
     title: bot.name,
     labels: { [BOT_LABEL]: bot.id, [SEND_BEHAVIOR_LABEL]: "queue", [KEEP_LIVE_LABEL]: "1" },
   });

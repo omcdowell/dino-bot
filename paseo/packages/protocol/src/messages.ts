@@ -8055,6 +8055,9 @@ export const WSHelloMessageSchema = z.object({
       // A per-device session token the daemon issued after an earlier password check
       // (client capability session_tokens, frame session.token).
       z.object({ kind: z.literal("sessionToken"), token: z.string().max(256) }),
+      // A one-use pairing ticket from the pairing QR (QR2): admits the device once and gets it a
+      // device token. Old daemons reject it as an invalid hello.
+      z.object({ kind: z.literal("pairingTicket"), ticket: z.string().max(256) }),
     ])
     .optional(),
   appVersion: z.string().optional(),
@@ -8063,6 +8066,7 @@ export const WSHelloMessageSchema = z.object({
       voice: z.boolean().optional(),
       [CLIENT_CAPS.helloRejection]: z.boolean().optional(),
       [CLIENT_CAPS.sessionTokens]: z.boolean().optional(),
+      [CLIENT_CAPS.deviceTokens]: z.boolean().optional(),
       [CLIENT_CAPS.prioritySync]: z.boolean().optional(),
       [CLIENT_CAPS.compactV2]: z.boolean().optional(),
       // compact_v2: hash of the server_info feature map the client holds (A1).
@@ -8127,6 +8131,9 @@ export const WSHelloRejectedMessageSchema = z.object({
     // Only for a hello that presented a session token: the token is unknown, expired or revoked.
     // Not an authentication failure: the client drops the token and reconnects with the password.
     "session_token_invalid",
+    // Only for a hello that presented a pairing ticket: unknown, expired, or used by another
+    // device. The user needs a new pairing code (`dinobot pair`).
+    "pairing_ticket_invalid",
   ]),
   accepts: z.array(z.literal("password")),
 });
@@ -8140,6 +8147,9 @@ export const WSSessionTokenMessageSchema = z.object({
   type: z.literal("session.token"),
   token: z.string().min(1).max(256),
   expiresAt: z.number().int(),
+  // A long-lived device token (client capability device_tokens): the client may forget the
+  // password it holds for this host once it has one.
+  device: z.literal(true).optional(),
 });
 
 // Complete WebSocket message schemas
@@ -8160,6 +8170,7 @@ export const WSOutboundMessageSchema = z.discriminatedUnion("type", [
 export type WSInboundMessage = z.infer<typeof WSInboundMessageSchema>;
 export type WSOutboundMessage = z.infer<typeof WSOutboundMessageSchema>;
 export type WSHelloMessage = z.infer<typeof WSHelloMessageSchema>;
+export type WSHelloRejectedMessage = z.infer<typeof WSHelloRejectedMessageSchema>;
 
 // ============================================================================
 // Helper functions for message conversion

@@ -18,6 +18,7 @@ describe("compact hello capabilities (HS1)", () => {
     expect(CLIENT_CAPABILITY_BITS[0]).toBe("hello_rejection");
     expect(CLIENT_CAPABILITY_BITS[23]).toBe("priority_sync");
     expect(CLIENT_CAPABILITY_BITS[24]).toBe("compact_v2");
+    expect(CLIENT_CAPABILITY_BITS[25]).toBe("device_tokens");
   });
 
   test("round trip: true bits compact, everything else kept", () => {
@@ -29,7 +30,7 @@ describe("compact hello capabilities (HS1)", () => {
       voice: true,
     };
     const { cb, rest } = encodeCompactCapabilities(input);
-    expect(cb).toBe("1dfffff"); // zstd_frames is bit 21, compact_v2 bit 24
+    expect(cb).toBe("3dfffff"); // zstd_frames is bit 21, compact_v2 bit 24, device_tokens 25
     expect(rest).toEqual({ [CLIENT_CAPS.browserHost]: browser, voice: true });
     const decoded = decodeCompactCapabilities(cb);
     expect(decoded[CLIENT_CAPS.zstdFrames]).toBeUndefined();

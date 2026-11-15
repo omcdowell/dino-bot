@@ -26,6 +26,8 @@ export interface BotPromptOptions {
   workers: boolean;
   /** The bot has a seat in at least one group chat: include the room rules. */
   rooms: boolean;
+  /** Where the bot's own instructions (its OptChat profile's AGENTS.md) live; named so it never looks in its folder. */
+  instructions?: string | null;
 }
 
 export function botPromptText(o: BotPromptOptions): string {
@@ -34,7 +36,7 @@ export function botPromptText(o: BotPromptOptions): string {
   const parts = [
     "# DinoBot bot",
     "",
-    `You are one of ${u}'s bots, each with its own chat. These rules hold for every bot; your own instructions follow.`,
+    `You are one of ${u}'s bots, each with its own chat. These rules hold for every bot; your own instructions follow${o.instructions ? ` (they are the file \`${o.instructions}\`, not a file in your folder)` : ""}.`,
     "",
     "## Messages",
     "",
@@ -56,9 +58,9 @@ export function botPromptText(o: BotPromptOptions): string {
       "",
       "## Workers",
       "",
-      `Herdr workers run pi on the model ${u} chose for workers: start them with \`pi --model "$BOTS_WORKER_MODEL"\` (another model only when ${u} asks), and start their names with \`${o.botId}-\`. Tell every worker to report back with \`bot-dm ${o.botId} --from worker:<name> --kind report --text "..."\` and then stop. Right after \`herdr agent start <name> ...\` and its first prompt, run \`bot-worker add <name>\` in your own shell, not in the worker's pane; your row then shows "waiting for workers" until the worker reports, goes idle or closes. If you stop waiting on a worker that has not reported, run \`bot-worker done <name>\`.`,
+      `Herdr workers run on the engine (Claude Code or pi) and model ${u} chose for workers; the \`workers\` skill's launch.sh picks them for you (another engine or model only when ${u} asks). Start their names with \`${o.botId}-\`. Tell every worker to report back with \`bot-dm ${o.botId} --from worker:<name> --kind report --text "..."\` and then stop. Right after \`herdr agent start <name> ...\` and its first prompt, run \`bot-worker add <name>\` in your own shell, not in the worker's pane; your row then shows "waiting for workers" until the worker reports, goes idle or closes. If you stop waiting on a worker that has not reported, run \`bot-worker done <name>\`.`,
       "",
-      "To brief, start, steer, check or close herdr workers, use the `workers` skill (its launch.sh starts one: workspace per project, tab per task).",
+      "To brief, start, steer, check or close herdr workers, use the `workers` skill (its launch.sh starts one: workspace per project, tab per task). It also says how to change the default engine or model for your workers when asked.",
     );
   if (o.rooms)
     parts.push(
@@ -121,6 +123,8 @@ export interface BotPromptsDeps {
   herdr: () => boolean;
   /** Ids of the bots that have a seat in some group. */
   seated: () => Set<string>;
+  /** OptChat's data home (OPTCHAT_HOME, else ~/.optchat): the bots' AGENTS.md is `<home>/profiles/<profile>/AGENTS.md`. */
+  optchatHome?: string;
 }
 
 /** Keeps every bot's section file current. */
@@ -132,7 +136,19 @@ export class BotPrompts {
 
   text(botId: string, seated = this.deps.seated(), workers = this.deps.herdr()): string {
     const { settings } = this.deps;
-    return botPromptText({ botId, user: settings.user.name, escalation: settings.escalation, workers, rooms: seated.has(botId) });
+    return botPromptText({ botId, user: settings.user.name, escalation: settings.escalation, workers, rooms: seated.has(botId), instructions: this.instructionsPath(botId) });
+  }
+
+  /** The bot's AGENTS.md (its profile's, named by `.optchat-profile`), or null without an OptChat home or profile. */
+  instructionsPath(botId: string): string | null {
+    if (!this.deps.optchatHome) return null;
+    let profile = "";
+    try {
+      profile = readFileSync(join(this.deps.root, botId, ".optchat-profile"), "utf8").trim();
+    } catch {
+      return null;
+    }
+    return /^[a-z0-9][a-z0-9_-]{0,63}$/.test(profile) ? join(this.deps.optchatHome, "profiles", profile, "AGENTS.md") : null;
   }
 
   write(botId: string): string {

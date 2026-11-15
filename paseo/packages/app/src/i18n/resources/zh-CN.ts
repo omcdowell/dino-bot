@@ -2384,6 +2384,9 @@ export const zhCN: TranslationResources = {
       },
     },
     host: {
+      pairing: {
+        guidance: "重新配对：在电脑上运行 `{{command}}`，然后扫描新的代码。",
+      },
       password: {
         guidance: "移除此主机，然后使用此守护进程要求的密码重新添加。",
       },

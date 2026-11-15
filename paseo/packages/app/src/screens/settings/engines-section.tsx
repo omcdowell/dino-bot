@@ -267,12 +267,15 @@ function CardHeader({
   glyph,
   glyphStyle,
   title,
+  recommended,
   status,
   testID,
 }: {
   glyph: string;
   glyphStyle: "pi" | "claude";
   title: string;
+  /** "(recommended)" in green after the title (Claude Code; matches first-run sign-in, LO1). */
+  recommended?: boolean;
   status: { ok: boolean; text: string };
   testID: string;
 }) {
@@ -284,7 +287,15 @@ function CardHeader({
         </Text>
       </View>
       <View style={styles.text}>
-        <Text style={styles.cardTitle}>{title}</Text>
+        <Text style={styles.cardTitle}>
+          {title}
+          {recommended ? " " : null}
+          {recommended ? (
+            <Text style={styles.recommended} testID="engine-claude-recommended">
+              (recommended)
+            </Text>
+          ) : null}
+        </Text>
         <StatusLine ok={status.ok} text={status.text} testID={testID} />
       </View>
     </View>
@@ -309,7 +320,7 @@ function PiCardView({
   const [open, setOpen] = useState<string | null>(null);
   const added = card.packages.filter((p) => !p.bundled);
   return (
-    <View style={[settingsStyles.card, styles.heroSelected]} testID="engine-pi">
+    <View style={settingsStyles.card} testID="engine-pi">
       <CardHeader
         glyph="π"
         glyphStyle="pi"
@@ -318,7 +329,8 @@ function PiCardView({
         testID="engine-pi-status"
       />
       <Text style={styles.blurb}>
-        Runs your bots and workers on any model, with your own keys or logins.
+        Runs your bots and workers in the pi terminal app (pi TUI), on any model, with your own
+        keys or logins.
       </Text>
       {card.signins.length === 0 ? (
         <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
@@ -475,17 +487,18 @@ function ClaudeCodeCardView({
 }) {
   const state = claudeCodeState(card);
   return (
-    <View style={[settingsStyles.card, styles.hero]} testID="engine-claude-code">
+    <View style={[settingsStyles.card, styles.hero, styles.recommendedCard]} testID="engine-claude-code">
       <CardHeader
         glyph={"\u2733\uFE0E"}
         glyphStyle="claude"
         title="Claude Code"
+        recommended
         status={claudeCodeSummary(card)}
         testID="engine-claude-status"
       />
       <Text style={styles.blurb}>
-        Runs the real Claude Code app on your computer, with OptChat memory. Uses your Claude plan,
-        not extra usage.
+        Runs your bots in the Claude Code terminal app (CC TUI) on your computer, with OptChat
+        memory. Uses your Claude plan, not extra usage.
       </Text>
       {card.warning ? <Text style={[styles.blurb, styles.warn]}>{card.warning}</Text> : null}
       {state === "error" && card.error ? (
@@ -601,7 +614,16 @@ const styles = StyleSheet.create((theme) => ({
   section: { marginBottom: theme.spacing[4] },
   pad: { padding: theme.spacing[4] },
   hero: { marginTop: theme.spacing[3] },
-  heroSelected: { borderColor: theme.colors.accent },
+  // Claude Code is the recommended engine (LO1, 15 Nov): the dino green outline, as on first run.
+  recommendedCard: { borderWidth: theme.borderWidth[2], borderColor: theme.colors.accent },
+  // A green chip with the dark ink on it (as on the green buttons): the spring green as text is
+  // only ~2:1 on light cards. (A light/dark switch in this sheet does not reach web: CSS variables.)
+  recommended: {
+    color: theme.colors.accentForeground,
+    backgroundColor: theme.colors.accent,
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing[1],
+  },
   row: { gap: theme.spacing[3], minHeight: 56 },
   signinRow: { gap: theme.spacing[3], paddingVertical: theme.spacing[3] },
   text: { flex: 1, minWidth: 0, gap: theme.spacing[1] },

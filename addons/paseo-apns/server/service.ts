@@ -130,6 +130,7 @@ export class ApnsService {
       activities: input.activities.map((a) => ({ id: a.id, token: a.token?.toLowerCase() ?? null })),
       appearance: input.appearance ?? null,
       dinoLayers: input.dinoLayers ?? null,
+      ...(input.ends?.length ? { ends: input.ends } : {}),
     });
     return { ok: true, reason: null, ...out, pushes };
   }

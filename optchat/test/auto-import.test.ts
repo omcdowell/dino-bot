@@ -89,8 +89,15 @@ test('estimate follows the calibration import and the warning states tokens, sha
 test('defaults table: every row complete, import model never pricier than compaction, overrides win', () => {
   for (const s of SUBSCRIPTIONS) {
     const r = MODEL_DEFAULTS[s];
-    for (const k of ['main', 'worker', 'compaction', 'importCompaction'] as const) assert.equal(r[k].provider, r.provider, `${s}.${k}`);
+    for (const k of ['main', 'worker', 'importCompaction'] as const) assert.equal(r[k].provider, r.provider, `${s}.${k}`);
+    if ('compaction' in r) assert.equal(r.compaction.provider, r.provider, `${s}.compaction`);
   }
+  // Ongoing compactor (owner, 15 Nov): Sonnet 5.5 medium on Claude, GPT-6.1 Sol low on ChatGPT, no default elsewhere.
+  const sonnet = { provider: 'anthropic', model: 'claude-sonnet-5-5', thinking: 'medium' };
+  for (const s of ['claude-pro', 'claude-max', 'anthropic-api'] as const) assert.deepEqual(resolveModels(s).compaction, sonnet, s);
+  assert.deepEqual(resolveModels('chatgpt').compaction, { provider: 'openai-codex', model: 'gpt-6.1-sol', thinking: 'low' });
+  for (const s of SUBSCRIPTIONS.filter(s => !['claude-pro', 'claude-max', 'anthropic-api', 'chatgpt'].includes(s)))
+    assert.equal(resolveModels(s).compaction, undefined, s);
   assert.equal(pickSubscription(['openrouter', 'claude-pro']), 'claude-pro');
   assert.equal(resolveModels('claude-max').importCompaction.model, 'claude-haiku-5-5');
   const own = { provider: 'anthropic', model: 'claude-haiku-4-5', thinking: 'off' as const };

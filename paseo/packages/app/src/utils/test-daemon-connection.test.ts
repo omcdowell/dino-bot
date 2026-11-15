@@ -304,6 +304,29 @@ describe("test-daemon-connection connectToDaemon", () => {
     });
   });
 
+  it("passes the pairing code's ticket and reports a refused code as a new-code error (QR2)", async () => {
+    const { connectToDaemon, getConnectionAuthFailureReason, PAIRING_CODE_USED_MESSAGE } =
+      await import("./test-daemon-connection");
+    probe.failNextConnection(
+      new DaemonAuthenticationError("pairing_ticket_invalid"),
+      "Transport closed (code 4001)",
+    );
+    const connection = { id: "direct:lan:6767", type: "directTcp", endpoint: "lan:6767" } as const;
+    const error = await connectToDaemon(
+      connection,
+      { pairingTicket: "ppt1.a.b.c" },
+      probe.deps,
+    ).catch((e: unknown) => e);
+    expect(probe.createdClients.at(-1)?.config.pairingTicket).toBe("ppt1.a.b.c");
+    expect(error).toMatchObject({
+      message: PAIRING_CODE_USED_MESSAGE,
+      authFailureReason: "pairing_ticket_invalid",
+    });
+    expect(PAIRING_CODE_USED_MESSAGE).toMatch(/expired or was already used.*pair`/);
+    // Not a password failure: the app must not ask for a password.
+    expect(getConnectionAuthFailureReason(error)).toBeNull();
+  });
+
   it("keeps generic transport failures generic when a password was supplied", async () => {
     const { connectToDaemon } = await import("./test-daemon-connection");
     probe.failNextConnection(new Error("Transport error"), "Transport error");

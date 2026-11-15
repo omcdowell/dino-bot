@@ -3,7 +3,7 @@
 #
 #   sh launch.sh [--engine pi|cc] <name> <brief-file> <minutes> [cwd]
 #
-# --engine (or WORKER_ENGINE): pi (default) or cc, the interactive Claude Code TUI (`claude`, run by
+# --engine (or WORKER_ENGINE): pi or cc, the interactive Claude Code TUI (`claude`, run by
 # herdr's claude kind). Everything else is the same for both: the brief, the first prompt, the
 # bot-dm report, bot-worker add, the skill shortlist. cc only (see SKILL.md, "Claude Code workers"):
 #   CC_WORKER_CONFIG_DIR  CLAUDE_CONFIG_DIR for the worker (its own login and settings); empty: the
@@ -22,8 +22,11 @@
 #   BOT           your bot name (folder under the bots root); default: the current folder when
 #                 it is directly under $PASEO_BOTS_ROOT
 #   PROJECT       workspace label (default: the last path part of cwd)
-#   WORKER_MODEL  pi --model for this worker (default: $BOTS_WORKER_MODEL, the model chosen
-#                 for workers in setup; empty: pi's own defaults)
+#   WORKER_MODEL  pi --model for this worker (default: the bot's .bot.json "workers".model, else
+#                 the model chosen for workers in setup, $BOTS_WORKER_MODEL; empty: pi's own defaults)
+# Without --engine or WORKER_ENGINE: the bot's .bot.json "workers".engine, else the host's default
+# (.settings.json workerEngine, the app's Settings), else Claude Code when it is signed in, else pi
+# (worker-default.mjs next to this script).
 #   PI_CODING_AGENT_DIR  pi's folder for sign-ins, settings and packages. The worker uses the
 #                 same one as the bots: this variable when set (the daemon's, which the bot's
 #                 shell inherits), else DinoBot's own (DINOBOT_PI_DIR, else $DINOBOT_HOME/pi:
@@ -47,13 +50,14 @@ fail() {
   echo "launch: $*" >&2
   exit 1
 }
-ENGINE=${WORKER_ENGINE:-pi}
+# The engine: --engine, else WORKER_ENGINE, else the bot's and then everyone's default (worker-default.mjs, below).
+ENGINE=${WORKER_ENGINE:-}
 if [ "${1:-}" = --engine ]; then
   [ $# -ge 2 ] || usage
   ENGINE=$2
   shift 2
 fi
-case $ENGINE in pi | cc) ;; *) echo "launch: engine must be pi or cc" >&2; exit 2 ;; esac
+case $ENGINE in '' | pi | cc) ;; *) echo "launch: engine must be pi or cc" >&2; exit 2 ;; esac
 [ $# -ge 3 ] && [ $# -le 4 ] || usage
 NAME=$1
 BRIEF=$2
@@ -71,9 +75,19 @@ BOT=${BOT:-}
 if [ -z "$BOT" ] && [ -n "${PASEO_BOTS_ROOT:-}" ] && [ "$(dirname "$PWD")" = "${PASEO_BOTS_ROOT%/}" ]; then
   BOT=$(basename "$PWD")
 fi
+# A bot's own folder holds its .optchat-profile marker (Claude Code bots have no PASEO_BOTS_ROOT in their shell).
+if [ -z "$BOT" ] && [ -f "$PWD/.optchat-profile" ]; then
+  BOT=$(basename "$PWD")
+fi
 [ -n "$BOT" ] || { echo "launch: set BOT=<your bot name> (or run from your bot folder)" >&2; exit 2; }
+[ -n "${PASEO_BOTS_ROOT:-}" ] || [ ! -f "$PWD/.optchat-profile" ] || [ "$(basename "$PWD")" != "$BOT" ] || PASEO_BOTS_ROOT=$(dirname "$PWD")
 PROJECT=${PROJECT:-$(basename "$CWD")}
-MODEL=${WORKER_MODEL:-${BOTS_WORKER_MODEL:-}}
+# Defaults (worker-default.mjs): engine WORKER_ENGINE > the bot's .bot.json "workers" > the host's setting (the app's
+# Settings) > Claude Code if signed in, else pi; model WORKER_MODEL > .bot.json "workers" > the host's worker model.
+DEFAULTS=$(BOT=$BOT PASEO_BOTS_ROOT=${PASEO_BOTS_ROOT:-} WORKER_ENGINE=$ENGINE node "$(cd "$(dirname "$0")" && pwd)/worker-default.mjs") ||
+  fail "cannot read the worker defaults"
+ENGINE=$(printf '%s\n' "$DEFAULTS" | sed -n 1p)
+MODEL=$(printf '%s\n' "$DEFAULTS" | sed -n 2p)
 SESSION_ID="$NAME-$(date +%Y%m%d-%H%M%S)"
 # Claude Code wants a UUID session id.
 [ "$ENGINE" != cc ] || SESSION_ID=$(node -e 'process.stdout.write(require("crypto").randomUUID())')

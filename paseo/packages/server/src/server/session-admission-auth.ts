@@ -4,18 +4,40 @@ import { OWNER_PERMISSIONS } from "./authorization/index.js";
 import { matchesLocalCredential } from "./local-credential.js";
 import type { SessionAdmission } from "./websocket-server.js";
 
-export type AdmissionFailure = "password_required" | "incorrect_password" | "session_token_invalid";
+export type AdmissionFailure =
+  | "password_required"
+  | "incorrect_password"
+  | "session_token_invalid"
+  | "pairing_ticket_invalid";
 
 /** How the hello proved itself; a token is issued only after a password or a token due for renewal. */
-export type AdmissionMethod = "open" | "password" | "localCredential" | "sessionToken" | "relay";
+export type AdmissionMethod =
+  | "open"
+  | "password"
+  | "localCredential"
+  | "sessionToken"
+  | "pairingTicket"
+  | "relay";
 
 type AdmissionResolution =
-  | { admission: SessionAdmission; method: AdmissionMethod; renewToken?: boolean }
+  | {
+      admission: SessionAdmission;
+      method: AdmissionMethod;
+      renewToken?: boolean;
+      /** The presented session token is a device token. */
+      deviceToken?: boolean;
+    }
   | { rejection: AdmissionFailure };
 
-export type SessionTokenVerifier = (
-  token: string,
-) => { principalId: string; permissions: SessionAdmission["permissions"]; renew: boolean } | null;
+export type SessionTokenVerifier = (token: string) => {
+  principalId: string;
+  permissions: SessionAdmission["permissions"];
+  renew: boolean;
+  device?: boolean;
+} | null;
+
+/** True if the ticket is valid for this device (pairing-tickets.ts PairingTicketVerifier.check). */
+export type PairingTicketVerifier = (ticket: string) => boolean;
 
 export async function resolveSessionAdmission(input: {
   credential: WSHelloMessage["auth"];
@@ -23,6 +45,7 @@ export async function resolveSessionAdmission(input: {
   localCredential: string | null;
   transport: "direct" | "relay";
   verifySessionToken?: SessionTokenVerifier;
+  verifyPairingTicket?: PairingTicketVerifier;
 }): Promise<AdmissionResolution> {
   const { credential, passwordHash, localCredential, transport } = input;
   const owner = { principalId: "owner", permissions: OWNER_PERMISSIONS };
@@ -49,7 +72,13 @@ export async function resolveSessionAdmission(input: {
       admission: { principalId: verified.principalId, permissions: verified.permissions },
       method: "sessionToken",
       renewToken: verified.renew,
+      ...(verified.device ? { deviceToken: true } : {}),
     };
+  }
+  if (credential.kind === "pairingTicket") {
+    return input.verifyPairingTicket?.(credential.ticket)
+      ? { admission: owner, method: "pairingTicket" }
+      : { rejection: "pairing_ticket_invalid" };
   }
   return (await compare(credential.password, passwordHash))
     ? { admission: owner, method: "password" }

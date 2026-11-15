@@ -22,8 +22,10 @@ import {
   roomsCreateRpc,
   roomsRenameRpc,
   type Compactor,
+  type CompactorRunnerSetting,
 } from "../shared/manage-rpc";
-import { compactorFromModelId, compactorLabel, compactorModelId } from "../shared/compactor";
+import { compactorFromModelId, compactorLabel, compactorModelId, runnerNote, runnerPreview } from "../shared/compactor";
+import type { CompactorRunner } from "../shared/compactor-runner";
 import { roomsSetMembersRpc } from "../shared/rooms/rpc";
 import type { Bot } from "../shared/rpc";
 import { BotAvatar } from "./bot-avatar";
@@ -190,6 +192,62 @@ function CompactorField({
   );
 }
 
+const RUNNER_CHOICES: Array<{ id: CompactorRunnerSetting; label: string }> = [
+  { id: "auto", label: "Automatic" },
+  { id: "in-session", label: "Claude Code" },
+  { id: "pi", label: "pi" },
+];
+
+/**
+ * Claude Code bots only (FF1): where the summaries run. Claude Code (the bot's own session, Claude models only) or pi
+ * (this computer's pi sign-in, any model in the picker). Automatic: pi for a non-Claude model, else the host default.
+ */
+function CompactorRunnerField({
+  c,
+  value,
+  compactor,
+  hostRunner,
+  onChange,
+}: {
+  c: Colors;
+  value: CompactorRunnerSetting;
+  compactor: Compactor;
+  hostRunner: CompactorRunner | null;
+  onChange(next: CompactorRunnerSetting): void;
+}) {
+  const effective = runnerPreview(value, compactor, hostRunner);
+  return (
+    <View testID="bots-sheet-compactor-runner" style={{ marginTop: 12 }}>
+      <Text style={{ fontSize: 13, fontWeight: "600", color: c.foregroundMuted, marginBottom: 6 }}>Summaries run on</Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+        {RUNNER_CHOICES.map((r) => {
+          const on = r.id === value;
+          return (
+            <Pressable
+              key={r.id}
+              accessibilityRole="button"
+              accessibilityState={{ selected: on }}
+              testID={`bots-sheet-compactor-runner-${r.id}`}
+              onPress={() => onChange(r.id)}
+              style={{
+                paddingHorizontal: 14,
+                paddingVertical: 8,
+                borderRadius: 999,
+                borderWidth: 1,
+                borderColor: on ? accentFill(c) : c.border,
+                backgroundColor: on ? accentFill(c) : c.surface2,
+              }}
+            >
+              <Text style={{ fontSize: 15, fontWeight: on ? "600" : "400", color: on ? accentOn(c) : c.foreground }}>{r.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Text style={{ marginTop: 8, fontSize: 13, color: c.foregroundMuted }}>{runnerNote(value, compactor, effective)}</Text>
+    </View>
+  );
+}
+
 /** Starter template chips (New bot): label + one line; a coordinator is suggested, never required. */
 function TemplatePicker({ c, value, onChange }: { c: Colors; value: TemplateId; onChange(next: TemplateId): void }) {
   const selected = BOT_TEMPLATES.find((t) => t.id === value);
@@ -306,6 +364,9 @@ export function BotSheet({
   const saveCompactor = useRpc(botsSetCompactorRpc);
   const [compactor, setCompactor] = useState<Compactor | null>(null);
   const [loadedCompactor, setLoadedCompactor] = useState<Compactor | null>(null);
+  // Claude Code bots (FF1): where summaries run; null on pi bots and older hosts (no choice shown).
+  const [runner, setRunner] = useState<CompactorRunnerSetting | null>(null);
+  const [loadedRunner, setLoadedRunner] = useState<{ runner: CompactorRunnerSetting; hostRunner: CompactorRunner | null } | null>(null);
   const create = useRpc(botsCreateRpc);
   const update = useRpc(botsUpdateRpc);
   const [name, setName] = useState("");
@@ -347,6 +408,8 @@ export function BotSheet({
     setAgents("");
     setCompactor(null);
     setLoadedCompactor(null);
+    setRunner(null);
+    setLoadedRunner(null);
     if (!bot) return;
     let live = true;
     // The host's avatar.json (to start the designer from it, and so the next save's revision goes above it).
@@ -359,10 +422,14 @@ export function BotSheet({
       })
       .catch(() => {});
     loadCompactor({ botId: bot.id })
-      .then(({ isDefault: _isDefault, ...result }) => {
+      .then(({ isDefault: _isDefault, runner: savedRunner, effectiveRunner: _effective, ccBot, hostRunner, ...result }) => {
         if (!live) return;
         setLoadedCompactor(result);
         setCompactor(result);
+        if (ccBot && savedRunner) {
+          setLoadedRunner({ runner: savedRunner, hostRunner: hostRunner ?? null });
+          setRunner(savedRunner);
+        }
       })
       .catch(() => {});
     loadAgents({ botId: bot.id })
@@ -378,8 +445,9 @@ export function BotSheet({
   }, [open, bot?.id]);
 
   const agentsDirty = bot ? loaded !== null && agents !== loaded.text : false;
+  const runnerDirty = !!runner && !!loadedRunner && runner !== loadedRunner.runner;
   const compactorDirty =
-    !!compactor && !!loadedCompactor && compactorLabel(compactor) !== compactorLabel(loadedCompactor);
+    (!!compactor && !!loadedCompactor && compactorLabel(compactor) !== compactorLabel(loadedCompactor)) || runnerDirty;
   const dirty =
     !!avatar || !!designed || (bot ? name.trim() !== bot.name || agentsDirty || compactorDirty : name.trim().length > 0);
   const pick = async () => {
@@ -405,7 +473,7 @@ export function BotSheet({
           ...(agentsDirty && loaded ? { agentsMd: { text: agents, baseMtimeMs: loaded.mtimeMs } } : {}),
           ...(avatar ? { avatar } : {}),
         });
-        if (compactorDirty && compactor) await saveCompactor({ botId: bot.id, compactor });
+        if (compactorDirty && compactor) await saveCompactor({ botId: bot.id, compactor, ...(runnerDirty && runner ? { runner } : {}) });
         toast.show(`${name.trim()} saved`, { variant: "success" });
       } else {
         // Empty AGENTS.md: the host builds it from template + purpose (and adds the bot-dm block).
@@ -626,6 +694,9 @@ export function BotSheet({
             extras={extras}
             onChange={setCompactor}
           />
+        ) : null}
+        {bot && compactor && runner && loadedRunner ? (
+          <CompactorRunnerField c={c} value={runner} compactor={compactor} hostRunner={loadedRunner.hostRunner} onChange={setRunner} />
         ) : null}
         {!bot ? (
           <Text style={{ marginTop: 10, fontSize: 13, color: c.foregroundMuted }}>

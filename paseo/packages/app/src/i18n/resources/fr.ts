@@ -2465,6 +2465,10 @@ export const fr: TranslationResources = {
       },
     },
     host: {
+      pairing: {
+        guidance:
+          "Associez de nouveau : sur votre ordinateur, lancez `{{command}}` et scannez le nouveau code.",
+      },
       password: {
         guidance:
           "Supprimez cet hôte puis ajoutez-le à nouveau avec le mot de passe demandé par ce daemon.",

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
-import { botIdFor, createStarterBot, trashBot } from "../lib/bots.mjs";
+import { botIdFor, createStarterBot, starterAvatarJson, trashBot } from "../lib/bots.mjs";
 import { readEnvFile, writeBotsSettings, writeDaemonConfig, writeDaemonEnv } from "../lib/config.mjs";
 import { detectSignIns, isTailnetIp, lanIp, subscriptionFor } from "../lib/detect.mjs";
 import { planGc } from "../lib/herdr.mjs";
@@ -184,6 +184,7 @@ describe("starter bot", () => {
     assert.equal(meta.chat.provider, "optchat/openai-codex/gpt-6-sol");
     // The installer's pick is the host default, not the user's: the phone's "Choose models" must move it (paseo-bots onboarding.applyToBots).
     assert.equal(meta.chat.setup, true);
+    assert.ok(!existsSync(join(L.botsRoot, "juniper", "avatar.json")), "no plugin in this fake app: no avatar.json");
     const cfg = JSON.parse(readFileSync(join(L.optchatHome, "profiles", "juniper", "config.json"), "utf8"));
     assert.equal(cfg.subscription, "chatgpt");
     assert.equal(cfg.setup, true);
@@ -194,6 +195,36 @@ describe("starter bot", () => {
     assert.ok(existsSync(join(trash, "profile", "AGENTS.md")));
     assert.ok(!existsSync(join(L.botsRoot, "juniper")));
     assert.equal(botIdFor("Tweety Bird"), "tweety-bird");
+  });
+
+  it("DA1: the starter bot gets a random default avatar.json (character in its default look), none without the plugin", async () => {
+    const plugins = join(import.meta.dirname, "..", "plugins"); // <app>/bots = plugins/bots
+    const first = await starterAvatarJson(plugins, () => 0);
+    const last = await starterAvatarJson(plugins, () => 0.9999);
+    assert.equal(first.character, "fc-jellyfish");
+    assert.equal(last.character, "shrimp");
+    for (const a of [first, last]) {
+      assert.equal(a.v, 1);
+      assert.equal(a.revision, 0, "any phone save replaces it");
+      assert.equal(a.eyes, "original");
+      assert.equal("colour" in a, false, "own colours");
+      assert.equal(a.accessories.length, 1);
+    }
+    assert.equal(first.accessories[0].id, "top-hat");
+    assert.equal(await starterAvatarJson(join(TMP, "no-such-app")), null);
+    const L = { ...fakeLayout(), app: plugins };
+    await createStarterBot(L, {});
+    const saved = JSON.parse(readFileSync(join(L.botsRoot, "juniper", "avatar.json"), "utf8"));
+    assert.equal(saved.revision, 0);
+    assert.equal(typeof saved.character, "string");
+  });
+
+  it("a sign-in with no default compactor (model-defaults.ts) gets no config.json: the user picks in Choose models", async () => {
+    const L = fakeLayout();
+    const models = { main: { provider: "google", model: "gemini-3.1-pro-preview", thinking: "medium" }, worker: { provider: "google", model: "gemini-3.8-flash", thinking: "medium" } };
+    assert.deepEqual(await createStarterBot(L, { models, subscription: "google" }), { botId: "juniper", created: true });
+    assert.ok(existsSync(join(L.optchatHome, "profiles", "juniper", "AGENTS.md")));
+    assert.ok(!existsSync(join(L.optchatHome, "profiles", "juniper", "config.json")));
   });
 });
 

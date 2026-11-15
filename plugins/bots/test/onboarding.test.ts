@@ -53,7 +53,7 @@ test("setup.apply: bots, compaction and workers models go to settings, default-f
     const files = new BotFiles({ root, optchatHome: optchat });
     const made = await files.create({ name: "Newbie" });
     assert.deepEqual(read(join(optchat, "profiles", made.botId, "config.json")).compactor, models.compaction);
-    assert.deepEqual(await files.compactor("juniper"), { ...models.compaction, isDefault: false });
+    assert.deepEqual(await files.compactor("juniper"), { ...models.compaction, isDefault: false, runner: "auto", effectiveRunner: "pi", ccBot: false, hostRunner: null });
     // A model without effort: no thinking anywhere (pi's own default applies).
     await ob.apply({ models: { ...models, workers: { provider: "local", model: "llama-3", thinking: null } } });
     assert.equal(read(join(pi, "settings.json")).defaultThinkingLevel, undefined);

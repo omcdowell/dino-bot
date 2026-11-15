@@ -344,6 +344,54 @@ esac
     const started = () => readFileSync(log, "utf8").trim().split("\n");
     return { d, brief, run, started };
   };
+  it("launch.sh defaults (owner, 15 Nov): Claude Code if signed in, else pi; the host's setting, then the bot's .bot.json, then WORKER_ENGINE override it", () => {
+    const { d, run, started } = standIn();
+    const kind = () => started()[started().indexOf("--kind") + 1];
+    const model = () => started()[started().indexOf("--model") + 1];
+    const claude = (loggedIn) => writeFileSync(join(d, "bin", "claude"), `#!/bin/sh\n[ "$1 $2" = "auth status" ] && echo '{"loggedIn":${loggedIn},"authMethod":"claude.ai"}'\nexit 0\n`, { mode: 0o755 });
+    const go = (args = [], extra = {}) => {
+      const r = run(args, extra);
+      assert.equal(r.status, 0, r.stderr);
+      return kind();
+    };
+    // Automatic: pi while Claude Code is not signed in, Claude Code once it is; a proxy counts as signed in.
+    claude(false);
+    assert.equal(go(), "pi");
+    assert.equal(go([], { CC_WORKER_BASE_URL: "http://proxy.invalid/x" }), "claude");
+    claude(true);
+    assert.equal(go(), "claude");
+    // The host's default (the app's Settings): .settings.json workerEngine.
+    const bots = join(d, "bots");
+    mkdirSync(join(bots, "testbot"), { recursive: true });
+    writeFileSync(join(bots, ".settings.json"), JSON.stringify({ workerEngine: "pi", models: { workers: { provider: "openai-codex", model: "gpt-6-sol", thinking: "high" } } }));
+    assert.equal(go(), "pi");
+    assert.equal(model(), "openai-codex/gpt-6-sol:high", "the host's worker model, read at launch");
+    // The bot's own default (.bot.json "workers"), which the bot writes when the user asks.
+    writeFileSync(join(bots, "testbot", ".bot.json"), JSON.stringify({ name: "Test", workers: { engine: "cc", model: "anthropic/claude-sonnet-5-5:medium" } }));
+    assert.equal(go(), "claude");
+    assert.equal(model(), "claude-sonnet-5-5");
+    writeFileSync(join(bots, "testbot", ".bot.json"), JSON.stringify({ name: "Test", workers: { model: "openai-codex/gpt-6-luna:low" } }));
+    assert.equal(go(), "pi", "a model alone keeps the host's engine");
+    assert.equal(model(), "openai-codex/gpt-6-luna:low");
+    // This launch only: WORKER_ENGINE / WORKER_MODEL, then --engine.
+    assert.equal(go([], { WORKER_ENGINE: "cc" }), "claude");
+    assert.equal(go([], { WORKER_MODEL: "anthropic/claude-opus-5-5:high" }), "pi");
+    assert.equal(model(), "anthropic/claude-opus-5-5:high");
+    assert.equal(go(["--engine", "cc"], { WORKER_ENGINE: "pi" }), "claude");
+    assert.equal(run([], { WORKER_ENGINE: "codex" }).status, 2);
+  });
+  it("launch.sh finds the bot from its folder's .optchat-profile when BOT and PASEO_BOTS_ROOT are unset (a Claude Code bot's shell)", () => {
+    const { d, brief } = standIn();
+    const bot = join(d, "bots", "kit");
+    mkdirSync(bot, { recursive: true });
+    writeFileSync(join(bot, ".optchat-profile"), "kit\n");
+    writeFileSync(join(bot, ".bot.json"), JSON.stringify({ workers: { engine: "pi", model: "openai-codex/gpt-6-sol" } }));
+    const r = spawnSync("sh", [join(dir, "launch.sh"), "w-two", brief, "1", d], { cwd: bot, encoding: "utf8", env: { PATH: `${join(d, "bin")}:${process.env.PATH}`, HOME: d } });
+    assert.equal(r.status, 0, r.stderr);
+    const info = JSON.parse(r.stdout);
+    assert.equal(info.bot, "kit");
+    assert.match(readFileSync(join(d, "herdr.log"), "utf8"), /^openai-codex\/gpt-6-sol$/m, "the bot's own default found through its folder");
+  });
   it("launch.sh --engine pi (and no --engine) starts pi with exactly the arguments it always had", () => {
     const { d, run, started } = standIn();
     const root = join(dir, "..");
@@ -399,7 +447,19 @@ esac
       const runs = lines.filter((l) => l.startsWith("pane|run|"));
       assert.ok(start >= 0);
       for (const l of runs) assert.ok(lines.indexOf(l) < start, "set before pi starts");
-      return runs.map((l) => l.split("|").slice(2));
+      // The command may hold "|" itself: everything after the pane id.
+      const sent = runs.map((l) => {
+        const [, , pane, ...cmd] = l.split("|");
+        return [pane, cmd.join("|")];
+      });
+      // cc workers: PASEO_HOME wins over the shell's PASEO_HOST (bot-dm refuses both); always sent there.
+      const clear = '[ -z "${PASEO_HOME:-}" ] || unset PASEO_HOST';
+      assert.equal(
+        sent.some(([, c]) => c === clear),
+        extra.WORKER_ENGINE === "cc",
+        "PASEO_HOST cleared in cc panes only",
+      );
+      return sent.filter(([, c]) => c !== clear);
     };
     const bots = join(d, "dinobot", "pi");
     const odd = join(d, "it's pi");
@@ -496,16 +556,18 @@ esac
   });
   it("cc-status.mjs: the status line shows the spend (kept across a restart) and the budget when there is one; never blocks", () => {
     const d = tmp();
-    const status = (usd) => spawnSync("node", [join(dir, "cc-status.mjs"), d], { encoding: "utf8", input: JSON.stringify({ session_id: "s1", model: { display_name: "Haiku" }, cost: { total_cost_usd: usd } }) });
+    // durMs: how long this Claude Code process has run (cost.total_duration_ms); a restart starts it again (CU1: per-process runs).
+    const status = (usd, durMs = 600_000) => spawnSync("node", [join(dir, "cc-status.mjs"), d], { encoding: "utf8", input: JSON.stringify({ session_id: "s1", model: { display_name: "Haiku" }, cost: { total_cost_usd: usd, total_duration_ms: durMs } }) });
     assert.equal(status(0.4).stdout, "$0.40 · Haiku", "no budget file: spend only");
     writeFileSync(join(d, "budget"), "\n");
     assert.equal(status(0.5).stdout, "$0.50 · Haiku", "empty budget: spend only");
     writeFileSync(join(d, "budget"), "1\n");
     assert.equal(status(0.8).stdout, "$0.80 / budget $1.00 · Haiku");
-    const r = status(0.3);
-    assert.equal(r.stdout, "$1.10 / budget $1.00 OVER BUDGET · Haiku", "a restarted process starts at 0: the old figure is banked");
+    assert.equal(status(0.6).stdout, "$0.80 / budget $1.00 · Haiku", "a late status line with a lower figure counts nothing twice");
+    const r = status(0.3, 1_000);
+    assert.equal(r.stdout, "$1.10 / budget $1.00 OVER BUDGET · Haiku", "a restarted process starts at 0: the old figure is kept");
     assert.equal(r.status, 0);
-    assert.equal(JSON.parse(readFileSync(join(d, "cost.json"), "utf8")).base, 0.8);
+    assert.deepEqual(JSON.parse(readFileSync(join(d, "cost.json"), "utf8")).runs.map((x) => x.usd), [0.8, 0.3]);
     assert.equal(spawnSync("node", [join(dir, "cc-status.mjs"), d], { encoding: "utf8", input: "not json" }).stdout, "$1.10 / budget $1.00 OVER BUDGET");
     assert.ok(!readdirSync(dir).includes("cc-cap.mjs"), "the blocking cap hook is gone");
   });

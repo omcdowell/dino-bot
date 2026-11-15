@@ -264,6 +264,38 @@ describe("first run: Sign in for your bots", () => {
     expect(byId("setup-signin-openai-codex:device-code:0-warning")).toBeNull();
   });
 
+  it("reads as two options: Claude Code (recommended, Choose) or pi (its providers in one box, each with Choose)", async () => {
+    host(cc());
+    await render();
+    const choice = byId("setup-signin-choice")!;
+    expect(choice.textContent).toContain(
+      "Pick how your bots run: Claude Code or pi"
+    );
+    expect(choice.textContent).toContain("terminal app");
+    const card = byId("setup-signin-claude-code")!;
+    expect(card.textContent).toContain("Option 1");
+    expect(byId("setup-signin-claude-code-recommended")!.textContent).toBe(
+      "(recommended)"
+    );
+    expect(card.textContent).toContain("Claude Code terminal app (CC TUI)");
+    expect(
+      card.querySelector("[data-testid='setup-signin-claude-code-choose']")!
+        .textContent
+    ).toBe("Choose");
+    const pi = byId("setup-signin-pi")!;
+    expect(byId("setup-signin-pi-heading")!.textContent).toContain("Option 2");
+    expect(pi.textContent).toContain("pi terminal app (pi TUI)");
+    for (const o of OPTIONS.options) {
+      const row = pi.querySelector(`[data-testid='setup-signin-${o.id}']`)!;
+      expect(row).not.toBeNull();
+      expect(
+        row.querySelector(`[data-testid='setup-signin-${o.id}-choose']`)!
+          .textContent
+      ).toBe("Choose");
+    }
+    expect(card.contains(pi)).toBe(false);
+  });
+
   it("pressing it runs Claude Code's own login (no extra-usage sheet), the pasted code goes to the computer, Continue goes on", async () => {
     host(cc(), (method, input) => {
       if (method === "signin.start") {
@@ -319,6 +351,7 @@ describe("first run: Sign in for your bots", () => {
     await render();
     const card = byId("setup-signin-claude-code")!;
     expect(card.tagName).toBe("DIV"); // not pressable
+    expect(byId("setup-signin-claude-code-choose")).toBeNull(); // nothing to choose yet
     expect(byId("setup-signin-claude-code-install")!.textContent).toContain(
       "claude.com/download"
     );
@@ -343,12 +376,30 @@ describe("first run: Sign in for your bots", () => {
     expect(h.router.replace).toHaveBeenCalledWith("/setup-models");
   });
 
-  it("an older daemon (no engines.*): no Claude Code card, pi's list as before", async () => {
-    host(new Error("Unknown RPC method: engines.status"));
+  it("an older daemon (no engines.*): still both options (no old pi-only screen); the Claude Code card asks to update, Check again", async () => {
+    let old = true;
+    h.invoke.mockImplementation(async (_p: string, method: string) => {
+      if (method === "signin.options") return OPTIONS;
+      if (method === "engines.status") {
+        if (old) throw new Error("Unknown RPC method: engines.status");
+        return cc();
+      }
+      throw new Error(method);
+    });
     await render();
-    expect(byId("setup-signin-claude-code")).toBeNull();
-    expect(byId("setup-signin-pi-heading")).toBeNull();
+    expect(byId("setup-signin-choice")).not.toBeNull();
+    expect(container!.textContent).not.toContain("Pick the account they use");
+    const card = byId("setup-signin-claude-code")!;
+    expect(card.tagName).toBe("DIV"); // not pressable: this daemon has no Claude Code login
+    expect(byId("setup-signin-claude-code-choose")).toBeNull();
+    expect(byId("setup-signin-claude-code-update")!.textContent).toContain("Update it");
+    expect(byId("setup-signin-pi-heading")!.textContent).toContain("Option 2");
     expect(byId("setup-signin-openai-codex:device-code:0")).not.toBeNull();
+    old = false;
+    await act(async () => byId("setup-signin-claude-code-check")!.click());
+    await flush();
+    expect(byId("setup-signin-claude-code-update")).toBeNull();
+    expect(byId("setup-signin-claude-code")!.tagName).toBe("BUTTON");
   });
 
   it("engines.status failing otherwise: the card is still there and usable", async () => {

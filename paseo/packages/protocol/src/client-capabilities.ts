@@ -3,6 +3,9 @@ export const CLIENT_CAPS = {
   // Capable clients accept a session.token frame after a password hello and may present it
   // (hello auth kind sessionToken) instead of the password on later hellos.
   sessionTokens: "session_tokens",
+  // QR2: capable clients get a long-lived device token (sliding 180-day idle expiry) instead of a
+  // 24-hour session token, after a pairing ticket or a password; they then drop a stored password.
+  deviceTokens: "device_tokens",
   // COMPAT(ownedSubscriptions): added in v0.8.0, remove legacy ownership after 2027-03-09.
   ownedSubscriptions: "owned_subscriptions",
   // Clients outside the Paseo app version series can explicitly accept provider IDs.
@@ -115,6 +118,7 @@ export const CLIENT_CAPABILITY_BITS: readonly ClientCapability[] = [
   CLIENT_CAPS.agentPatches,
   CLIENT_CAPS.prioritySync,
   CLIENT_CAPS.compactV2,
+  CLIENT_CAPS.deviceTokens,
 ];
 
 /** Splits a capability map into the `cb` bits (true values of known bits) and the rest. */

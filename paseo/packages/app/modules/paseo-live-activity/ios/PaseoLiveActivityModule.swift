@@ -1,5 +1,6 @@
 import ExpoModulesCore
 import Foundation
+import os
 import Security
 import UIKit
 #if canImport(ActivityKit)
@@ -14,7 +15,14 @@ import ActivityKit
 ///   with the paseo-apns daemon plugin.
 /// - `apply(state, staleDate)` shows the daemon's answer locally: update every activity, start one
 ///   if none is running (only possible in the foreground), or end them all when `state` is null.
-/// - At most one activity: when a new one appears, older ones are ended.
+/// - At most one activity: when a new one appears, older ones are ended. Only older ones, and only
+///   still-active ones: the newest (by when the app first saw it) is never ended. Before, the
+///   activityUpdates loop kept whichever activity it was handed, so a late yield for an older one
+///   ended the newer (la-vanish).
+/// - Starts locally only when nothing is running or on its way (iOS 26 `.pending`), at most once
+///   per `requestMinInterval`; a start held back by that retries itself (onChange -> JS sync).
+/// - Every end the app makes or sees is recorded with its reason (ring `ends`, `os_log` subsystem
+///   com.example.paseo.LiveActivity, category "ends"); JS sends them to paseo-apns with the sync.
 public class PaseoLiveActivityModule: Module {
   public func definition() -> ModuleDefinition {
     Name("PaseoLiveActivity")
@@ -361,6 +369,19 @@ final class LiveActivityCenter {
   /// activity id -> update token (nil until iOS hands it out)
   private var tokens: [String: String] = [:]
   private var watched = Set<String>()
+  /// activity id -> the order the app first saw it in (higher = newer).
+  private var seenOrder: [String: Int] = [:]
+  private var seenSeq = 0
+  /// Ids the app itself is ending (so the state watcher does not record them as system ends).
+  private var endingByUs = Set<String>()
+  /// Why activities ended, oldest first ("<iso time> <reason>"), at most `maxEnds`.
+  private var endRing: [String] = []
+  private static let maxEnds = 16
+  /// Last local Activity.request, and whether a retry after the rate limit is queued.
+  private var lastRequestAt: Date?
+  private var retryQueued = false
+  static let requestMinInterval: TimeInterval = 30
+  private let endLog = Logger(subsystem: "com.example.paseo.LiveActivity", category: "ends")
   private let defaults = UserDefaults.standard
   private static let startTokenKey = "paseo.liveActivity.startToken"
 
@@ -400,7 +421,9 @@ final class LiveActivityCenter {
       Task {
         for await activity in Activity<PaseoBotsAttributes>.activityUpdates {
           self.watch(activity)
-          await self.endOthers(keeping: activity.id)
+          // A late yield for an activity that has already ended changes nothing.
+          guard activity.activityState == .active else { continue }
+          await self.endOlder()
         }
       }
     }
@@ -422,6 +445,30 @@ final class LiveActivityCenter {
     onChange?()
   }
 
+  private static let isoFormatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+  }()
+
+  /// Records why an activity ended (ring + os_log); `ours`: the app is ending `id` itself.
+  private func recordEnd(_ reason: String, id: String?, ours: Bool) {
+    let line = "\(Self.isoFormatter.string(from: Date())) \(reason)"
+    lock.lock()
+    if ours, let id = id { endingByUs.insert(id) }
+    endRing.append(String(line.prefix(160)))
+    if endRing.count > Self.maxEnds { endRing.removeFirst(endRing.count - Self.maxEnds) }
+    lock.unlock()
+    endLog.notice("Live Activity end: \(reason, privacy: .public)")
+  }
+
+  /// The ring of end reasons, oldest first (snapshot `ends`).
+  func ends() -> [String] {
+    lock.lock()
+    defer { lock.unlock() }
+    return endRing
+  }
+
   /// The phone's appearance changed (AppearanceSync): JS syncs again and reports it.
   func appearanceChanged() {
     notify()
@@ -441,6 +488,10 @@ final class LiveActivityCenter {
       return
     }
     watched.insert(activity.id)
+    if seenOrder[activity.id] == nil {
+      seenSeq += 1
+      seenOrder[activity.id] = seenSeq
+    }
     lock.unlock()
     Task {
       for await data in activity.pushTokenUpdates {
@@ -455,7 +506,12 @@ final class LiveActivityCenter {
         if state == .ended || state == .dismissed {
           self.lock.lock()
           self.tokens.removeValue(forKey: activity.id)
+          let ours = self.endingByUs.remove(activity.id) != nil
           self.lock.unlock()
+          if !ours {
+            // Ended by iOS, the user or a push (server end), not by this app.
+            self.recordEnd("system-\(state == .ended ? "ended" : "dismissed"):\(short(activity.id))", id: nil, ours: false)
+          }
           self.notify()
         }
       }
@@ -463,9 +519,22 @@ final class LiveActivityCenter {
     notify()
   }
 
+  private func rank(_ id: String) -> Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return seenOrder[id] ?? 0
+  }
+
+  /// At most one activity: ends the active ones older than the newest active one (by the order
+  /// the app first saw them). Never the newest; never one that is no longer active.
   @available(iOS 16.2, *)
-  private func endOthers(keeping id: String) async {
-    for other in Activity<PaseoBotsAttributes>.activities where other.id != id && other.activityState == .active {
+  private func endOlder() async {
+    let active = Activity<PaseoBotsAttributes>.activities.filter { $0.activityState == .active }
+    guard active.count > 1, let newest = active.max(by: { rank($0.id) < rank($1.id) }) else { return }
+    let keep = rank(newest.id)
+    for other in active where other.id != newest.id && rank(other.id) < keep {
+      guard other.activityState == .active else { continue }
+      recordEnd("endOthers:\(short(other.id)) keep:\(short(newest.id))", id: other.id, ours: true)
       await other.end(nil, dismissalPolicy: .immediate)
     }
   }
@@ -501,6 +570,7 @@ final class LiveActivityCenter {
       "enabled": enabled, "startToken": token.map { $0 as Any } ?? NSNull(), "activities": activities,
       "appearance": AppearanceSync.current.map { $0 as Any } ?? NSNull(),
       "dinoLayers": DinoSetting.current,
+      "ends": ends(),
     ]
   }
 
@@ -596,8 +666,11 @@ final class LiveActivityCenter {
       let stale = staleDate.map { Date(timeIntervalSince1970: $0) }
       guard let json = stateJson else {
         Task {
-          let running = Activity<PaseoBotsAttributes>.activities
+          let running = Activity<PaseoBotsAttributes>.activities.filter {
+            $0.activityState != .ended && $0.activityState != .dismissed
+          }
           for activity in running {
+            self.recordEnd("apply-null:\(short(activity.id))", id: activity.id, ours: true)
             await activity.end(nil, dismissalPolicy: .immediate)
           }
           done(running.isEmpty ? "none" : "ended")
@@ -628,6 +701,34 @@ final class LiveActivityCenter {
           done("disabled")
           return
         }
+        // One on its way (iOS 26 `.pending`, or a state this SDK does not know): no second one.
+        if Activity<PaseoBotsAttributes>.activities.contains(where: {
+          $0.activityState != .ended && $0.activityState != .dismissed
+        }) {
+          done("pending")
+          return
+        }
+        // At most one local start per requestMinInterval; a held-back start retries after it.
+        let now = Date()
+        self.lock.lock()
+        if let last = self.lastRequestAt, now.timeIntervalSince(last) < Self.requestMinInterval {
+          let wait = Self.requestMinInterval - now.timeIntervalSince(last)
+          let queue = !self.retryQueued
+          self.retryQueued = true
+          self.lock.unlock()
+          if queue {
+            DispatchQueue.main.asyncAfter(deadline: .now() + wait) {
+              self.lock.lock()
+              self.retryQueued = false
+              self.lock.unlock()
+              self.notify()
+            }
+          }
+          done("rate_limited")
+          return
+        }
+        self.lastRequestAt = now
+        self.lock.unlock()
         do {
           let activity = try Activity.request(
             attributes: PaseoBotsAttributes(), content: content, pushType: .token)
@@ -673,4 +774,9 @@ func downscaledPng(_ data: Data, px: CGFloat) -> Data? {
 
 private func hex(_ data: Data) -> String {
   return data.map { String(format: "%02x", $0) }.joined()
+}
+
+/// The first 8 characters of an activity id (logs, end reasons).
+private func short(_ id: String) -> String {
+  return String(id.prefix(8))
 }

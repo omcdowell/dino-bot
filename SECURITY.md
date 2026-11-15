@@ -83,8 +83,12 @@ trust GitHub's HTTPS for that; download it, check it as above, then run it), and
 GitHub account: whoever can push a `v…` tag to this repository can make a release.
 
 ## Known gaps (beta)
-- Only one password, shared by all your phones. It is kept in the app's normal storage, not the
-  iOS Keychain.
+- Pairing codes are one-use (one device, 10 minutes), and each device gets its own token
+  (`dinobot devices` lists and revokes them). Until the app build that understands one-use codes
+  is out, the code also carries the computer's password (`pairingQr` in `lib/product.json`), so a
+  photo of a code is a long-lived secret. Older app versions keep that password; newer ones delete
+  it once they have a device token. Tokens are kept in the app's normal storage, not the iOS
+  Keychain.
 - Push notifications go through Expo and Apple.
 - The bundled daemon still uses some dependency versions that have published advisories. Updating
   them is in progress.

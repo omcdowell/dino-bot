@@ -11,6 +11,7 @@
  */
 import { createHash } from "node:crypto";
 import { readdir, unlink } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { gzipSync } from "node:zlib";
@@ -22,6 +23,7 @@ import {
   type AvatarJson,
   type AvatarPack,
 } from "../shared/avatar";
+import { botsPluginDirs } from "./plugin-dir";
 
 export const AVATAR_JSON_FILE = "avatar.json";
 export const AVATAR_RENDER_DIR = "avatars";
@@ -56,18 +58,39 @@ type ResvgClass = new (svg: string, options: object) => { render(): { asPng(): U
 const RESVG_MODULE: string = "@resvg/resvg-js";
 
 /**
- * resvg-js, loaded on first use so a host without the native module still starts (only a save fails).
+ * resvg-js's entry file in the bots plugin's own node_modules (Paseo's config, else the install: plugin-dir.ts);
+ * null when none has it. Not a bare import: Paseo evaluates the plugin's bundle from its own install, so a bare
+ * name resolves from there ("Cannot find package '@resvg/resvg-js' imported from …/bundle-evaluator.js").
+ */
+export function resolveResvg(env: NodeJS.ProcessEnv = process.env): string | null {
+  for (const dir of botsPluginDirs(env)) {
+    try {
+      return createRequire(join(dir, "package.json")).resolve(RESVG_MODULE);
+    } catch {
+      // not in this folder
+    }
+  }
+  return null;
+}
+
+/**
+ * Loads resvg-js (uncached; resvgRenderer caches): the plugin folder's, else whatever this module's own
+ * resolution finds (tests and tools run from the source tree).
  * No system fonts: the avatars have no text, and loading them costs ~40 ms per render.
  */
-export function resvgRenderer(): Promise<AvatarRenderer> {
-  resvg ??= import(RESVG_MODULE)
-    .then(({ Resvg }: { Resvg: ResvgClass }) => (svg: string, size: number) =>
-      Buffer.from(new Resvg(svg, { fitTo: { mode: "width", value: size }, font: { loadSystemFonts: false } }).render().asPng()),
-    )
-    .catch((error: unknown) => {
-      resvg = null;
-      throw error;
-    });
+export async function loadResvg(env: NodeJS.ProcessEnv = process.env): Promise<AvatarRenderer> {
+  const file = resolveResvg(env);
+  const { Resvg } = (file ? createRequire(file)(file) : await import(RESVG_MODULE)) as { Resvg: ResvgClass };
+  return (svg: string, size: number) =>
+    Buffer.from(new Resvg(svg, { fitTo: { mode: "width", value: size }, font: { loadSystemFonts: false } }).render().asPng());
+}
+
+/** resvg-js, loaded on first use so a host without the native module still starts (only a save fails). */
+export function resvgRenderer(env: NodeJS.ProcessEnv = process.env): Promise<AvatarRenderer> {
+  resvg ??= loadResvg(env).catch((error: unknown) => {
+    resvg = null;
+    throw error;
+  });
   return resvg;
 }
 

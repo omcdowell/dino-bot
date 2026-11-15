@@ -127,7 +127,9 @@ async function rpc<T>(serverId: string, method: string, input: unknown): Promise
  *
  * First run only (FR1, 15 Nov): Claude Code's own login is on top ("uses your Claude Pro/Max
  * plan"), its state from engines.status as on Settings › Providers; pi's list follows. From
- * Settings the list is pi's only (Providers has its own Claude Code card).
+ * Settings the list is pi's only (Providers has its own Claude Code card). The old pi-only
+ * first-run screen is gone (15 Nov): an older daemon (no engines.*) still gets both options, the
+ * Claude Code card asking to update the computer first.
  */
 export default function SetupSignInScreen() {
   const insets = useSafeAreaInsets();
@@ -174,9 +176,10 @@ export default function SetupSignInScreen() {
     try {
       const r = await rpc<EnginesAnswer>(serverId, ENGINES_RPC.status, {});
       setCcCard(r?.claudeCode ?? null);
+      setCcUnsupported(false);
     } catch (e) {
-      // An older daemon has no Claude Code login either: no card. Other errors: the card stays
-      // usable (signin.start reports what is wrong).
+      // An older daemon has no Claude Code login either: the card asks to update it. Other
+      // errors: the card stays usable (signin.start reports what is wrong).
       if (isEnginesUnsupportedError(e)) setCcUnsupported(true);
     }
   }, [serverId]);
@@ -390,9 +393,16 @@ export default function SetupSignInScreen() {
           </View>
         ) : (
           <>
-            <Text style={styles.lead}>
-              {`${APP_DISPLAY_NAME}'s bots run on your computer. Pick the account they use. You sign in here; your computer keeps the sign-in.`}
-            </Text>
+            {claudeCode.kind === "hidden" ? (
+              <Text style={styles.lead}>
+                {`${APP_DISPLAY_NAME}'s bots run on your computer. Pick the account they use. You sign in here; your computer keeps the sign-in.`}
+              </Text>
+            ) : (
+              <View style={styles.intro} testID="setup-signin-choice">
+                <Text style={styles.heading}>{CLAUDE_CODE_FIRST_RUN_COPY.choiceTitle}</Text>
+                <Text style={styles.body}>{CLAUDE_CODE_FIRST_RUN_COPY.choiceLead}</Text>
+              </View>
+            )}
             {signedIn.length ? (
               <View style={styles.card}>
                 <Text style={styles.ok}>{`✓ Already signed in: ${signedIn.join(", ")}`}</Text>
@@ -412,18 +422,32 @@ export default function SetupSignInScreen() {
                 onCheckAgain={reloadClaudeCode}
               />
             )}
-            {claudeCode.kind === "hidden" || !options ? null : (
-              <Text style={styles.body} testID="setup-signin-pi-heading">
-                {CLAUDE_CODE_FIRST_RUN_COPY.piHeading}
-              </Text>
+            {claudeCode.kind === "hidden" ? null : (
+              <Text style={styles.or}>{CLAUDE_CODE_FIRST_RUN_COPY.or}</Text>
             )}
-            <OptionsList
-              options={options}
-              loadError={loadError}
-              busy={busy}
-              onRetry={reload}
-              onChoose={choose}
-            />
+            <View style={styles.piBox} testID="setup-signin-pi">
+              <View
+                style={styles.piHead}
+                testID={claudeCode.kind === "hidden" ? undefined : "setup-signin-pi-heading"}
+              >
+                {claudeCode.kind === "hidden" ? null : (
+                  <Text style={styles.kicker}>{CLAUDE_CODE_FIRST_RUN_COPY.optionTwo}</Text>
+                )}
+                <Text style={styles.title}>{CLAUDE_CODE_FIRST_RUN_COPY.piTitle}</Text>
+                <Text style={styles.body}>
+                  {claudeCode.kind === "hidden"
+                    ? CLAUDE_CODE_FIRST_RUN_COPY.piDetailSettings
+                    : CLAUDE_CODE_FIRST_RUN_COPY.piDetail}
+                </Text>
+              </View>
+              <OptionsList
+                options={options}
+                loadError={loadError}
+                busy={busy}
+                onRetry={reload}
+                onChoose={choose}
+              />
+            </View>
             {fromSettings && serverId ? <InstallFromLink serverId={serverId} /> : null}
             {fromSettings || signedIn.length ? null : (
               <Button onPress={goNext} testID="setup-signin-skip-for-now">
@@ -691,6 +715,24 @@ function pressableCardStyle({ pressed }: PressableStateCallbackType) {
   return [styles.card, pressed && styles.pressed];
 }
 
+function pressableClaudeCardStyle({ pressed }: PressableStateCallbackType) {
+  return [styles.card, styles.recommendedCard, pressed && styles.pressed];
+}
+
+/**
+ * The "Choose" box on each option (LO1): green on Claude Code, grey on pi's providers. It is the
+ * look of a button only; the whole card is the one press target (no button inside a button).
+ */
+function ChooseBox({ tone, testID }: { tone: "green" | "grey"; testID: string }) {
+  return (
+    <View style={tone === "green" ? styles.chooseGreen : styles.chooseGrey} testID={testID}>
+      <Text style={tone === "green" ? styles.chooseGreenText : styles.chooseGreyText}>
+        {CLAUDE_CODE_FIRST_RUN_COPY.choose}
+      </Text>
+    </View>
+  );
+}
+
 /**
  * One way to sign in; the Claude login carries its badge from the host's list (EXTRA USAGE, or
  * UNOFFICIAL when the host has a provider plugin for the Claude plan), shown as a warning.
@@ -713,20 +755,25 @@ function SignInOptionRow({
       style={pressableCardStyle}
       testID={`setup-signin-${option.id}`}
     >
-      <View style={styles.row}>
-        <Text style={styles.title}>{option.label}</Text>
-        {option.badge ? (
-          <Text style={badgeIsWarning(option) ? styles.badgeWarn : styles.badge}>
-            {option.badge}
-          </Text>
-        ) : null}
+      <View style={styles.optionRow}>
+        <View style={styles.optionText}>
+          <View style={styles.titleRow}>
+            <Text style={styles.title}>{option.label}</Text>
+            {option.badge ? (
+              <Text style={badgeIsWarning(option) ? styles.badgeWarn : styles.badge}>
+                {option.badge}
+              </Text>
+            ) : null}
+          </View>
+          {option.note ? <Text style={styles.body}>{option.note}</Text> : null}
+          {warning ? (
+            <Text style={styles.warn} testID={`setup-signin-${option.id}-warning`}>
+              {warning}
+            </Text>
+          ) : null}
+        </View>
+        <ChooseBox tone="grey" testID={`setup-signin-${option.id}-choose`} />
       </View>
-      {option.note ? <Text style={styles.body}>{option.note}</Text> : null}
-      {warning ? (
-        <Text style={styles.warn} testID={`setup-signin-${option.id}-warning`}>
-          {warning}
-        </Text>
-      ) : null}
     </Pressable>
   );
 }
@@ -753,16 +800,36 @@ function ClaudeCodeOption({
   const pressable = claudeCodeCardPressable(state);
   const body = (
     <>
-      <View style={styles.row}>
-        <Text style={styles.title}>{CLAUDE_CODE_FIRST_RUN_COPY.label}</Text>
-        <Text style={styles.badge}>YOUR PLAN</Text>
+      <View style={styles.optionRow}>
+        <View style={styles.optionText}>
+          <Text style={styles.kicker}>{CLAUDE_CODE_FIRST_RUN_COPY.optionOne}</Text>
+          <View style={styles.titleRow}>
+            <Text style={styles.title}>
+              {CLAUDE_CODE_FIRST_RUN_COPY.label}{" "}
+              <Text style={styles.recommended} testID="setup-signin-claude-code-recommended">
+                {CLAUDE_CODE_FIRST_RUN_COPY.recommended}
+              </Text>
+            </Text>
+          </View>
+          <Text style={styles.ok}>{CLAUDE_CODE_FIRST_RUN_COPY.note}</Text>
+          <Text style={styles.body}>{CLAUDE_CODE_FIRST_RUN_COPY.detail}</Text>
+        </View>
+        {pressable ? <ChooseBox tone="green" testID="setup-signin-claude-code-choose" /> : null}
       </View>
-      <Text style={styles.ok}>{CLAUDE_CODE_FIRST_RUN_COPY.note}</Text>
-      <Text style={styles.body}>{CLAUDE_CODE_FIRST_RUN_COPY.detail}</Text>
       {state.kind === "logged-in" ? (
         <Text style={styles.ok} testID="setup-signin-claude-code-status">{`✓ ${state.status}`}</Text>
       ) : null}
       {state.kind === "error" ? <Text style={styles.error}>{state.message}</Text> : null}
+      {state.kind === "update-host" ? (
+        <>
+          <Text style={styles.body} testID="setup-signin-claude-code-update">
+            {state.message}
+          </Text>
+          <Button onPress={onCheckAgain} testID="setup-signin-claude-code-check">
+            Check again
+          </Button>
+        </>
+      ) : null}
       {state.kind === "not-installed" ? (
         <>
           <Text style={styles.body} testID="setup-signin-claude-code-install">
@@ -788,7 +855,7 @@ function ClaudeCodeOption({
   );
   if (!pressable) {
     return (
-      <View style={styles.card} testID="setup-signin-claude-code">
+      <View style={[styles.card, styles.recommendedCard]} testID="setup-signin-claude-code">
         {body}
       </View>
     );
@@ -797,7 +864,7 @@ function ClaudeCodeOption({
     <Pressable
       onPress={onChoose}
       disabled={disabled}
-      style={pressableCardStyle}
+      style={pressableClaudeCardStyle}
       testID="setup-signin-claude-code"
     >
       {body}
@@ -816,6 +883,76 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
   },
   pressed: { opacity: 0.7 },
+  intro: { gap: theme.spacing[2] },
+  heading: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.lg,
+    fontWeight: theme.fontWeight.semibold,
+  },
+  kicker: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  // Option 1: the dino green outline (spring green accent).
+  recommendedCard: { borderWidth: theme.borderWidth[2], borderColor: theme.colors.accent },
+  // A green chip with the dark ink on it (as on the green buttons): the spring green as text is
+  // only ~2:1 on light cards. (A light/dark switch in this sheet does not reach web: CSS variables.)
+  recommended: {
+    color: theme.colors.accentForeground,
+    backgroundColor: theme.colors.accent,
+    fontWeight: theme.fontWeight.semibold,
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing[1],
+  },
+  or: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    textAlign: "center",
+  },
+  // Option 2: one soft panel under all of pi's providers.
+  piBox: {
+    padding: theme.spacing[3],
+    borderRadius: theme.borderRadius["2xl"],
+    backgroundColor: theme.colors.surface1,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    gap: theme.spacing[3],
+  },
+  piHead: { gap: theme.spacing[1], paddingHorizontal: theme.spacing[1] },
+  optionRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing[3] },
+  optionText: { flex: 1, minWidth: 0, gap: theme.spacing[2] },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    flexWrap: "wrap",
+  },
+  chooseGreen: {
+    paddingHorizontal: theme.spacing[4],
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.accent,
+  },
+  chooseGreenText: {
+    color: theme.colors.accentForeground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+  },
+  chooseGrey: {
+    paddingHorizontal: theme.spacing[4],
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface3,
+  },
+  chooseGreyText: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+  },
   steps: { gap: theme.spacing[1], paddingBottom: theme.spacing[1] },
   progressRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
   stepOn: {

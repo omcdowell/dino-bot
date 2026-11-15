@@ -45,7 +45,55 @@ COSIGN_SHA256S="darwin-arm64=9f9b8cd557cf2e5b3df3373a00baa005a86b02391e3e06dd0ce
 main() {
   # The very first thing, before any check or download: say what is happening (`curl | sh` is
   # otherwise silent until the name question). Every slow step below prints a line as it starts.
-  echo "Installing $PRODUCT_NAME. This takes a minute or two; each step is shown below."
+  #
+  # Two looks (lib/tui.mjs has the same rules for the wizard). RICH: a real terminal that is not
+  # TERM=dumb: step headers, blank lines around what matters, one progress line redrawn in place,
+  # text wrapped to a readable column (at most 76 wide, read from the window each time), details
+  # (paths, retries, signature) in ~/.dinobot/logs/install.log, named only when something fails.
+  # Colour unless NO_COLOR. Otherwise (pipes, CI, logs, TERM=dumb): the plain lines, as before.
+  RICH=0
+  if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ]; then RICH=1; fi
+  B=""; D=""; G=""; R=""; C=""; N=""
+  if [ "$RICH" = 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    B=$(printf '\033[1m'); D=$(printf '\033[2m'); G=$(printf '\033[32m'); R=$(printf '\033[31m'); C=$(printf '\033[36m'); N=$(printf '\033[0m')
+  fi
+  # Window width now (a resize is picked up at the next line): the terminal, else $COLUMNS, else 80.
+  cols() {
+    _w=$(stty size </dev/tty 2>/dev/null | cut -d' ' -f2)
+    case "$_w" in ''|0|*[!0-9]*) _w=$(tput cols 2>/dev/null || true) ;; esac
+    case "$_w" in ''|0|*[!0-9]*) _w=${COLUMNS:-80} ;; esac
+    case "$_w" in ''|0|*[!0-9]*) _w=80 ;; esac
+    echo "$_w"
+  }
+  # wrap <indent> <text>: words never broken; a word longer than the line gets a line of its own.
+  wrap() {
+    _w=$(cols); _w=$((_w - 2 - $1)); [ "$_w" -le 76 ] || _w=76; [ "$_w" -ge 20 ] || _w=20
+    printf '%s\n' "$2" | awk -v w="$_w" -v ind="$(printf "%$(( $1 + 2 ))s" "")" '{
+      n = split($0, a, " "); line = ""
+      for (i = 1; i <= n; i++) {
+        if (line == "") line = a[i]
+        else if (length(line) + 1 + length(a[i]) > w) { print ind line; line = a[i] }
+        else line = line " " a[i]
+      }
+      print ind line }'
+  }
+  # Rich lines: say_ok "Downloaded" -> "  ✓ Downloaded"; step <n> <title>; status line redrawn with \r.
+  say_ok() { printf '\r\033[K  %s✓%s %s\n' "$G" "$N" "$1"; SPACED=0; }
+  status() { printf '\r\033[K  %s' "$1"; } # (callers keep it short: it must not wrap)
+  step() { printf '\n  %sStep %s of 3%s  %s%s%s\n\n' "$C" "$1" "$N" "$B" "$2" "$N"; SPACED=1; }
+  SPACED=0 # a blank line is already above the cursor (no second one before an error)
+  # Details for the log (and only the log, in the rich look).
+  LOG=""
+  log() { [ -n "$LOG" ] && printf '%s\n' "$*" >>"$LOG" 2>/dev/null; return 0; }
+  # say <line>: plain look prints it; rich look logs it.
+  say() { if [ "$RICH" = 1 ]; then log "$*"; else echo "$*"; fi; }
+  if [ "$RICH" = 1 ]; then
+    printf '\n  %s%s%s\n' "$B" "Installing $PRODUCT_NAME" "$N"
+    wrap 0 "This takes a minute or two. Your bots will run on this computer; your phone connects to it." | sed "s/^/$D/; s/\$/$N/"
+    step 1 "Download"
+  else
+    echo "Installing $PRODUCT_NAME. This takes a minute or two; each step is shown below."
+  fi
   # Owner-only files: bot memories, chats, logs and secrets are not for other users of this computer.
   umask 077
   ROOT=${DINOBOT_HOME:-$HOME/.$PRODUCT_ID}
@@ -60,8 +108,19 @@ main() {
   }
   T0=$(now_ms)
 
-  fail() { printf '%s install stopped: %s\n' "$PRODUCT_NAME" "$*" >&2; exit 1; }
-  echo "Checking this computer..."
+  fail() {
+    if [ "$RICH" = 1 ]; then
+      log "$PRODUCT_NAME install stopped: $*"
+      _m="$*"; _first=$(printf '%s' "$_m" | cut -c1 | tr '[:lower:]' '[:upper:]')
+      { printf '\r\033[K'; [ "$SPACED" = 1 ] || echo
+        printf '  %s✗%s %s%s install stopped.%s\n' "$R" "$N" "$B" "$PRODUCT_NAME" "$N"
+        wrap 2 "$_first${_m#?}"
+        [ -n "$LOG" ] && [ -s "$LOG" ] && printf '%s\n' "$(wrap 2 "Details: $(printf '%s' "$LOG" | sed "s#^$HOME/#~/#")")" | sed "s/^/$D/; s/\$/$N/"
+        echo; } >&2
+    else printf '%s install stopped: %s\n' "$PRODUCT_NAME" "$*" >&2; fi
+    exit 1
+  }
+  say "Checking this computer..."
   sha256_of() {
     if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
     elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
@@ -90,8 +149,13 @@ main() {
     fail "this Ubuntu runs on WSL 1, which cannot run Tailscale. In Windows PowerShell run:  wsl --set-version ${WSL_DISTRO_NAME:-<distro>} 2   then run the install command again. Nothing was installed."
   fi
   if [ "$WSL" = 2 ]; then
-    echo "Windows WSL ${WSL_DISTRO_NAME:-2}: $PRODUCT_NAME goes inside this Linux; your phone reaches it over Tailscale."
-    echo "Note: Windows (WSL) support is untested on a real Windows PC so far. If something goes wrong, see docs/windows.md in the $PRODUCT_NAME repository."
+    if [ "$RICH" = 1 ]; then
+      wrap 0 "Windows (WSL ${WSL_DISTRO_NAME:-2}): $PRODUCT_NAME goes inside this Linux; your phone reaches it over Tailscale. Untested on a real Windows PC so far: if something goes wrong, see docs/windows.md in the $PRODUCT_NAME repository." | sed "s/^/$D/; s/\$/$N/"
+      echo
+    else
+      echo "Windows WSL ${WSL_DISTRO_NAME:-2}: $PRODUCT_NAME goes inside this Linux; your phone reaches it over Tailscale."
+      echo "Note: Windows (WSL) support is untested on a real Windows PC so far. If something goes wrong, see docs/windows.md in the $PRODUCT_NAME repository."
+    fi
     case "$ROOT" in
       /mnt/[a-zA-Z]|/mnt/[a-zA-Z]/*) fail "$ROOT is on a Windows drive, which cannot keep $PRODUCT_NAME's password private and is slow. Install into Ubuntu's own home folder (leave DINOBOT_HOME unset). Nothing was installed." ;;
     esac
@@ -122,6 +186,7 @@ main() {
   fi
 
   mkdir -p "$ROOT/download" "$ROOT/logs"
+  if [ "$RICH" = 1 ]; then LOG="$ROOT/logs/install.log"; : >"$LOG"; log "$PRODUCT_NAME install, $(date)"; fi
   TARBALL="$ROOT/download/$ASSET"
 
   # Where the download comes from (MODE):
@@ -237,6 +302,17 @@ main() {
   }
   dl_draw() { # dl_draw [done]: terminal: redraw one line; else one plain line
     _s=$(dl_amount)
+    if [ "$RICH" = 1 ]; then
+      if [ -n "${1:-}" ]; then say_ok "Downloaded (${_s#*/})"; return; fi
+      # A bar as wide as the window allows (at most 20), built char by char (multibyte glyphs).
+      _bw=$(( $(cols) - 34 )); [ "$_bw" -le 20 ] || _bw=20
+      if [ -n "$PC" ] && [ "$_bw" -ge 5 ]; then
+        _h=$((PC * _bw / 100)); _bar=""; _j=0
+        while [ "$_j" -lt "$_bw" ]; do if [ "$_j" -lt "$_h" ]; then _bar="$_bar━"; else _bar="$_bar─"; fi; _j=$((_j + 1)); done
+        status "Downloading  $C$_bar$N  $(printf '%3d' "$PC")%  $_s"
+      else status "Downloading  ${PC:+$PC%  }$_s"; fi
+      return
+    fi
     if [ "$TTY" = 1 ]; then
       if [ -n "$PC" ]; then
         _h=$((PC / 5))
@@ -248,7 +324,7 @@ main() {
     else echo "Downloading  $_s${PC:+ ($PC%)}"; fi
   }
 
-  echo "Downloading $PRODUCT_NAME ($OS/$ARCH) in the background into $ROOT"
+  say "Downloading $PRODUCT_NAME ($OS/$ARCH) in the background into $ROOT"
   # 1. Download in the background (.tar.zst first when it can be unpacked here; the asset that
   # arrived is written to download/asset). A .tar.*.part left by a run that lost its network is
   # kept and resumed (RESUMED=1: if it then fails the checksum, it was of an older release, and
@@ -313,7 +389,7 @@ main() {
     else
       [ -n "$COSIGN_PIN" ] || { kill "$DL" 2>/dev/null; fail "no pinned signature checker (cosign) for $OS/$ARCH. Nothing was installed."; }
       COSIGN=$ROOT/tools/cosign
-      echo "Also downloading the signature checker (cosign, once) in the background"
+      say "Also downloading the signature checker (cosign, once) in the background"
       (
         rm -f "$COSIGN.part"
         if [ "$MODE" != tarball ]; then
@@ -357,8 +433,10 @@ main() {
     NAME_DEFAULT=$(default_name)
     case " $* " in *" --yes "*) USER_NAME=$NAME_DEFAULT ;; esac
     if [ -z "$USER_NAME" ] && [ -r /dev/tty ] && (exec </dev/tty) 2>/dev/null; then
-      printf 'While that downloads: what should your bots call you? [%s]: ' "$NAME_DEFAULT"
+      if [ "$RICH" = 1 ]; then printf '  %sWhat should your bots call you?%s [%s]: ' "$B" "$N" "$NAME_DEFAULT"
+      else printf 'While that downloads: what should your bots call you? [%s]: ' "$NAME_DEFAULT"; fi
       read -r USER_NAME </dev/tty || USER_NAME=""
+      if [ "$RICH" = 1 ]; then echo; SPACED=1; fi
     fi
     [ -n "$USER_NAME" ] || USER_NAME=$NAME_DEFAULT
   fi
@@ -376,7 +454,7 @@ main() {
         if [ "$TTY" = 1 ]; then dl_measure; dl_draw; fi
         while sleep 0.5 2>/dev/null || sleep 1; do
           i=$((i + 1)); dl_measure
-          if [ "$TTY" = 1 ]; then dl_draw
+          if [ "$TTY" = 1 ] || [ "$RICH" = 1 ]; then dl_draw
           elif [ -n "$PC" ]; then [ "$PC" -ge "$q" ] && [ "$PC" -lt 100 ] && { dl_draw; q=$(( (PC / 25 + 1) * 25 )); }
           elif [ $((i % 60)) = 0 ]; then dl_draw; fi
         done
@@ -387,8 +465,13 @@ main() {
     [ -z "$TICK" ] || { kill "$TICK" 2>/dev/null || true; wait "$TICK" 2>/dev/null || true; }
     rm -f "$ROOT/download/$NAME".tar.*.hdr
     if [ "$DLRC" != 0 ]; then
-      [ "$TTY" = 1 ] && echo
-      echo "Downloading failed"; cat "$ROOT/logs/download.log" >&2
+      if [ "$RICH" = 1 ]; then
+        # curl's own lines and the retries go to the log; the screen gets one sentence (fail).
+        printf '\r\033[K'; { echo "Downloading failed:"; cat "$ROOT/logs/download.log"; } >>"$LOG"
+      else
+        [ "$TTY" = 1 ] && echo
+        echo "Downloading failed"; cat "$ROOT/logs/download.log" >&2
+      fi
       # curl -f: "error: 404"; wget: "ERROR 404". A release URL that 404s means nothing is published there.
       [ "$MODE" = url ] && grep -Eq '(error|ERROR):? 404' "$ROOT/logs/download.log" 2>/dev/null &&
         fail "no release has been published yet at $BASE (or it has no $ASSET for this computer). Nothing was installed."
@@ -409,7 +492,8 @@ main() {
     # Either is enough; if both are there they must agree. Checksums catch corruption; authenticity
     # comes from the signature check right after.
     # DINOBOT_ALLOW_UNVERIFIED=1 is for local development builds only.
-    echo "Checking the download (checksum$([ "$SIGN" = 1 ] && echo " and signature"))..."
+    say "Checking the download (checksum$([ "$SIGN" = 1 ] && echo " and signature"))..."
+    if [ "$RICH" = 1 ]; then status "Checking the download..."; fi
     TAR_SHA=$(sha256_of "$TARBALL")
     PIN_SHA=""
     for p in $PINNED_SHA256S; do [ "${p%%=*}" = "$ASSET" ] && PIN_SHA=${p#*=}; done
@@ -427,7 +511,8 @@ main() {
       rm -f "$TARBALL"
       # A .part resumed from an earlier run, of a release that has been replaced since: once more from 0.
       if [ "$RESUMED" = 1 ]; then
-        echo "The part downloaded by an earlier try was of another release; downloading again from the start."
+        say "The part downloaded by an earlier try was of another release; downloading again from the start."
+        if [ "$RICH" = 1 ]; then { printf '\r\033[K'; wrap 0 "The part downloaded earlier was of another release: downloading again from the start." | sed "s/^/$D/; s/\$/$N/"; }; fi
         RESUMED=0; ASSET=$ASSET0; TARBALL=$TARBALL0; rm -f "$ROOT/download/$NAME".tar.*
         start_download; continue
       fi
@@ -443,20 +528,24 @@ main() {
     [ -s "$BUNDLE" ] || { rm -f "$TARBALL" "$BUNDLE"; fail "the release has no signature ($ASSET$SIG_SUFFIX), so it cannot be verified. Nothing was installed."; }
     if [ -n "$CS" ]; then
       # Progress of whichever cosign file is arriving (MB so far / total; terminal only, one line).
-      printf 'Getting the signature checker'
+      [ "$RICH" = 1 ] || printf 'Getting the signature checker'
+      if [ "$RICH" = 1 ]; then status "Getting the signature checker (once)..."; fi
       if [ "$TTY" = 1 ]; then
         ( while sleep 0.5 2>/dev/null || sleep 1; do
             GOT=""; TOT=""
             for _x in "$COSIGN.zst" "$COSIGN.gz" "$COSIGN"; do
               [ -f "$_x.part" ] && { GOT=$(wc -c <"$_x.part" | tr -d ' '); TOT=$(hdr_total "$_x.hdr"); break; }
             done
-            [ -n "$GOT" ] && printf '\rGetting the signature checker  %s   ' "$(dl_amount)"
+            if [ -n "$GOT" ]; then
+              if [ "$RICH" = 1 ]; then status "Getting the signature checker (once)  $(dl_amount)"
+              else printf '\rGetting the signature checker  %s   ' "$(dl_amount)"; fi
+            fi
           done ) &
       else ( while sleep 10; do printf '.'; done ) & fi
       TICK=$!
       CSRC=0; wait "$CS" || CSRC=$?
       kill "$TICK" 2>/dev/null || true; wait "$TICK" 2>/dev/null || true
-      echo
+      if [ "$RICH" = 1 ]; then printf '\r\033[K'; else echo; fi
       [ "$CSRC" = 0 ] || { rm -f "$TARBALL" "$BUNDLE"; fail "could not get the signature checker (cosign $COSIGN_VERSION): $(tail -1 "$ROOT/logs/cosign.log"). Nothing was installed."; }
     fi
     mkdir -p "$ROOT/tools/sigstore"
@@ -467,10 +556,15 @@ main() {
       fail "the download's signature is not from $PRODUCT_NAME's release workflow ($(grep -v '^$' "$ROOT/logs/signature.log" | tail -1)). Nothing was installed."
     fi
     rm -f "$BUNDLE"
-    echo "Signature OK (built and signed by $SIGNER_REPO's release workflow)"
-  elif [ "$SIGNING_MODE" != off ]; then echo "WARNING: signature not checked (DINOBOT_ALLOW_UNSIGNED / DINOBOT_ALLOW_UNVERIFIED)" >&2
+    say "Signature OK (built and signed by $SIGNER_REPO's release workflow)"
+    if [ "$RICH" = 1 ]; then say_ok "Checked: checksum and signature"; fi
+  elif [ "$SIGNING_MODE" != off ]; then
+    if [ "$RICH" = 1 ]; then say_ok "Checked: checksum"; wrap 2 "! signature not checked (development build: DINOBOT_ALLOW_UNSIGNED)" | sed "s/^/$D/; s/\$/$N/" >&2
+    else echo "WARNING: signature not checked (DINOBOT_ALLOW_UNSIGNED / DINOBOT_ALLOW_UNVERIFIED)" >&2; fi
+  elif [ "$RICH" = 1 ]; then say_ok "Checked: checksum"
   fi
-  echo "Unpacking into $ROOT/app..."
+  say "Unpacking into $ROOT/app..."
+  if [ "$RICH" = 1 ]; then status "Unpacking..."; fi
   rm -rf "$ROOT/app.new"
   mkdir -p "$ROOT/app.new"
   # -m: the files get today's time (the sources' fixed commit date may lie in the future).
@@ -486,8 +580,9 @@ main() {
   mv "$ROOT/app.new" "$ROOT/app"
   rm -f "$TARBALL" "$ROOT/download/$NAME".tar.*
   T1=$(now_ms)
+  if [ "$RICH" = 1 ]; then say_ok "Unpacked"; fi
 
-  echo "Starting the setup wizard..."
+  say "Starting the setup wizard..."
   # 4. The wizard (bundled Node). It prints the QR as soon as the daemon listens.
   # The wizard reads answers from /dev/tty itself, so `curl | sh` works.
   DINOBOT_T0_MS=$T0 DINOBOT_FETCH_MS=$((T1 - T0)) DINOBOT_HOME=$ROOT DINOBOT_TARBALL_SHA=$TAR_SHA DINOBOT_TARBALL_FORMAT=${ASSET##*.} DINOBOT_SOURCE_MODE=$MODE \

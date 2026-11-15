@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, test } from "vitest";
 import { OWNER_PERMISSIONS } from "./authorization/index.js";
 import { resolveSessionAdmission } from "./session-admission-auth.js";
-import { SessionTokenStore } from "./session-tokens.js";
+import { listPairedDevices, revokePairedDevices, SessionTokenStore } from "./session-tokens.js";
 
 const HASH_A = "$2b$12$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const HASH_B = "$2b$12$bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -101,12 +101,14 @@ describe("session tokens", () => {
     ).toBeNull();
   });
 
-  test("a new token for a device replaces its previous one", () => {
+  test("a new token for a device replaces its previous one once the device presents it", () => {
     const { store } = harness();
     const first = store.issue(OWNER, PHONE)!.token;
     const second = store.issue(OWNER, PHONE)!.token;
-    expect(store.verify(first, PHONE)).toBeNull();
+    // Renewal grace: the device may not have received the new one (dropped socket).
+    expect(store.verify(first, PHONE)).toEqual({ ...OWNER, renew: true });
     expect(store.verify(second, PHONE)).not.toBeNull();
+    expect(store.verify(first, PHONE)).toBeNull();
     expect(store.size).toBe(1);
   });
 
@@ -260,6 +262,108 @@ describe("session tokens across a restart (RU1)", () => {
       expect(t.open().verify(issued.token, PHONE)).not.toBeNull();
     } finally {
       t.cleanup();
+    }
+  });
+});
+
+describe("device tokens (QR2)", () => {
+  const DAY = 24 * HOUR;
+
+  test("live 180 days, not 24 hours, and are renewed when used a day after issue", () => {
+    const { store, advance } = harness();
+    const issued = store.issue(OWNER, PHONE, { device: true })!;
+    expect(issued.device).toBe(true);
+    expect(issued.expiresAt).toBe(1_000_000 + 180 * DAY);
+    advance(2 * HOUR);
+    expect(store.verify(issued.token, PHONE)).toEqual({ ...OWNER, renew: false, device: true });
+    advance(3 * DAY);
+    expect(store.verify(issued.token, PHONE)).toEqual({ ...OWNER, renew: true, device: true });
+  });
+
+  test("sliding idle expiry: renewed on use it outlives 180 days; unused it ends at 180 days", () => {
+    const { store, advance } = harness();
+    let token = store.issue(OWNER, PHONE, { device: true })!.token;
+    for (let i = 0; i < 4; i++) {
+      advance(100 * DAY);
+      const verified = store.verify(token, PHONE);
+      expect(verified?.renew).toBe(true);
+      token = store.issue(OWNER, PHONE, { device: true })!.token;
+    }
+    advance(179 * DAY);
+    expect(store.verify(token, PHONE)).not.toBeNull();
+    const idle = store.issue(
+      OWNER,
+      { clientId: "clsk_idle", channel: "direct:protected" },
+      { device: true },
+    )!;
+    advance(180 * DAY);
+    expect(
+      store.verify(idle.token, { clientId: "clsk_idle", channel: "direct:protected" }),
+    ).toBeNull();
+  });
+
+  test("a replaced token keeps working for 7 days only (renewal grace)", () => {
+    const { store, advance } = harness();
+    const first = store.issue(OWNER, PHONE, { device: true })!.token;
+    advance(2 * DAY);
+    store.issue(OWNER, PHONE, { device: true });
+    advance(6 * DAY);
+    expect(store.verify(first, PHONE)?.renew).toBe(true);
+    advance(1 * DAY + 1);
+    expect(store.verify(first, PHONE)).toBeNull();
+  });
+
+  test("a password change still ends device tokens", () => {
+    const { store, setPasswordHash } = harness();
+    const { token } = store.issue(OWNER, PHONE, { device: true })!;
+    setPasswordHash(HASH_B);
+    expect(store.verify(token, PHONE)).toBeNull();
+  });
+
+  test("survive a restart with their kind, and are revoked from outside the daemon", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "paseo-device-tokens-"));
+    try {
+      let now = 5_000_000;
+      const open = () =>
+        new SessionTokenStore({
+          getPasswordHash: () => HASH_A,
+          now: () => now,
+          persistPath: path.join(dir, "session-tokens.json"),
+        });
+      const phone = open().issue(OWNER, PHONE, { device: true, label: "app 0.1.4" })!;
+      now += 10;
+      const laptop = open().issue(
+        OWNER,
+        { clientId: "clsk_laptop", channel: "direct:protected" },
+        { device: true },
+      )!;
+      const store = open();
+      expect(store.verify(phone.token, PHONE)).toEqual({ ...OWNER, renew: false, device: true });
+      expect(listPairedDevices(dir, now).map((d) => [d.clientId, d.label, d.device])).toEqual([
+        ["clsk_laptop", null, true],
+        ["clsk_phone", "app 0.1.4", true],
+      ]);
+      now += 1000;
+      revokePairedDevices(dir, ["clsk_phone"], now);
+      expect(store.verify(phone.token, PHONE)).toBeNull();
+      expect(
+        store.verify(laptop.token, { clientId: "clsk_laptop", channel: "direct:protected" }),
+      ).not.toBeNull();
+      expect(listPairedDevices(dir, now).map((d) => d.clientId)).toEqual(["clsk_laptop"]);
+      // Pairing again after a revocation works (a token issued later).
+      now += 1000;
+      const again = store.issue(OWNER, PHONE, { device: true })!;
+      expect(store.verify(again.token, PHONE)).not.toBeNull();
+      now += 1000;
+      revokePairedDevices(dir, "all", now);
+      expect(store.verify(again.token, PHONE)).toBeNull();
+      expect(
+        store.verify(laptop.token, { clientId: "clsk_laptop", channel: "direct:protected" }),
+      ).toBeNull();
+      expect(listPairedDevices(dir, now)).toEqual([]);
+      expect(statSync(path.join(dir, "revoked-devices.json")).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

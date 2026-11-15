@@ -91,6 +91,38 @@ A provider plugin that replaces pi's `anthropic` provider is detected genericall
 (unofficial) instead of EXTRA USAGE. The tarball also carries npm (so pi can install provider
 plugins on a Mac without npm) and pinned rg/fd (pi's tools).
 
+## Bots on Claude Code
+
+A bot can run on your own Claude Code login (`claude auth login`, a Pro or Max plan) instead of pi. Its turns are
+then billed to that plan, not as extra usage. It is still an OptChat bot with the same memory, AGENTS.md, chat, DMs
+and rooms. Only the engine differs.
+
+- **Which bots.** When setup chose no pi model and Claude Code is logged in with a plan, new bot chats start on
+  Claude Code. One bot can also ask for it in its `.bot.json`: `"chat": {"provider": "optchat-cc"}` (or
+  `optchat-cc/sonnet`).
+- **How it runs.** The bot's Claude Code is the ordinary interactive TUI. It runs in a herdr tab `cc-<bot>` (workspace
+  `bots` of DinoBot's herdr session), started by the same script as Claude Code workers (`skills/workers/launch-cc.sh`).
+  Three Claude Code mods from the bots plugin (`claude-code/`) do the rest:
+  - after each turn they swap the context for the OptChat memory view;
+  - they give the TUI OptChat's prompt and `zoom`/`date`/`search_memory`;
+  - they deliver your messages without keystrokes;
+  - they run the memory's summaries with Claude Code's own `$.model.complete`, on the same login.
+- **The memory.** It lives in the daemon (the bots plugin), which uses OptChat's own code and its profile lock. A
+  profile is used by a pi chat or a Claude Code chat, never both at once. The mods reach it on `127.0.0.1` with a
+  per-bot token kept in `~/bots/.cc/<bot>/` (mode 600).
+- **DinoBot never handles your Claude token.** There are no API calls, no `claude -p` and no proxy. The pane drops
+  any `ANTHROPIC_*` variables so the TUI uses the login. `DINOBOT_CLAUDE_CONFIG_DIR` picks another Claude Code
+  config folder, as on the Claude Code card.
+- **Your own Anthropic API proxy (opt-in).** A bot's `.bot.json` can say `"cc": {"baseUrl": "https://…"}` (and
+  `"authToken"`, default `proxy`), or the daemon's env `DINOBOT_CC_BASE_URL` (and `DINOBOT_CC_AUTH_TOKEN`) can set it
+  for every Claude Code bot. The TUI then gets only that route as `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`, with
+  its own config folder (`~/bots/.cc/<bot>/claude-config`, no login in it), so the proxy, not a Claude login, is
+  used. The proxy must hold the login. Unset (the default), nothing changes.
+- **Limits.**
+  - Team and Enterprise logins switch Claude Code mods off, so OptChat cannot run there.
+  - The app shows a turn per step (no token streaming).
+  - Images typed into the TUI are not kept (those sent from the app are).
+
 ## Odd corners
 
 - herdr: if herdr's socket path under HOME would not fit a unix socket (HOME longer than about 56

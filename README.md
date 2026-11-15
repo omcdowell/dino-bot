@@ -50,7 +50,8 @@ Many thanks to the Paseo project.</p>
 `~/.local/bin` is not on your PATH yet, setup prints the one line to add for your shell, for example
 `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc` on a Mac; open a new terminal after it.
 Until then, use the full path `~/.dinobot/bin/dinobot`. Then `dinobot help` lists the commands:
-`dinobot pair` shows the pairing code again, `dinobot doctor` checks everything, `dinobot update`
+`dinobot pair` shows a new pairing code (each code works once, for 10 minutes), `dinobot devices`
+lists or unpairs paired devices, `dinobot doctor` checks everything, `dinobot update`
 updates, `dinobot uninstall` removes DinoBot.
 
 **To update, run `dinobot update`** (or the install command again): your sign-ins, the phone's

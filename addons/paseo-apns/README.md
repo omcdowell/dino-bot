@@ -82,6 +82,10 @@ lists the bots that are working or have herdr workers out.
   It also sends the phone's `appearance` (`light`/`dark`); that install's pushes carry it in the
   content state, because on iOS 26 the widget always gets the dark colour scheme. Likewise its
   Lock Screen dino setting (`dinoLayers`, 3 or 6), which the widget cannot read on the phone.
+  An idle that has not lasted 5 s yet is answered with the last busy state, so a busy-set blip
+  does not make the open app end its activity. Every sync is logged as one `la-sync` row
+  (`reported` activities, `busy`, `answer`: busy / idle-grace / null, and the app's `ends`
+  reasons when it sends them).
 - Pushes: `apns-push-type: liveactivity`, topic `<topic>.push-type.liveactivity`, priority 10;
   start (to the push-to-start token, `attributes-type: PaseoBotsAttributes`, alert without sound,
   required by Apple), update, end (`dismissal-date` now). `stale-date` = now + 30 min, refreshed

@@ -41,6 +41,8 @@ test("settings: values are read; bad ones fall back one key at a time; relative 
     defaultModel: "openai-codex/gpt-5",
     // A bad effort drops to null (no effort); a pick without a provider is no pick.
     models: { bots: { provider: "openai-codex", model: "gpt-6-sol", thinking: "high" }, compaction: { provider: "x", model: "y", thinking: null }, workers: null },
+    workerEngine: null,
+    compactorRunner: null,
     herdr: { session: null },
     rooms: { fullTools: false },
     extensions: ["/home/u/bots/addon/index.ts", "/abs/x.ts"],

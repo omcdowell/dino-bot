@@ -8,18 +8,24 @@
  *
  * A designed avatar (avatar.json, server/avatar-store.ts) is hashed by its JSON instead, the name of its
  * content-addressed renders, and can be sent at 64, 128 or 512 px.
+ *
+ * DA1: a bot with no usable avatar (none in .bot.json, or its file missing / not a PNG) shows a default instead of
+ * nothing: its avatar.json if it has a valid one (the installer's starter bot), else a character picked from its id
+ * (stableDefaultAvatar). Rendered in memory, never written to the bot's folder.
  */
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
-import { AvatarJsonSchema, type AvatarJson } from "../shared/avatar";
+import { basename, isAbsolute, join, resolve } from "node:path";
+import { AVATAR_PACK, AvatarJsonSchema, composeAvatarSvg, parseAvatar, stableDefaultAvatar, type AvatarJson, type AvatarPack } from "../shared/avatar";
 import {
   AVATAR_JSON_FILE,
   AVATAR_PNG_SIZE,
   AVATAR_RENDER_DIR,
   avatarJsonHash,
   renderFileName,
+  resvgRenderer,
+  type AvatarRenderer,
   type AvatarSize,
 } from "./avatar-store";
 
@@ -43,8 +49,19 @@ export interface Avatar {
 const NONE: Avatar = { dataUri: null, hash: null };
 
 export interface BotAvatarRef {
+  /** Bot id: the key of its stable default avatar (absent: the folder name). */
+  id?: string;
   avatar: string | null;
   cwd: string;
+}
+
+/** What bots.list sends as `avatar` for a bot shown with a default avatar (DA1): not a file, only "has an avatar". */
+export const DEFAULT_AVATAR_REF = "default";
+
+export interface AvatarsServiceOptions {
+  /** SVG -> PNG for default avatars (default: resvg-js, loaded on first use). */
+  renderer?: () => Promise<AvatarRenderer>;
+  pack?: AvatarPack;
 }
 
 export interface BotAvatar extends Avatar {
@@ -55,6 +72,15 @@ export interface BotAvatar extends Avatar {
 export class AvatarsService {
   private readonly cache = new Map<string, { mtimeMs: number; size: number; avatar: Avatar }>();
   private readonly designs = new Map<string, { mtimeMs: number; size: number; hash: string | null; avatar: AvatarJson | null }>();
+  /** Default avatars rendered in memory, by `<hash>-<size>`. */
+  private readonly defaultPngs = new Map<string, Promise<Avatar>>();
+  private readonly renderer: () => Promise<AvatarRenderer>;
+  private readonly pack: AvatarPack;
+
+  constructor(options: AvatarsServiceOptions = {}) {
+    this.renderer = options.renderer ?? resvgRenderer;
+    this.pack = options.pack ?? AVATAR_PACK;
+  }
 
   /** The PNG as a data URI with its content hash, read again only when the file changed. */
   async read(path: string): Promise<Avatar> {
@@ -131,10 +157,10 @@ export class AvatarsService {
    * Otherwise (no avatar.json, another .bot.json avatar, or avatar.png replaced since): avatar.png as before.
    */
   async forBot(bot: BotAvatarRef, size?: AvatarSize): Promise<BotAvatar> {
-    if (!bot.avatar) return { ...NONE, size: null };
-    const path = avatarPath(bot.avatar, bot.cwd);
-    const png = await this.read(path);
-    if (!png.hash || path !== join(bot.cwd, "avatar.png")) return { ...png, size: null };
+    const png = bot.avatar ? await this.read(avatarPath(bot.avatar, bot.cwd)) : NONE;
+    if (!png.hash) return this.defaultPng(bot, size ?? AVATAR_PNG_SIZE);
+    const path = avatarPath(bot.avatar!, bot.cwd);
+    if (path !== join(bot.cwd, "avatar.png")) return { ...png, size: null };
     const design = await this.designHash(bot.cwd);
     if (!design) return { ...png, size: null };
     const renders = join(bot.cwd, AVATAR_RENDER_DIR);
@@ -152,6 +178,7 @@ export class AvatarsService {
    * so the JSON and the PNGs are the same picture under the same hash. Null otherwise.
    */
   async designForBot(bot: BotAvatarRef): Promise<{ hash: string; avatar: AvatarJson } | null> {
+    if (!(await this.hasOwnPng(bot))) return this.defaultDesign(bot);
     const png = await this.forBot(bot);
     if (png.size === null || !png.hash) return null;
     const design = await this.design(bot.cwd);
@@ -160,7 +187,41 @@ export class AvatarsService {
 
   /** The hash `bots.list` sends for this bot (see forBot). */
   async hashForBot(bot: BotAvatarRef): Promise<string | null> {
+    if (!(await this.hasOwnPng(bot))) return (await this.defaultDesign(bot)).hash;
     return (await this.forBot(bot)).hash;
+  }
+
+  /** True when the bot has a usable PNG of its own (else it shows a default avatar). */
+  async hasOwnPng(bot: BotAvatarRef): Promise<boolean> {
+    return !!bot.avatar && !!(await this.read(avatarPath(bot.avatar, bot.cwd))).hash;
+  }
+
+  /** DA1: the bot's valid avatar.json (installer starter bot), else the stable default for its id. */
+  async defaultDesign(bot: BotAvatarRef): Promise<{ hash: string; avatar: AvatarJson }> {
+    const own = await this.design(bot.cwd);
+    if (own && parseAvatar(own.avatar, this.pack).ok) return own;
+    const avatar = stableDefaultAvatar(this.pack, bot.id ?? basename(bot.cwd));
+    return { hash: avatarJsonHash(avatar), avatar };
+  }
+
+  /** The default avatar as a PNG of `size`, rendered once per picture and size; no image when rendering fails. */
+  private async defaultPng(bot: BotAvatarRef, size: AvatarSize): Promise<BotAvatar> {
+    const { hash, avatar } = await this.defaultDesign(bot);
+    const key = `${hash}-${size}`;
+    let hit = this.defaultPngs.get(key);
+    if (!hit) {
+      hit = (async (): Promise<Avatar> => {
+        const bytes = await (await this.renderer())(composeAvatarSvg(avatar, this.pack), size);
+        return { dataUri: `data:image/png;base64,${bytes.toString("base64")}`, hash };
+      })();
+      this.defaultPngs.set(key, hit);
+      hit.catch(() => this.defaultPngs.delete(key));
+    }
+    try {
+      return { ...(await hit), size };
+    } catch {
+      return { dataUri: null, hash, size: null };
+    }
   }
 }
 
@@ -174,10 +235,12 @@ export async function withAvatarHashes<T extends BotAvatarRef>(
 ): Promise<Array<T & { avatarHash: string | null; avatarPack: number | null }>> {
   return Promise.all(
     bots.map(async (bot) => {
-      if (!bot.avatar) return { ...bot, avatarHash: null, avatarPack: null };
       const design = avatars.designForBot ? await avatars.designForBot(bot) : null;
       const avatarHash = design ? design.hash : await avatars.hashForBot(bot);
-      return { ...bot, avatarHash, avatarPack: design ? design.avatar.packVersion : null };
+      if (!avatarHash) return { ...bot, avatarHash: null, avatarPack: null };
+      // A bot shown with a default avatar (DA1) has no avatar of its own: the app only asks for an avatar it has.
+      const avatar = bot.avatar ?? DEFAULT_AVATAR_REF;
+      return { ...bot, avatar, avatarHash, avatarPack: design ? design.avatar.packVersion : null };
     }),
   );
 }
@@ -191,7 +254,7 @@ export async function avatarAnswer(
   bot: BotAvatarRef | undefined,
   request: { size?: AvatarSize; format?: "png" | "json" },
 ): Promise<{ dataUri: string | null; hash: string | null; size?: AvatarSize | null; avatar?: AvatarJson }> {
-  if (!bot?.avatar) return { dataUri: null, hash: null, size: null };
+  if (!bot) return { dataUri: null, hash: null, size: null };
   if (request.format === "json") {
     const design = await avatars.designForBot(bot);
     if (design) return { dataUri: null, hash: design.hash, avatar: design.avatar };

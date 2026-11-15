@@ -12,7 +12,10 @@ import { z } from "zod";
  */
 
 const STORAGE_KEY = "@paseo:session-tokens-v1";
-const StoredSchema = z.record(z.string(), z.object({ token: z.string().min(1).max(256) }));
+const StoredSchema = z.record(
+  z.string(),
+  z.object({ token: z.string().min(1).max(256), device: z.boolean().optional() }),
+);
 
 export interface SessionTokenPersistence {
   getItem(key: string): Promise<string | null>;
@@ -22,6 +25,11 @@ export interface SessionTokenPersistence {
 export interface SessionTokenRegistry {
   storeFor(input: { serverId: string; connectionId: string }): DaemonSessionTokenStore;
   forgetServer(serverId: string): void;
+  /**
+   * QR2: called with the serverId once a device token for it is safely stored (the device then
+   * needs no password for that host). Returns an unsubscribe.
+   */
+  onDeviceToken(listener: (serverId: string) => void): () => void;
   /** Resolves once stored tokens are loaded (connects before then use the password). */
   ready: Promise<void>;
 }
@@ -32,15 +40,32 @@ function keyFor(serverId: string, connectionId: string): string {
 
 export function createSessionTokenRegistry(storage: SessionTokenPersistence): SessionTokenRegistry {
   const tokens = new Map<string, string>();
+  const deviceKeys = new Set<string>();
+  const deviceListeners = new Set<(serverId: string) => void>();
   let writeChain: Promise<void> = Promise.resolve();
   let loaded = false;
 
-  const persist = () => {
-    const snapshot: Record<string, { token: string }> = {};
-    for (const [key, token] of tokens) snapshot[key] = { token };
-    writeChain = writeChain
-      .then(() => storage.setItem(STORAGE_KEY, JSON.stringify(snapshot)))
-      .catch(() => undefined);
+  const persist = (): Promise<boolean> => {
+    const snapshot: Record<string, { token: string; device?: boolean }> = {};
+    for (const [key, token] of tokens) {
+      snapshot[key] = deviceKeys.has(key) ? { token, device: true } : { token };
+    }
+    const write = writeChain.then(async () => {
+      await storage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+      return true;
+    });
+    const written = write.catch(() => false);
+    writeChain = written.then(() => undefined);
+    return written;
+  };
+
+  const notifyDevice = (key: string, written: Promise<boolean>) => {
+    const [serverId] = JSON.parse(key) as [string, string];
+    void (async () => {
+      // Only once the token is on disk: the password is the fallback until then.
+      if (!(await written) || !deviceKeys.has(key)) return;
+      for (const listener of deviceListeners) listener(serverId);
+    })();
   };
 
   const ready = (async () => {
@@ -50,7 +75,9 @@ export function createSessionTokenRegistry(storage: SessionTokenPersistence): Se
       if (parsed?.success) {
         for (const [key, value] of Object.entries(parsed.data)) {
           // A token set while loading is newer than the stored one.
-          if (!tokens.has(key)) tokens.set(key, value.token);
+          if (tokens.has(key)) continue;
+          tokens.set(key, value.token);
+          if (value.device) deviceKeys.add(key);
         }
       }
     } catch {
@@ -66,12 +93,14 @@ export function createSessionTokenRegistry(storage: SessionTokenPersistence): Se
       const key = keyFor(serverId, connectionId);
       return {
         get: () => tokens.get(key) ?? null,
-        set: (token) => {
+        set: (token, info) => {
           if (token === (tokens.get(key) ?? null)) return;
           if (token) tokens.set(key, token);
           else tokens.delete(key);
-          if (loaded) persist();
-          else void ready.then(persist);
+          if (token && info?.device) deviceKeys.add(key);
+          else deviceKeys.delete(key);
+          const written = loaded ? persist() : ready.then(persist);
+          if (token && info?.device) notifyDevice(key, written);
         },
       };
     },
@@ -81,10 +110,17 @@ export function createSessionTokenRegistry(storage: SessionTokenPersistence): Se
         const [keyServerId] = JSON.parse(key) as [string, string];
         if (keyServerId === serverId) {
           tokens.delete(key);
+          deviceKeys.delete(key);
           changed = true;
         }
       }
-      if (changed) persist();
+      if (changed) void persist();
+    },
+    onDeviceToken: (listener) => {
+      deviceListeners.add(listener);
+      return () => {
+        deviceListeners.delete(listener);
+      };
     },
   };
 }

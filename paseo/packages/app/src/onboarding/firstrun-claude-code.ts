@@ -14,9 +14,27 @@ import { badgeIsWarning, type SignInOption } from "./onboarding-model";
 import { claudeCodeState, type ClaudeCodeCard } from "./engines-model";
 
 export const CLAUDE_CODE_FIRST_RUN_COPY = {
+  /**
+   * Two options (LO1, 15 Nov: "make it clear on the logins that its two options … the pi tui or
+   * the cc tui that they are picking between"). TUI is said in words first ("terminal app").
+   */
+  choiceTitle: "Pick how your bots run: Claude Code or pi",
+  choiceLead:
+    "There are two options. Each is a terminal app (a program in a text window on your computer) that your bots run in. You sign in here; your computer keeps the sign-in.",
+  optionOne: "Option 1",
+  optionTwo: "Option 2",
+  or: "or",
+  recommended: "(recommended)",
+  choose: "Choose",
   label: "Claude Code",
   note: "Uses your Claude Pro/Max plan",
-  detail: "Claude Code's own login, run by your computer. No extra usage.",
+  detail:
+    "Your bots run in the Claude Code terminal app (CC TUI). Your computer logs in; no extra usage.",
+  piTitle: "pi",
+  piDetail:
+    "Your bots run in the pi terminal app (pi TUI), signed in with one of these providers.",
+  /** From Settings (pi's list only, no Claude Code card). */
+  piDetailSettings: "Your bots run in the pi terminal app (pi TUI). Add one of these providers.",
   /** The Providers page's words for a computer without the `claude` CLI (engines-section.tsx). */
   install:
     "Install Claude Code on your computer first (claude.com/download), then log in here.",
@@ -24,14 +42,18 @@ export const CLAUDE_CODE_FIRST_RUN_COPY = {
   installHere:
     "Not on your computer yet. One tap installs it (Anthropic's installer), then you log in.",
   installButton: "Install Claude Code",
-  piHeading: "Or sign in through pi:",
+  /** A daemon that predates engines.* (no Claude Code login there): update it first. */
+  updateHost:
+    "Your computer's bots service is too old for Claude Code. Update it on your computer, then Check again.",
   extraUsageWarning:
     "⚠ Billed per token on top of any Claude plan you pay for.",
 } as const;
 
 export type FirstRunClaudeCode =
-  /** The host's daemon predates engines.* (and Claude Code's login): no card. */
+  /** Settings › Add a sign-in: pi's list only (Providers has its own Claude Code card). */
   | { kind: "hidden" }
+  /** The host's daemon predates engines.* (and Claude Code's login): the card, asking to update. */
+  | { kind: "update-host"; message: string }
   /** engines.status not answered yet: the card already works (signin.start says if claude is missing). */
   | { kind: "checking" }
   /** canInstall: the host runs Anthropic's installer ("Install Claude Code"), else only the message. */
@@ -45,7 +67,9 @@ export function firstRunClaudeCode(input: {
   unsupported: boolean;
   card: ClaudeCodeCard | null | undefined;
 }): FirstRunClaudeCode {
-  if (input.unsupported) return { kind: "hidden" };
+  // The old pi-only first-run screen is gone (15 Nov): first run always shows both options.
+  if (input.unsupported)
+    return { kind: "update-host", message: CLAUDE_CODE_FIRST_RUN_COPY.updateHost };
   const card = input.card;
   if (!card) return { kind: "checking" };
   const state = claudeCodeState(card);

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
-import { AVATAR_PACK, AVATAR_PACK_JSON, type AvatarJson } from "../shared/avatar";
+import { AVATAR_PACK, AVATAR_PACK_JSON, stableDefaultAvatar, type AvatarJson } from "../shared/avatar";
 import { BotFiles } from "../server/manage";
 import { AvatarsService, withAvatarHashes } from "../server/avatars";
 import {
@@ -252,7 +252,7 @@ test("hash stability: the same picture always hashes the same, any change of pic
   assert.ok(!turned.pngs[128].equals(r1.pngs[128]));
 });
 
-test("bot list hash: a designed avatar sends its JSON hash and the size asked for; a picture upload or no avatar.json as before", async () => {
+test("bot list hash: a designed avatar sends its JSON hash and the size asked for; a picture upload or no avatar.json as before (no avatar: DA1 default)", async () => {
   const host = tempHost(["peggy", "scrat"]);
   try {
     const files = new BotFiles(host);
@@ -265,7 +265,7 @@ test("bot list hash: a designed avatar sends its JSON hash and the size asked fo
     const pngHash = (await service.read(join(scrat.cwd, "avatar.png"))).hash;
     assert.deepEqual(
       (await withAvatarHashes([peggy, scrat, { ...scrat, id: "none", avatar: null }], service)).map((b) => b.avatarHash),
-      [avatarJsonHash(a), pngHash, null],
+      [avatarJsonHash(a), pngHash, avatarJsonHash(stableDefaultAvatar(AVATAR_PACK, "none"))], // DA1: no avatar -> stable default
     );
     for (const size of AVATAR_SIZES) {
       const got = await service.forBot(peggy, size);

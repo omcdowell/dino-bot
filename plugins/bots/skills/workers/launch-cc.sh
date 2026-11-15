@@ -1,16 +1,21 @@
-# Sourced by launch.sh for --engine cc (not run on its own): starts the interactive Claude Code TUI in $PANE.
+# Sourced by launch.sh for --engine cc, and by ../../claude-code/start-bot.sh for a bot on Claude Code (not run on
+# its own): starts the interactive Claude Code TUI in $PANE. One launch path for workers and bots.
 # In: NAME BRIEF CWD PANE TAB SESSION_ID MODEL, launch.sh's fail() and get(). Out: SESSION_FILE, MODEL, CCDIR.
+# Bots also set: CCDIR (their state folder), CC_PLUGIN_DIRS (colon-separated --plugin-dir list: the OptChat mods),
+# CC_EXTRA_ARGS (more claude flags), CC_WORKER_EFFORT, and CC_PLAN_LOGIN=1 (no ANTHROPIC_* from the pane's shell, so
+# the TUI runs on the Claude Code login and never on an API key or a gateway).
 #
 # Per worker, in <brief without .md>.cc/ (CCDIR):
 #   plugin/       a session-only plugin (--plugin-dir) whose skills/ are the worker shortlist (links to the
 #                 skill folders next to workers/) plus WORKER_SKILLS, as pi's --skill list
 #   settings.json --settings: the status line with the spend (cc-status.mjs; nothing blocks a tool call, the
 #                 bot stops the worker at its budget, as for pi), tool permissions (a worker runs unattended,
-#                 like pi), env: no auto-update, CLAUDE_CODE_TMPDIR=tmp/, a proxy (CC_WORKER_BASE_URL)
+#                 like pi), thinking summaries (showThinkingSummaries; CC_THINKING_SUMMARIES=0 off),
+#                 env: no auto-update, CLAUDE_CODE_TMPDIR=tmp/, a proxy (CC_WORKER_BASE_URL)
 #   budget        the budget in US$ (optional; shown in the status line); cost.json the spend so far
 # --setting-sources project,local leaves out the user's own settings, hooks, plugins and skills (pi's --no-skills).
-HERE=$(cd "$(dirname "$0")" && pwd)
-CCDIR="${BRIEF%.md}.cc"
+HERE=${CC_HERE:-$(cd "$(dirname "$0")" && pwd)}
+CCDIR="${CCDIR:-${BRIEF%.md}.cc}"
 mkdir -p "$CCDIR/plugin/.claude-plugin" "$CCDIR/plugin/skills" "$CCDIR/tmp" || fail "cannot create $CCDIR"
 find "$CCDIR/plugin/skills" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 printf '%s\n' '{"name":"worker","version":"1.0.0","description":"Skills for this herdr worker (bots workers shortlist)"}' >"$CCDIR/plugin/.claude-plugin/plugin.json"
@@ -58,6 +63,9 @@ const settings = {
   claudeMdExcludes: [home + "/CLAUDE.md", home + "/CLAUDE.local.md", home + "/.claude/**"],
   attribution: { commit: "", pr: "" },
   autoMemoryEnabled: false,
+  // Thinking summaries from the API (Opus 5.x sends none by default: the transcript and the mods get empty
+  // thinking blocks), so the DinoBot app can show what a bot thinks. CC_THINKING_SUMMARIES=0 turns it off.
+  showThinkingSummaries: process.env.CC_THINKING_SUMMARIES !== "0",
   // No self-update from a worker (it would swap the claude install every other session uses); its temp files in
   // its own folder, not a shared /tmp.
   env: {
@@ -84,7 +92,7 @@ fs.chmodSync(dir + "/settings.json", 0o600);
 ' "$CCDIR" "$HERE/cc-status.mjs" "${CC_WORKER_BASE_URL:-}" "${CC_WORKER_AUTH_TOKEN:-}" || fail "cannot write $CCDIR/settings.json"
 
 # Model: CC_WORKER_MODEL, else the worker model when it is a Claude one (provider/model:thinking).
-EFFORT=
+EFFORT=${CC_WORKER_EFFORT:-}
 if [ -n "${CC_WORKER_MODEL:-}" ]; then
   MODEL=$CC_WORKER_MODEL
 elif [ -n "$MODEL" ]; then
@@ -107,6 +115,16 @@ case $EFFORT in low | medium | high | xhigh | max) ;; *) EFFORT= ;; esac
 # MCP servers (as pi workers). --exclude-dynamic-system-prompt-sections: no per-machine text in the system prompt.
 set -- --session-id "$SESSION_ID" --name "$NAME" --settings "$CCDIR/settings.json" --setting-sources project,local --plugin-dir "$CCDIR/plugin" \
   --tools "${CC_WORKER_TOOLS:-Bash,Read,Edit,Write,Glob,Grep,Skill}" --strict-mcp-config --exclude-dynamic-system-prompt-sections
+if [ -n "${CC_PLUGIN_DIRS:-}" ]; then
+  OLDIFS=$IFS
+  IFS=:
+  for d in $CC_PLUGIN_DIRS; do
+    [ -z "$d" ] || set -- "$@" --plugin-dir "$d"
+  done
+  IFS=$OLDIFS
+fi
+# shellcheck disable=SC2086 # CC_EXTRA_ARGS is a list of flags
+[ -z "${CC_EXTRA_ARGS:-}" ] || set -- "$@" $CC_EXTRA_ARGS
 [ -z "$EFFORT" ] || set -- --effort "$EFFORT" "$@"
 [ -z "$MODEL" ] || set -- --model "$MODEL" "$@"
 # Own config dir: set in the pane's shell, which herdr then types `claude ...` into. A `claude` shell function (one
@@ -114,6 +132,13 @@ set -- --session-id "$SESSION_ID" --name "$NAME" --settings "$CCDIR/settings.jso
 # Same order as the app's Claude Code card (lib/engines.mjs claudeConfigDir): DINOBOT_CLAUDE_CONFIG_DIR, then
 # CC_WORKER_CONFIG_DIR; neither: the pane's own CLAUDE_CONFIG_DIR or ~/.claude, the user's own login.
 CCCFG=${DINOBOT_CLAUDE_CONFIG_DIR:-${CC_WORKER_CONFIG_DIR:-}}
+# PASEO_HOST from the pane's shell (~/.bashrc) next to a PASEO_HOME makes the Paseo CLI refuse every call (bot-dm:
+# "PASEO_HOME and PASEO_HOST are both set"); as Paseo does for its own agents, PASEO_HOME wins.
+herdr pane run "$PANE" '[ -z "${PASEO_HOME:-}" ] || unset PASEO_HOST' >/dev/null || fail "cannot clear PASEO_HOST in pane $PANE"
+if [ "${CC_PLAN_LOGIN:-}" = 1 ]; then
+  herdr pane run "$PANE" "unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL ANTHROPIC_CUSTOM_HEADERS CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX" >/dev/null ||
+    fail "cannot clear ANTHROPIC_* in pane $PANE"
+fi
 if [ -n "$CCCFG" ]; then
   mkdir -p "$CCCFG" && CCCFG=$(cd "$CCCFG" && pwd) || fail "cannot create $CCCFG"
   Q=$(printf '%s' "$CCCFG" | sed "s/'/'\\\\''/g")
