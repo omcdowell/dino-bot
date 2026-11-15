@@ -29,6 +29,16 @@ export const APP_DISPLAY_NAME: string =
 export const APP_LINK_SCHEME: string =
   typeof extra?.linkScheme === "string" && extra.linkScheme ? extra.linkScheme : "paseo";
 
+/**
+ * "Paste pairing link" placeholder: the link this build's own setup prints under its QR
+ * (`dinobot pair --link`: `<scheme>://pair/#offer=…`). The owner's build keeps upstream's text.
+ */
+export function pairLinkPlaceholder(flavour: AppFlavour, scheme: string): string {
+  return flavour === "public" ? `${scheme}://pair/#offer=…` : "https://app.paseo.sh/#offer=...";
+}
+
+export const PAIR_LINK_PLACEHOLDER: string = pairLinkPlaceholder(APP_FLAVOUR, APP_LINK_SCHEME);
+
 /** Installer URL shown on the welcome screen (public flavour); null hides the install step. */
 export const APP_INSTALL_URL: string | null =
   typeof extra?.installUrl === "string" && extra.installUrl ? extra.installUrl : null;

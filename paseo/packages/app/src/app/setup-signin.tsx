@@ -33,6 +33,7 @@ import {
   type SignInStatus,
 } from "@/onboarding/onboarding-model";
 import { routeAfterStep } from "@/onboarding/setup-store";
+import { ONBOARDING_EXIT_ROUTE, pauseOnboarding } from "@/onboarding/onboarding-pause";
 import { createSignInMemory, pendingSessionId } from "@/onboarding/signin-session-store";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { setupColumnStyle } from "@/constants/layout";
@@ -300,8 +301,9 @@ export default function SetupSignInScreen() {
     else setActionError("That sign-in is not offered by this computer any more. Pick one below.");
   }, [optionParam, options, status, choose]);
 
-  // Back: stops a sign-in in progress; otherwise it leaves this screen (Settings, or home on first
-  // run). It no longer means "next" (SR1 fix 1): "Skip for now" is the visible way on.
+  // Back: stops a sign-in in progress; otherwise it leaves this screen: Settings, or on first run
+  // Welcome, still in onboarding (onboarding-pause.ts: no bounce back in, never the bots home with
+  // setup unfinished). It no longer means "next" (SR1 fix 1): "Skip for now" is the visible way on.
   const back = useCallback(() => {
     if (status && status.state !== "done") {
       void rpc(serverId, ONBOARDING_RPC.signinCancel, { sessionId: status.sessionId }).catch(
@@ -312,8 +314,8 @@ export default function SetupSignInScreen() {
     }
     if (fromSettings) return void next();
     signInMemory.forget(serverId);
-    if (router.canGoBack()) router.back();
-    else router.replace("/" as Href);
+    pauseOnboarding(serverId);
+    router.dismissTo(ONBOARDING_EXIT_ROUTE as Href);
   }, [status, serverId, next, setStatus, fromSettings, router]);
 
   // Several accounts are fine (e.g. a subscription plus an API key): back to the list.

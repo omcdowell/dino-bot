@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.1.10
+
+### The pairing QR picture is gone within 10 minutes, whatever happens
+
+- Setup saves a picture of the pairing QR (`~/.dinobot/pairing-qr.png`, for terminals that draw
+  the code with gaps). It holds your computer's pairing password, and it used to stay on disk
+  unless the phone finished signing in while setup was still waiting. Now it is removed:
+  when the app is signed in; when setup's 10-minute wait ends; when setup fails; on Ctrl-C, when
+  setup is stopped, or when the terminal or SSH session closes; and, if setup itself was killed,
+  by a small background helper at 10 minutes. After a reboot or a sleeping Mac, the DinoBot server
+  removes any picture older than 10 minutes when it starts and once a minute. `dinobot doctor`
+  reports and removes a stale one. `dinobot pair` shows a fresh code any time.
+- Removing the picture does not change the password: a phone already paired stays paired.
+
+### Claude Code users get "Your bots are ready"
+
+- Setup's terminal now counts a Claude Code login (the same check as Settings › Providers ›
+  Claude Code) once the app has paired and opened its sign-in step, so a Claude-Code-only setup
+  sees "✓ Signed in from the app (Claude Code)" and "Your bots are ready" instead of waiting
+  forever. A Claude Code login that was already on the computer does not count before the phone
+  pairs.
+
+### First-run steps in the app
+
+- **Back on "Sign in for your bots" goes to the welcome screen**, which now offers "Continue
+  setup", instead of bouncing straight back to sign-in (after an in-app scan) or leaving setup
+  for good (after a pasted or tapped link).
+- A failed in-app QR scan shows the same Tailscale help as a failed pairing link.
+- The "Paste pairing link" field shows DinoBot's own link (`dinobot://pair/#offer=…`), not
+  paseo.sh's.
+- The app changes ship with the next iOS build.
+
 ## v0.1.9
 
 ### Claude Code first when you set up

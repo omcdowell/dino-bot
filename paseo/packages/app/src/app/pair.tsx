@@ -11,7 +11,7 @@ import { PairLinkModal } from "@/components/pair-link-modal";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { APP_DISPLAY_NAME, RELEASE_POLICY } from "@/constants/flavour";
-import { TAILSCALE_HELP } from "@/hosts/pair-deep-link";
+import { pairFailureHelp } from "@/hosts/pair-deep-link";
 import { routeAfterPairing } from "@/onboarding/setup-store";
 import { setupColumnStyle } from "@/constants/layout";
 
@@ -78,6 +78,7 @@ function PairDeepLink({ link, attemptKey }: { link: string; attemptKey: string }
     [insets.bottom],
   );
 
+  const failureHelp = pairFailureHelp(state, RELEASE_POLICY.tailnetOnly);
   const busy = Boolean(link) && (state.status === "scanning" || state.status === "pairing");
   let message = `Connecting ${APP_DISPLAY_NAME} to your computer…`;
   if (!link) message = "This link has no pairing code. Paste the link from your computer instead.";
@@ -94,9 +95,9 @@ function PairDeepLink({ link, attemptKey }: { link: string; attemptKey: string }
           <Text style={styles.message} testID="pair-deep-link-message">
             {message}
           </Text>
-          {state.status === "stopped" && state.error && RELEASE_POLICY.tailnetOnly ? (
+          {failureHelp ? (
             <Text style={styles.help} testID="pair-deep-link-tailscale-help">
-              {TAILSCALE_HELP}
+              {failureHelp}
             </Text>
           ) : null}
         </View>

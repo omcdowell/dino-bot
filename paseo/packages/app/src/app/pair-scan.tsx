@@ -14,6 +14,8 @@ import { BackHeader } from "@/components/headers/back-header";
 import { PairLinkModal } from "@/components/pair-link-modal";
 import { Button } from "@/components/ui/button";
 import { routeAfterPairing } from "@/onboarding/setup-store";
+import { RELEASE_POLICY } from "@/constants/flavour";
+import { pairFailureHelp } from "@/hosts/pair-deep-link";
 
 const styles = StyleSheet.create((theme) => ({
   container: {
@@ -78,6 +80,17 @@ const styles = StyleSheet.create((theme) => ({
   },
   scanAgainButton: {
     marginTop: theme.spacing[6],
+  },
+  // A failed scan: the same Tailscale help as the deep-link /pair screen (pair.tsx).
+  failureHelpCard: {
+    marginTop: theme.spacing[4],
+    padding: theme.spacing[4],
+    borderRadius: theme.borderRadius.xl,
+    backgroundColor: theme.colors.surface2,
+  },
+  failureHelpText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
   },
   helperText: {
     marginTop: theme.spacing[6],
@@ -212,6 +225,7 @@ export default function PairScanScreen() {
   }
 
   const granted = Boolean(permission?.granted);
+  const failureHelp = pairFailureHelp(scanState, RELEASE_POLICY.tailnetOnly);
 
   return (
     <View style={styles.container}>
@@ -263,6 +277,13 @@ export default function PairScanScreen() {
             </View>
           </View>
         )}
+        {failureHelp ? (
+          <View style={styles.failureHelpCard}>
+            <Text style={styles.failureHelpText} testID="pair-scan-tailscale-help">
+              {failureHelp}
+            </Text>
+          </View>
+        ) : null}
       </View>
       <PairLinkModal
         visible={scanState.status === "passwordRequired"}

@@ -12,6 +12,7 @@ import { AdaptiveModalSheet, AdaptiveTextInput, type SheetHeader } from "./adapt
 import { getConnectionAuthFailureReason } from "@/utils/test-daemon-connection";
 import { PairingTargetTracker } from "./pair-link-credentials";
 import { Button } from "@/components/ui/button";
+import { PAIR_LINK_PLACEHOLDER } from "@/constants/flavour";
 import type { EditingTextInputHandle } from "@/components/ui/text-input";
 
 const FLEX_ONE_STYLE = { flex: 1 } as const;
@@ -219,7 +220,7 @@ function PairLinkModalContent({
           nativeID="pair-link-input"
           accessibilityLabel={t("pairing.link.label")}
           onChangeText={handleChangeOfferUrl}
-          placeholder="https://app.paseo.sh/#offer=..."
+          placeholder={PAIR_LINK_PLACEHOLDER}
           placeholderTextColor={theme.colors.foregroundMuted}
           style={styles.input}
           autoFocus

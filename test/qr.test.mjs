@@ -1,4 +1,5 @@
 // Pairing QR: terminal rendering and the PNG.  node --test test/qr.test.mjs
+process.env.DINOBOT_QR_REAPER = "0"; // these tests write pictures; the reaper has its own tests (qr-lifetime)
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createRequire } from "node:module";

@@ -34,6 +34,12 @@ import {
   installCommand,
 } from "@/constants/flavour";
 import { routeAfterPairing } from "@/onboarding/setup-store";
+import {
+  isOnboardingPaused,
+  onboardingPauseVersion,
+  resumeOnboarding,
+  subscribeOnboardingPause,
+} from "@/onboarding/onboarding-pause";
 import { useIsFocused } from "@react-navigation/native";
 
 interface WelcomeAction {
@@ -119,6 +125,15 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.accentText,
     fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.medium,
+  },
+  continueSetup: {
+    width: "100%",
+    maxWidth: 420,
+    gap: theme.spacing[2],
+    marginBottom: theme.spacing[4],
+    padding: theme.spacing[4],
+    borderRadius: theme.borderRadius.xl,
+    backgroundColor: theme.colors.surface2,
   },
   installStep: {
     width: "100%",
@@ -232,13 +247,28 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
   // Only while this screen is on top, and once per host: with /pair pushed over it (a pairing link),
   // the pair screen routes on; repeating the redirect replaced the setup screens over and over
   // (seen on the DinoBot desktop app, which restarted its sign-in check each time).
+  // Not for a host whose onboarding the user just stepped back out of (Back on sign-in, N-1): it
+  // gets "Continue setup" below instead of a bounce straight back in.
   const isFocused = useIsFocused();
   const routedFor = useRef<string | null>(null);
+  useSyncExternalStore(
+    subscribeOnboardingPause,
+    onboardingPauseVersion,
+    onboardingPauseVersion,
+  );
+  const pausedServerId = isOnboardingPaused(anyOnlineServerId) ? anyOnlineServerId : null;
   useEffect(() => {
     if (!anyOnlineServerId || !isFocused || routedFor.current === anyOnlineServerId) return;
+    if (isOnboardingPaused(anyOnlineServerId)) return;
     routedFor.current = anyOnlineServerId;
     finishOnboardingFor(anyOnlineServerId);
-  }, [anyOnlineServerId, finishOnboardingFor, isFocused]);
+  }, [anyOnlineServerId, finishOnboardingFor, isFocused, pausedServerId]);
+  const handleContinueSetup = useCallback(() => {
+    if (!pausedServerId) return;
+    resumeOnboarding(pausedServerId);
+    routedFor.current = pausedServerId;
+    finishOnboardingFor(pausedServerId);
+  }, [pausedServerId, finishOnboardingFor]);
 
   const handleOpenPaseoSite = useCallback(() => {
     void openExternalUrl("https://paseo.sh");
@@ -321,6 +351,9 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
     if (actions[0]) actions[0].primary = true;
   }
 
+  // "Continue setup" is the main way on for a paired host; the pairing buttons step back.
+  if (pausedServerId) for (const action of actions) action.primary = false;
+
   if (isElectronRuntime() && RELEASE_POLICY.desktopRemoteSsh) {
     actions.splice(1, 0, {
       key: "remote-ssh",
@@ -359,7 +392,23 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
             ) : null}
           </View>
 
-          {APP_INSTALL_URL ? <InstallStep url={APP_INSTALL_URL} /> : null}
+          {pausedServerId ? (
+            <View style={styles.continueSetup} testID="welcome-continue-setup">
+              <Text style={styles.installTitle}>Your computer is paired.</Text>
+              <Text style={styles.installHint}>
+                Finish setting up your bots: sign in, choose models.
+              </Text>
+              <Button
+                variant="default"
+                onPress={handleContinueSetup}
+                testID="welcome-continue-setup-button"
+              >
+                Continue setup
+              </Button>
+            </View>
+          ) : null}
+
+          {APP_INSTALL_URL && !pausedServerId ? <InstallStep url={APP_INSTALL_URL} /> : null}
 
           <View style={styles.actions}>
             {actions.map((action) => (

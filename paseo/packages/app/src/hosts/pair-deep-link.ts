@@ -120,3 +120,14 @@ export const TAILSCALE_HELP = `Can't reach your computer? Tailscale is usually t
 1. On ${DEVICE_COPY.thisDevice}, open the Tailscale app and check it says Connected.
 2. On your computer, check Tailscale is running and signed in to the same account.
 3. Try again. If it still fails, run \`${APP_LINK_SCHEME} doctor\` on your computer.`;
+
+/**
+ * The help under a failed pairing, the same on the deep-link /pair screen and the in-app scan:
+ * TAILSCALE_HELP when the attempt stopped with an error and the build is Tailscale-only.
+ */
+export function pairFailureHelp(
+  state: { status: string; error?: string | null },
+  tailnetOnly: boolean,
+): string | null {
+  return state.status === "stopped" && state.error && tailnetOnly ? TAILSCALE_HELP : null;
+}

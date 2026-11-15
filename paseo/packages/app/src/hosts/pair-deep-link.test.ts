@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  TAILSCALE_HELP,
+  pairFailureHelp,
   isTailnetEndpoint,
   pairLinkFromIncoming,
   routeForIncoming,
@@ -101,5 +103,19 @@ describe("provider invite links (private provider packages)", () => {
     expect(providerInviteFromIncoming("/provider/add?source=npm%3Ax", "dinobot")?.source).toBe(
       "npm:x",
     );
+  });
+});
+
+describe("pairFailureHelp (N-3: in-app scan and deep link show the same help)", () => {
+  it("the Tailscale help after a failed attempt in the Tailscale-only build", () => {
+    expect(pairFailureHelp({ status: "stopped", error: "Could not connect" }, true)).toBe(
+      TAILSCALE_HELP,
+    );
+    expect(TAILSCALE_HELP).toMatch(/Tailscale app and check it says Connected/);
+  });
+  it("nothing while pairing, after a plain cancel, or in the own build", () => {
+    expect(pairFailureHelp({ status: "pairing" }, true)).toBeNull();
+    expect(pairFailureHelp({ status: "stopped", error: null }, true)).toBeNull();
+    expect(pairFailureHelp({ status: "stopped", error: "x" }, false)).toBeNull();
   });
 });

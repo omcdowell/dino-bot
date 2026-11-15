@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { RELEASE_POLICIES, installCommand, resolveAppFlavour } from "./flavour";
+import {
+  RELEASE_POLICIES,
+  installCommand,
+  pairLinkPlaceholder,
+  resolveAppFlavour,
+} from "./flavour";
 import {
   flavourSourcesEnv,
   planFlavour,
@@ -257,5 +262,16 @@ describe("apply-flavour (widget sources)", () => {
         "Info.plist": plist,
       }),
     ).toEqual({});
+  });
+});
+
+describe("paste pairing link placeholder (N-4)", () => {
+  it("public: this build's own link, never paseo.sh", () => {
+    const text = pairLinkPlaceholder("public", "dinobot");
+    expect(text).toBe("dinobot://pair/#offer=…");
+    expect(text).not.toContain("paseo");
+  });
+  it("own build: upstream's text", () => {
+    expect(pairLinkPlaceholder("own", "paseo")).toBe("https://app.paseo.sh/#offer=...");
   });
 });

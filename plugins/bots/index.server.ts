@@ -266,6 +266,9 @@ export default function contribute(server: PluginServerContext) {
 
   // Onboarding on the phone (DinoBot): sign-in, models, optional import. pi does the work.
   const onboarding = new Onboarding(settings, root);
+  // DinoBot: load the host module now, not at the first sign-in RPC; it runs the daemon's sweep of
+  // a stale pairing QR picture (lib/qr.mjs startQrSweep). A plain Paseo host has none: no-op.
+  void onboarding.host().catch(() => null);
   server.handle(signinOptionsRpc, () => onboarding.options());
   server.handle(signinStartRpc, async (input) => (await onboarding.need()).start(input) as never);
   server.handle(signinSubmitRpc, async (input) => (await onboarding.need()).submit(input) as never);
