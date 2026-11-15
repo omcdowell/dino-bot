@@ -58,7 +58,10 @@ more per archive with the default).
    (`build/public-check.mjs`, `build/private-guard.sh`, gitleaks) and, with `--for-real`, pushes
    `main` (one commit, every folder); with `TAG=v<semver>` it also pushes the tag. The tag must be `v` plus
    `version` in `lib/product.json` (the release workflow checks it; the install shows it in
-   `MANIFEST.json` and `dinobot doctor`).
+   `MANIFEST.json` and `dinobot doctor`). The tag also needs its short release notes,
+   `release-notes/v<version>.md` (`### New` / `### Fixed`, one plain line per item): they become
+   the GitHub release body, followed by a link to the full CHANGELOG.md (`build/release-notes.sh`).
+   Without them the release workflow stops in its first job.
 4. The tag starts `.github/workflows/release.yml`: tests, builds linux-x64 and linux-arm64, then
    darwin-arm64 (macOS minutes count 10x, so only after Linux passed), each on its own runner from
    the tagged commit's folders (`build/ci-build.sh`); adds the compressed cosign binaries

@@ -54,6 +54,12 @@ else
   say "WARNING: actionlint not found, skipped"
 fi
 
+# Release notes for TAG (the release workflow's first job stops without them).
+if [ -n "${TAG:-}" ]; then
+  (cd "$R" && sh build/release-notes.sh "$TAG" >/dev/null) || die "no release notes for $TAG: add release-notes/$TAG.md"
+  say "release notes for $TAG ok"
+fi
+
 # 3. The workflow's unit tests, on the pushed tree, with the pinned Node.
 [ "$(node -v)" = "v$(jq -r .node "$R/build/sources.json")" ] || die "node $(node -v), sources.json wants $(jq -r .node "$R/build/sources.json")"
 TESTS=$(step test "unit tests (incl. fail-closed checksum + signature)")

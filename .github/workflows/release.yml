@@ -46,8 +46,10 @@ jobs:
           case "$GITHUB_REF_NAME" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "tag $GITHUB_REF_NAME is not v<major>.<minor>.<patch>[-x]"; exit 1 ;; esac
           want="v$(jq -r .version lib/product.json)" # the version the install reports (MANIFEST.json, doctor)
           [ "$GITHUB_REF_NAME" = "$want" ] || { echo "tag $GITHUB_REF_NAME, but lib/product.json says $want"; exit 1; }
+      - name: tag has release notes (release-notes/<tag>.md; the GitHub release body)
+        run: build/release-notes.sh "$GITHUB_REF_NAME"
       - name: unit tests (incl. fail-closed checksum + signature)
-        run: node --test test/unit.test.mjs test/wave2.test.mjs test/providers.test.mjs test/signing.test.mjs test/public-tree.test.mjs test/push.test.mjs test/pairing-identity.test.mjs test/signin-loop.test.mjs
+        run: node --test test/unit.test.mjs test/wave2.test.mjs test/providers.test.mjs test/signing.test.mjs test/public-tree.test.mjs test/push.test.mjs test/pairing-identity.test.mjs test/signin-loop.test.mjs test/release-notes.test.mjs
 
   # Linux first; macOS (10x minutes) only once test and both Linux builds have passed.
   # Private repo runners: 2 CPU / 8 GB (Linux), 3 CPU / 7 GB (macOS arm64), not the 16 GB of public
@@ -302,8 +304,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          # Not marked pre-release, so releases/latest (install.sh, dinobot update) finds it.
+          # Body: the tag's short notes (release-notes/<tag>.md) and a link to the full CHANGELOG.md
+          # (the test job already failed if the notes are missing), then how it was built and signed. Not marked pre-release, so releases/latest
+          # (install.sh, dinobot update) finds it.
+          {
+            build/release-notes.sh "$TAG"
+            printf '\n---\n\n'
+            echo "Built from this repo at $GITHUB_SHA (paseo/, plugins/bots/, optchat/; pins in build/sources.json) by run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Every file has a keyless Sigstore signature (.sigstore.json); install.sh and \`dinobot update\` check it."
+          } >"$RUNNER_TEMP/notes.md"
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --latest \
             --title "DinoBot $TAG" \
-            --notes "Built from this repo at $GITHUB_SHA (paseo/, plugins/bots/, optchat/; pins in build/sources.json) by run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Every file has a keyless Sigstore signature (.sigstore.json); install.sh and \`dinobot update\` check it." \
+            --notes-file "$RUNNER_TEMP/notes.md" \
             release/*
