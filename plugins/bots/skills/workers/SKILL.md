@@ -22,8 +22,10 @@ One task per worker. The brief says:
 - **Goal**: what "done" looks like, in one or two sentences, and how you will check it.
 - **Where**: repo, branch to start from, the worktree or folder to work in. Never your own
   checkout or another worker's.
-- **Rules**: what it must not do (push, merge, deploy, restart services, edit files outside
-  its folder, commit trailers such as Co-Authored-By if the project forbids them).
+- **Rules**: what it must not do (push, merge, deploy, edit files outside its folder, commit
+  trailers such as Co-Authored-By if the project forbids them). It restarts DinoBot or other
+  services only when that restart is its task: then it waits until no bot is mid-turn,
+  restarts once and checks the service is back.
 - **Budget**: a spend budget in US$ ("Budget: US$5") and a time estimate in minutes (section 5).
 - **Report**: the report file path (`<task>.report.md` next to the brief) and what goes in it:
   files changed, commits, test commands with pass/fail counts, open questions.

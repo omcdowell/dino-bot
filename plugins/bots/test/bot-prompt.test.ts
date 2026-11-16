@@ -64,9 +64,9 @@ test("escalation: named when set, left out when the host has none; the user's na
   assert.match(none, /Ask the user first/);
 });
 
-test("house rules stay about 150 words (rules + skills line) and carry no personal names or paths", () => {
+test("house rules stay about 185 words (rules + skills line) and carry no personal names or paths", () => {
   const rules = botPromptText({ ...base, user: "the user" }).split("## House rules\n")[1]!;
-  assert.ok(words(rules) <= 165, `house rules ${words(rules)} words`);
+  assert.ok(words(rules) <= 195, `house rules ${words(rules)} words`);
   assert.doesNotMatch(botPromptText({ ...base, user: "the user", workers: true, rooms: true }), /Sam|\/home\/|~\//);
 });
 

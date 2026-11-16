@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.13
+
+### Restarts
+
+- A bot still never restarts or stops DinoBot from its own session (it runs inside DinoBot, so
+  that would cut off its reply). When a restart is needed it now starts a worker for it, instead
+  of giving you the command: the worker waits until no bot is mid-turn, restarts once and checks
+  DinoBot is back.
+
+### Fixed
+
+- The workers skill told bots to forbid "restart services" in every worker's brief, which blocked
+  that restart worker. A worker now restarts DinoBot or a service only when that is its task.
+
 ## v0.1.12
 
 ### Choose models with Claude Code
