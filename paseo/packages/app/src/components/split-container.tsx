@@ -108,14 +108,12 @@ interface SplitContainerProps {
   onCloseTab: (tabId: string) => Promise<void> | void;
   onCopyResumeCommand: (agentId: string) => Promise<void> | void;
   onCopyAgentId: (agentId: string) => Promise<void> | void;
-  onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
   onCloseTabsToLeft: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;
-  onCreateNewTab: (input: { paneId?: string }) => void;
   buildPaneContentModel: (input: {
     paneId: string;
     tab: WorkspaceTabDescriptor;
@@ -321,14 +319,12 @@ export function SplitContainer({
   onCloseTab,
   onCopyResumeCommand,
   onCopyAgentId,
-  onCopyTerminalId,
   onCopyFilePath,
   onReloadAgent,
   onRenameTab,
   onCloseTabsToLeft,
   onCloseTabsToRight,
   onCloseOtherTabs,
-  onCreateNewTab,
   buildPaneContentModel,
   onFocusPane,
   onSplitPane,
@@ -662,14 +658,12 @@ export function SplitContainer({
                   onCloseTab={onCloseTab}
                   onCopyResumeCommand={onCopyResumeCommand}
                   onCopyAgentId={onCopyAgentId}
-                  onCopyTerminalId={onCopyTerminalId}
                   onCopyFilePath={onCopyFilePath}
                   onReloadAgent={onReloadAgent}
                   onRenameTab={onRenameTab}
                   onCloseTabsToLeft={onCloseTabsToLeft}
                   onCloseTabsToRight={onCloseTabsToRight}
                   onCloseOtherTabs={onCloseOtherTabs}
-                  onCreateNewTab={onCreateNewTab}
                   buildPaneContentModel={buildPaneContentModel}
                   onFocusPane={onFocusPane}
                   onSplitPane={onSplitPane}
@@ -713,12 +707,10 @@ export function SplitContainer({
                   closingTabIds={closingTabIds}
                   onSelectTab={onSelectTabInPane}
                   onCloseTab={onCloseTab}
-                  onCreateNewTab={onCreateNewTab}
                   hoveredCloseTabKey={hoveredCloseTabKey}
                   setHoveredCloseTabKey={setHoveredCloseTabKey}
                   onCopyResumeCommand={onCopyResumeCommand}
                   onCopyAgentId={onCopyAgentId}
-                  onCopyTerminalId={onCopyTerminalId}
                   onCopyFilePath={onCopyFilePath}
                   onReloadAgent={onReloadAgent}
                   onRenameTab={onRenameTab}
@@ -935,14 +927,12 @@ function SplitNodeView({
   onCloseTab,
   onCopyResumeCommand,
   onCopyAgentId,
-  onCopyTerminalId,
   onCopyFilePath,
   onReloadAgent,
   onRenameTab,
   onCloseTabsToLeft,
   onCloseTabsToRight,
   onCloseOtherTabs,
-  onCreateNewTab,
   buildPaneContentModel,
   onFocusPane,
   onSplitPane,
@@ -1023,14 +1013,12 @@ function SplitNodeView({
             onCloseTab={onCloseTab}
             onCopyResumeCommand={onCopyResumeCommand}
             onCopyAgentId={onCopyAgentId}
-            onCopyTerminalId={onCopyTerminalId}
             onCopyFilePath={onCopyFilePath}
             onReloadAgent={onReloadAgent}
             onRenameTab={onRenameTab}
             onCloseTabsToLeft={onCloseTabsToLeft}
             onCloseTabsToRight={onCloseTabsToRight}
             onCloseOtherTabs={onCloseOtherTabs}
-            onCreateNewTab={onCreateNewTab}
             buildPaneContentModel={buildPaneContentModel}
             onFocusPane={onFocusPane}
             onSplitPane={onSplitPane}
@@ -1075,14 +1063,12 @@ function SplitNodeView({
               onCloseTab={onCloseTab}
               onCopyResumeCommand={onCopyResumeCommand}
               onCopyAgentId={onCopyAgentId}
-              onCopyTerminalId={onCopyTerminalId}
               onCopyFilePath={onCopyFilePath}
               onReloadAgent={onReloadAgent}
               onRenameTab={onRenameTab}
               onCloseTabsToLeft={onCloseTabsToLeft}
               onCloseTabsToRight={onCloseTabsToRight}
               onCloseOtherTabs={onCloseOtherTabs}
-              onCreateNewTab={onCreateNewTab}
               buildPaneContentModel={buildPaneContentModel}
               onFocusPane={onFocusPane}
               onSplitPane={onSplitPane}
@@ -1135,14 +1121,12 @@ function SplitPaneView({
   onCloseTab,
   onCopyResumeCommand,
   onCopyAgentId,
-  onCopyTerminalId,
   onCopyFilePath,
   onReloadAgent,
   onRenameTab,
   onCloseTabsToLeft,
   onCloseTabsToRight,
   onCloseOtherTabs,
-  onCreateNewTab,
   buildPaneContentModel,
   onFocusPane,
   onSplitPane: _onSplitPane,
@@ -1270,14 +1254,12 @@ function SplitPaneView({
             onCloseTab={onCloseTab}
             onCopyResumeCommand={onCopyResumeCommand}
             onCopyAgentId={onCopyAgentId}
-            onCopyTerminalId={onCopyTerminalId}
             onCopyFilePath={onCopyFilePath}
             onReloadAgent={onReloadAgent}
             onRenameTab={onRenameTab}
             onCloseTabsToLeft={handleCloseTabsToLeft}
             onCloseTabsToRight={handleCloseTabsToRight}
             onCloseOtherTabs={handleCloseOtherTabs}
-            onCreateNewTab={onCreateNewTab}
             onReorderTabs={handleReorderTabs}
             externalDndContext
             activeDragTabId={activeDragTabId}

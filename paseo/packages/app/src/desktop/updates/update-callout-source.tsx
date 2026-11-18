@@ -14,7 +14,6 @@ import {
 } from "@/desktop/updates/resolve-update-callout";
 import { useDesktopAppUpdater } from "@/desktop/updates/use-desktop-app-updater";
 import { useStableEvent } from "@/hooks/use-stable-event";
-import { openChangelog } from "@/changelog";
 
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
 
@@ -26,7 +25,7 @@ function renderBody(body: UpdateCalloutBody, t: ReturnType<typeof useTranslation
 
 function materializeActions(
   actions: readonly UpdateCalloutActionDescriptor[],
-  handlers: { changelog: () => void; install: () => void; retry: () => void },
+  handlers: { install: () => void; retry: () => void },
 ): SidebarCalloutAction[] {
   return actions.map((action) => ({
     label: action.label,
@@ -94,7 +93,6 @@ export function UpdateCalloutSource() {
       ) : undefined,
       variant: descriptor.variant,
       actions: materializeActions(descriptor.actions, {
-        changelog: openChangelog,
         install,
         retry,
       }),

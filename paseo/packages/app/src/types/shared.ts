@@ -2,7 +2,7 @@ import type { AgentPermissionRequest } from "@getpaseo/protocol/agent-types";
 
 /**
  * Pending permission structure
- * Uses actual ACP types instead of any
+ * Uses the protocol permission types
  */
 export interface PendingPermission {
   key: string;

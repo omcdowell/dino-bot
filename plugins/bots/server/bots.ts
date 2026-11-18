@@ -97,6 +97,15 @@ export function setClaudeCodeReady(check: () => Promise<boolean>): void {
   claudeCodeReady = check;
 }
 
+let ccChatCreated: (bot: Bot, agentId: string) => void = () => {};
+/**
+ * Called once a Claude Code chat is made (index.server.ts: when the bot's OptChat profile already has a log, the chat
+ * is reloaded so it shows that history; a new chat opens with history "skip", so it looked empty until a refresh).
+ */
+export function setCcChatCreated(hook: (bot: Bot, agentId: string) => void): void {
+  ccChatCreated = hook;
+}
+
 /** Config for a new bot chat when no "bot" agent profile names a model. */
 export function defaultChatConfig(): ChatConfig {
   if (!defaultModel) return DEFAULT_CHAT_CONFIG;
@@ -269,9 +278,15 @@ export async function botChatConfig(cwd: string): Promise<ChatConfig | null> {
   }
 }
 
+/** The engine a chat config runs on: `optchat` (pi) or `optchat-cc` (Claude Code). */
+export const chatEngine = (config: ChatConfig) => config.provider.split("/")[0]!;
+
 export async function createChat(bot: Bot, paseo: BotsPaseo, carried?: ChatConfig | null): Promise<string> {
   const workspace = await paseo.workspaces.open(bot.cwd);
-  let config = carried ?? (await botChatConfig(bot.cwd)) ?? (await chatConfig(paseo));
+  const configured = (await botChatConfig(bot.cwd)) ?? (await chatConfig(paseo));
+  // A chat's own pick carries over only on the engine the bot is set to: after a switch in Bot models (.bot.json
+  // `chat`, or the host's bot model) the new chat runs on the new engine, not the old chat's.
+  let config = carried && (configured === DEFAULT_CHAT_CONFIG || chatEngine(carried) === chatEngine(configured)) ? carried : configured;
   // No model chosen anywhere (a fresh host that logged in to Claude Code only): the bot runs on Claude Code.
   if (config === DEFAULT_CHAT_CONFIG && (await claudeCodeReady().catch(() => false))) config = { provider: CC_CHAT_PROVIDER };
   const agent = await workspace.agents.create({
@@ -279,6 +294,10 @@ export async function createChat(bot: Bot, paseo: BotsPaseo, carried?: ChatConfi
     title: bot.name,
     labels: { [BOT_LABEL]: bot.id, [SEND_BEHAVIOR_LABEL]: "queue", [KEEP_LIVE_LABEL]: "1" },
   });
+  if (chatEngine(config) === CC_CHAT_PROVIDER)
+    try {
+      ccChatCreated(bot, agent.id);
+    } catch {}
   return agent.id;
 }
 

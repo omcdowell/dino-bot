@@ -22,12 +22,8 @@ const SECTION_LABELS = {
   general: "General",
   chat: "Chat",
   appearance: "Appearance",
-  sidebar: "Sidebar",
-  editor: "Editor",
-  terminal: "Terminal",
-  browser: "Browser",
   shortcuts: "Shortcuts",
-  integrations: "Integrations",
+  notifications: "Notifications",
   permissions: "Permissions",
   diagnostics: "Diagnostics",
   about: "About",
@@ -36,15 +32,11 @@ const SECTION_LABELS = {
 export type SettingsSection = keyof typeof SECTION_LABELS;
 
 type HostSection =
-  | "projects"
   | "connections"
   | "pair-device"
   | "agents"
-  | "metadata"
-  | "workspaces"
   | "providers"
   | "usage"
-  | "terminals"
   | "plugins"
   | "host";
 
@@ -356,30 +348,6 @@ export async function serveJson(page: Page, url: string, body: unknown): Promise
       body: JSON.stringify(body),
     });
   });
-}
-
-export async function openAddProviderArea(page: Page): Promise<void> {
-  await page.getByTestId("host-page-add-provider-card").scrollIntoViewIfNeeded();
-  await expect(page.getByRole("textbox", { name: "Search providers" })).toBeVisible();
-}
-
-export async function findAcpCatalogProvider(page: Page, providerName: string): Promise<void> {
-  await page.getByRole("textbox", { name: "Search providers" }).fill(providerName);
-  await expect(page.getByText(providerName, { exact: true })).toBeVisible();
-}
-
-export async function installAcpCatalogProvider(page: Page, providerName: string): Promise<void> {
-  await findAcpCatalogProvider(page, providerName);
-  await page.getByRole("button", { name: "Add", exact: true }).click();
-}
-
-export async function expectProviderInstalledInSettings(
-  page: Page,
-  providerName: string,
-): Promise<void> {
-  await expect(
-    page.getByRole("button", { name: `${providerName} provider details`, exact: true }),
-  ).toBeVisible();
 }
 
 export async function expectHostNoDaemonLifecycleRow(page: Page): Promise<void> {

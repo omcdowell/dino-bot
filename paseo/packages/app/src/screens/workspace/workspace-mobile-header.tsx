@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import { SidebarMenuToggle } from "@/components/headers/menu-header";
 import { PluginHeaderButtons } from "@/plugins";
 import type { ShortcutKey } from "@/utils/format-shortcut";
-import { WorkspaceScriptsButton } from "@/screens/workspace/workspace-scripts-button";
 import { WorkspaceExplorerToggle } from "@/screens/workspace/workspace-explorer-toggle";
 import {
   WorkspaceHeaderMenuMobile,
@@ -27,7 +26,6 @@ import {
   type WorkspaceTabMenuLabels,
 } from "@/screens/workspace/workspace-tab-menu";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
-import type { WorkspaceDescriptor } from "@/stores/session-store";
 import {
   MobileFloatingHeader,
   MobileFloatingHeaderIdentity,
@@ -51,7 +49,6 @@ export interface WorkspaceMobileTabActions {
   onSelectTab: (key: string) => void;
   onCopyResumeCommand: (agentId: string) => Promise<void> | void;
   onCopyAgentId: (agentId: string) => Promise<void> | void;
-  onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
@@ -75,61 +72,18 @@ export interface WorkspaceMobileExplorerToggleProps {
   accessibilityState: { expanded: boolean };
 }
 
-export interface WorkspaceMobileScriptsProps {
-  scripts: WorkspaceDescriptor["scripts"];
-  liveTerminalIds: string[];
-  onScriptTerminalStarted: (terminalId: string) => void;
-  onViewTerminal: (terminalId: string) => void;
-  onOpenUrlInBrowserTab: (url: string) => void;
-}
-
 function getFallbackTabOptionLabel(
   tab: WorkspaceTabDescriptor,
-  labels: {
-    newTab: string;
-    newAgent: string;
-    setup: string;
-    terminal: string;
-    browser: string;
-    agent: string;
-    changes: string;
-    files: string;
-    pullRequest: string;
-    network: string;
-  },
+  labels: { agent: string; files: string; network: string },
 ): string {
-  if (tab.target.kind === "new_tab") {
-    return labels.newTab;
-  }
-  if (tab.target.kind === "draft") {
-    return labels.newAgent;
-  }
-  if (tab.target.kind === "setup") {
-    return labels.setup;
-  }
-  if (tab.target.kind === "terminal") {
-    return labels.terminal;
-  }
-  if (tab.target.kind === "browser") {
-    return labels.browser;
-  }
   if (tab.target.kind === "file") {
     return tab.target.path.split("/").findLast(Boolean) ?? tab.target.path;
-  }
-  if (tab.target.kind === "working_diff" || tab.target.kind === "changes_tree") {
-    return labels.changes;
   }
   if (tab.target.kind === "files") {
     return labels.files;
   }
-  if (tab.target.kind === "pull_request") {
-    return labels.pullRequest;
-  }
   if (tab.target.kind === "network_status") {
     return labels.network;
-  }
-  if (tab.target.kind === "commit_diff") {
-    return tab.target.sha.slice(0, 7);
   }
   return labels.agent;
 }
@@ -156,7 +110,6 @@ function MobileWorkspaceTabOption({
     onSelectTab,
     onCopyResumeCommand,
     onCopyAgentId,
-    onCopyTerminalId,
     onCopyFilePath,
     onReloadAgent,
     onRenameTab,
@@ -169,7 +122,6 @@ function MobileWorkspaceTabOption({
     () => ({
       copyResumeCommand: t("workspace.tabs.menu.copyResumeCommand"),
       copyAgentId: t("workspace.tabs.menu.copyAgentId"),
-      copyTerminalId: t("workspace.tabs.menu.copyTerminalId"),
       copyFilePath: t("workspace.tabs.menu.copyFilePath"),
       rename: t("workspace.tabs.menu.rename"),
       closeAbove: t("workspace.tabs.menu.closeAbove"),
@@ -192,7 +144,6 @@ function MobileWorkspaceTabOption({
     menuTestIDBase,
     onCopyResumeCommand,
     onCopyAgentId,
-    onCopyTerminalId,
     onCopyFilePath,
     onReloadAgent,
     onRenameTab,
@@ -205,15 +156,8 @@ function MobileWorkspaceTabOption({
 
   const fallbackLabels = useMemo(
     () => ({
-      newTab: t("workspace.tabs.actions.newTab"),
-      newAgent: t("workspace.tabs.fallback.newAgent"),
-      setup: t("workspace.tabs.fallback.setup"),
-      terminal: t("workspace.tabs.fallback.terminal"),
-      browser: t("workspace.tabs.fallback.browser"),
       agent: t("workspace.tabs.fallback.agent"),
-      changes: t("panels.diff.changesLabel"),
       files: t("panels.files.label"),
-      pullRequest: t("panels.pullRequest.label"),
       network: t("network.tabLabel"),
     }),
     [t],
@@ -308,7 +252,7 @@ export function MobileHeaderMenuLeading({
 /**
  * The phone's workspace header (option D, as corrected by the owner): the wide header's controls in
  * the same places, as floating glass — [back] [avatar · bot name] ······ [plugin buttons |
- * scripts | Explorer]. The tab row is gone; tabs are the header sheet's Tabs group. The title
+ * Explorer]. The tab row is gone; tabs are the header sheet's Tabs group. The title
  * pill is the sheet's only opener: a ⋯ button beside it opened the same sheet, so it went
  * (after build 23).
  */
@@ -323,7 +267,6 @@ export function WorkspaceMobileHeader({
   activeTabKey,
   tabActions,
   explorer,
-  scripts,
   menu,
 }: {
   normalizedServerId: string;
@@ -336,7 +279,6 @@ export function WorkspaceMobileHeader({
   activeTabKey: string;
   tabActions: WorkspaceMobileTabActions;
   explorer: WorkspaceMobileExplorerToggleProps;
-  scripts: WorkspaceMobileScriptsProps;
   menu: WorkspaceMobileHeaderMenuProps;
 }): ReactElement {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -385,19 +327,6 @@ export function WorkspaceMobileHeader({
     () => (
       <>
         <PluginHeaderButtons serverId={normalizedServerId} workspaceId={normalizedWorkspaceId} />
-        {scripts.scripts.length > 0 ? (
-          <WorkspaceScriptsButton
-            serverId={normalizedServerId}
-            workspaceId={normalizedWorkspaceId}
-            scripts={scripts.scripts}
-            liveTerminalIds={scripts.liveTerminalIds}
-            onScriptTerminalStarted={scripts.onScriptTerminalStarted}
-            onViewTerminal={scripts.onViewTerminal}
-            onOpenUrlInBrowserTab={scripts.onOpenUrlInBrowserTab}
-            hideLabels
-            presentation="ghost"
-          />
-        ) : null}
         <WorkspaceExplorerToggle
           onPress={explorer.onPress}
           label={explorer.label}
@@ -410,7 +339,7 @@ export function WorkspaceMobileHeader({
         />
       </>
     ),
-    [explorer, normalizedServerId, normalizedWorkspaceId, scripts],
+    [explorer, normalizedServerId, normalizedWorkspaceId],
   );
   // The sheet presents from a portal, so it takes no room beside the pill that opens it.
   const identity = useMemo(

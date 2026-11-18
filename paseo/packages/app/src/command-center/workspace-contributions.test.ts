@@ -36,14 +36,9 @@ function source(gitActions: GitActions): {
       gitActions,
       labels: {
         section: "Workspace actions",
-        newAgent: "New agent",
-        newTerminal: "New terminal",
-        newBrowser: "New browser",
         splitRight: "Split pane right",
         splitDown: "Split pane down",
-        changes: "Changes",
         files: "Files",
-        pullRequest: "Pull request",
         openPanel: (name, placement) => `Open ${name} ${placement}`,
         previousTab: "Previous tab",
         nextTab: "Next tab",
@@ -52,7 +47,6 @@ function source(gitActions: GitActions): {
         reloadAgent: "Reload agent",
         copyResumeCommand: "Copy resume command",
         copyAgentId: "Copy agent id",
-        copyTerminalId: "Copy terminal id",
         copyFilePath: "Copy file path",
         closeTabsLeft: "Close tabs left",
         closeTabsRight: "Close tabs right",
@@ -73,17 +67,14 @@ function source(gitActions: GitActions): {
         copyBranchName: "Copy branch name",
         pin: "Pin to top",
         unpin: "Unpin",
-        showSetup: "Show setup",
         labelsGroup: "Labels",
       },
       icons: {},
       shortcuts: {},
       capabilities: {
         canSplitPanes: true,
-        canOpenBrowserTabs: true,
         isGit: false,
         canPin: false,
-        canShowSetup: false,
       },
       activeTabKind: null,
       activeTabIndex: -1,
@@ -146,7 +137,7 @@ describe("workspace command center contributions", () => {
     expect(contributions.filter((item) => item.id === "git:pull")).toHaveLength(1);
   });
 
-  it("orders New agent before Git and keeps terminal, browser, and splits search-only", () => {
+  it("puts the primary Git action first and keeps splits search-only", () => {
     const fixture = source({
       primary: gitAction("commit", "Commit"),
       secondary: [],
@@ -157,42 +148,25 @@ describe("workspace command center contributions", () => {
 
     expect(
       contributions
-        .filter((item) =>
-          [
-            "tab:new-agent",
-            "git:commit",
-            "tab:new-terminal",
-            "tab:new-browser",
-            "pane:split-right",
-            "pane:split-down",
-          ].includes(item.id),
-        )
+        .filter((item) => ["git:commit", "pane:split-right", "pane:split-down"].includes(item.id))
         .map(({ id, visibility }) => ({ id, visibility })),
     ).toEqual([
-      { id: "tab:new-agent", visibility: "always" },
       { id: "git:commit", visibility: "always" },
-      { id: "tab:new-terminal", visibility: "query" },
-      { id: "tab:new-browser", visibility: "query" },
       { id: "pane:split-right", visibility: "query" },
       { id: "pane:split-down", visibility: "query" },
     ]);
   });
 
-  it("omits browser and split actions when their existing capabilities are unavailable", () => {
+  it("omits split actions when panes cannot split", () => {
     const fixture = source({ primary: null, secondary: [], menu: [] });
     fixture.value.capabilities = {
       canSplitPanes: false,
-      canOpenBrowserTabs: false,
       isGit: false,
       canPin: false,
-      canShowSetup: false,
     };
 
     const contributions = buildWorkspaceCommandCenterContributions(fixture.value);
 
-    expect(contributions.some((item) => item.id === "tab:new-agent")).toBe(true);
-    expect(contributions.some((item) => item.id === "tab:new-terminal")).toBe(true);
-    expect(contributions.some((item) => item.id === "tab:new-browser")).toBe(false);
     expect(contributions.some((item) => item.id.startsWith("pane:"))).toBe(false);
     expect(contributions.some((item) => item.id === "workspace:rename")).toBe(true);
     expect(contributions.some((item) => item.id === "workspace:copy-path")).toBe(true);
@@ -215,14 +189,11 @@ describe("workspace command center contributions", () => {
     ).toBe(true);
   });
 
-  it("keeps workspace creation commands available outside Git", () => {
+  it("keeps split commands available outside Git", () => {
     const fixture = source({ primary: null, secondary: [], menu: [] });
 
     const contributions = buildWorkspaceCommandCenterContributions(fixture.value);
 
-    expect(contributions.some((item) => item.id === "tab:new-agent")).toBe(true);
-    expect(contributions.some((item) => item.id === "tab:new-terminal")).toBe(true);
-    expect(contributions.some((item) => item.id === "tab:new-browser")).toBe(true);
     expect(contributions.some((item) => item.id === "pane:split-right")).toBe(true);
     expect(contributions.some((item) => item.id === "pane:split-down")).toBe(true);
     expect(contributions.some((item) => item.id.startsWith("git:"))).toBe(false);
@@ -294,23 +265,6 @@ describe("workspace command center contributions", () => {
         (item) => item.id === "workspace:pin",
       ),
     ).toBe(false);
-  });
-
-  it("lists Show setup only when the workspace has setup to show", () => {
-    const withoutSetup = source({ primary: null, secondary: [], menu: [] });
-    expect(
-      buildWorkspaceCommandCenterContributions(withoutSetup.value).some(
-        (item) => item.id === "workspace:show-setup",
-      ),
-    ).toBe(false);
-
-    const withSetup = source({ primary: null, secondary: [], menu: [] });
-    withSetup.value.capabilities.canShowSetup = true;
-    buildWorkspaceCommandCenterContributions(withSetup.value)
-      .find((item) => item.id === "workspace:show-setup")
-      ?.run();
-
-    expect(withSetup.dispatched).toEqual([{ id: "workspace.setup.show", scope: "workspace" }]);
   });
 
   // Regression guard for the registration split: these two are handled only by workspace-screen.tsx

@@ -445,22 +445,7 @@ describe("provider overrides (new format)", () => {
     expect(result.success).toBe(false);
   });
 
-  test("extends: acp without command → error", () => {
-    const result = PersistedConfigSchema.safeParse({
-      agents: {
-        providers: {
-          "my-agent": {
-            extends: "acp",
-            label: "My Agent",
-          },
-        },
-      },
-    });
-
-    expect(result.success).toBe(false);
-  });
-
-  test("extends unknown provider → error", () => {
+  test("extends a provider this build does not have → accepted (the registry skips it)", () => {
     const result = PersistedConfigSchema.safeParse({
       agents: {
         providers: {
@@ -472,7 +457,7 @@ describe("provider overrides (new format)", () => {
       },
     });
 
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
   test("invalid provider ID format → error", () => {

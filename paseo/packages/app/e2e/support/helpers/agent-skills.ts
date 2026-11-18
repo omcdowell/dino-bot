@@ -5,7 +5,6 @@ import path from "node:path";
 import { expect, type Dialog, type Page } from "@playwright/test";
 import type { DaemonClient as InternalDaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { AgentSkillSelection } from "@getpaseo/protocol/messages";
-import { buildOpenProjectRoute } from "@/utils/host-routes";
 import { gotoAppShell, openSettings } from "./app";
 import { connectDaemonClient } from "./daemon-client-loader";
 import { startIsolatedHostDaemon, type IsolatedHostDaemon } from "./isolated-host-daemon";
@@ -125,7 +124,7 @@ export async function openAgentSkillsSettings(
 ): Promise<void> {
   await gotoAppShell(page);
   if (options.compact) {
-    await openCompactSettings(page, buildOpenProjectRoute());
+    await openCompactSettings(page, "/");
   } else {
     await openSettings(page);
   }

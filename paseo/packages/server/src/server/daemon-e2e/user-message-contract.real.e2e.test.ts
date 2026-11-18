@@ -30,24 +30,6 @@ interface ProviderContractCase {
 
 const CONTRACT_CASES: ProviderContractCase[] = [
   {
-    provider: "claude",
-    title: "Claude",
-    timeoutMs: 180_000,
-    createConfig: () => getRealProviderConfig("claude"),
-  },
-  {
-    provider: "codex",
-    title: "Codex",
-    timeoutMs: 180_000,
-    createConfig: () => getRealProviderConfig("codex"),
-  },
-  {
-    provider: "opencode",
-    title: "OpenCode",
-    timeoutMs: 180_000,
-    createConfig: () => getRealProviderConfig("opencode"),
-  },
-  {
     provider: "pi",
     title: "Pi",
     timeoutMs: 240_000,

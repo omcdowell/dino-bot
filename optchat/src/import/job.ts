@@ -3,9 +3,11 @@ import { join, relative } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Memory, atomicWrite, bytes, COMPACTOR_ERRORS, type Entry, type Compressor } from '../memory.ts';
 import { record } from '../cache.ts';
-import type { ImportedEntry } from './sources.ts';
 import { generationPath, memoryDirectory } from './active.ts';
 
+/** A message read from another tool's history (sources.ts), before it has a place in a log. Here, not in sources.ts,
+ * so a host that only stages or finishes an import (the bots plugin's Claude Code engine) does not type-check the readers. */
+export type ImportedEntry = Omit<Entry, 'i' | 'size'>;
 export type ImportMode = 'append' | 'rebuild';
 export interface ImportJob {
   id: string;
@@ -165,7 +167,7 @@ export async function runImport(
   try {
     report();
     await memory.settle(signal, true);
-    signal.throwIfAborted();
+    (signal as AbortSignal & { throwIfAborted(): void }).throwIfAborted(); // typed so: the bots plugin's Node types lack it
     // Close all writers before the single atomic pointer swap. The previous generation stays intact.
     await memory.close();
     if (!activate) {

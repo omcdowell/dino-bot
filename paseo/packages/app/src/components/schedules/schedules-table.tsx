@@ -22,21 +22,15 @@ export interface ScheduleRowView {
 
 interface SchedulesTableProps {
   rows: ScheduleRowView[];
-  /**
-   * The form sheet is owned by the screen (it serves both create and edit and
-   * shares the screen's "New schedule" button), so the table delegates edit
-   * upward rather than mounting a second sheet here.
-   */
-  onEditSchedule: (schedule: AggregatedSchedule) => void;
 }
 
 /**
  * The schedules list: a single settings-style card of rows across every
  * connected host, in a full-width list matching the History screen. Rows own
  * their host-scoped mutations (pause/resume/run/delete via the mutations hook +
- * a destructive confirm) and delegate editing upward.
+ * a destructive confirm) and expose no edit form.
  */
-export function SchedulesTable({ rows, onEditSchedule }: SchedulesTableProps): ReactElement {
+export function SchedulesTable({ rows }: SchedulesTableProps): ReactElement {
   return (
     <View style={styles.listContent} testID="schedules-table">
       <View style={settingsStyles.card}>
@@ -45,7 +39,6 @@ export function SchedulesTable({ rows, onEditSchedule }: SchedulesTableProps): R
             key={`${row.schedule.serverId}:${row.schedule.id}`}
             row={row}
             isFirst={index === 0}
-            onEditSchedule={onEditSchedule}
           />
         ))}
       </View>
@@ -65,11 +58,9 @@ const NO_PENDING: ScheduleRowPending = {};
 function SchedulesTableRow({
   row,
   isFirst,
-  onEditSchedule,
 }: {
   row: ScheduleRowView;
   isFirst: boolean;
-  onEditSchedule: (schedule: AggregatedSchedule) => void;
 }): ReactElement {
   const { schedule } = row;
   const { id, serverId } = schedule;
@@ -94,10 +85,6 @@ function SchedulesTableRow({
     },
     [],
   );
-
-  const handleEdit = useCallback(() => {
-    onEditSchedule(schedule);
-  }, [onEditSchedule, schedule]);
 
   const handlePause = useCallback(() => {
     void runAction("pause", () => mutations.pauseSchedule(id));
@@ -138,7 +125,6 @@ function SchedulesTableRow({
       singleHost={row.singleHost}
       isFirst={isFirst}
       pending={pending}
-      onEdit={handleEdit}
       onPause={handlePause}
       onResume={handleResume}
       onRunNow={handleRunNow}

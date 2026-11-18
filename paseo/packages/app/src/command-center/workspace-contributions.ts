@@ -1,9 +1,6 @@
 import type { GitAction, GitActions } from "@/git/policy";
 import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
-import type {
-  WorkspacePanelPlacement,
-  WorkspacePanelTarget,
-} from "@/keyboard/keyboard-action-dispatcher";
+import type { WorkspacePanelPlacement } from "@/keyboard/keyboard-action-dispatcher";
 import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
 import type { ShortcutKey } from "@/utils/format-shortcut";
 import type { CommandCenterContribution, CommandCenterIcon } from "./contributions";
@@ -17,14 +14,9 @@ export interface WorkspaceCommandCenterLabelChoice {
 
 export interface WorkspaceCommandCenterLabels {
   section: string;
-  newAgent: string;
-  newTerminal: string;
-  newBrowser: string;
   splitRight: string;
   splitDown: string;
-  changes: string;
   files: string;
-  pullRequest: string;
   openPanel(name: string, placement: WorkspacePanelPlacement): string;
   previousTab: string;
   nextTab: string;
@@ -33,7 +25,6 @@ export interface WorkspaceCommandCenterLabels {
   reloadAgent: string;
   copyResumeCommand: string;
   copyAgentId: string;
-  copyTerminalId: string;
   copyFilePath: string;
   closeTabsLeft: string;
   closeTabsRight: string;
@@ -55,19 +46,13 @@ export interface WorkspaceCommandCenterLabels {
   copyBranchName: string;
   pin: string;
   unpin: string;
-  showSetup: string;
   labelsGroup: string;
 }
 
 export interface WorkspaceCommandCenterIcons {
-  newAgent?: CommandCenterIcon;
-  newTerminal?: CommandCenterIcon;
-  newBrowser?: CommandCenterIcon;
   splitRight?: CommandCenterIcon;
   splitDown?: CommandCenterIcon;
-  changes?: CommandCenterIcon;
   files?: CommandCenterIcon;
-  pullRequest?: CommandCenterIcon;
   previousTab?: CommandCenterIcon;
   nextTab?: CommandCenterIcon;
   close?: CommandCenterIcon;
@@ -83,15 +68,12 @@ export interface WorkspaceCommandCenterIcons {
   copyBranchName?: CommandCenterIcon;
   pin?: CommandCenterIcon;
   unpin?: CommandCenterIcon;
-  showSetup?: CommandCenterIcon;
   toggleFocusMode?: CommandCenterIcon;
   label?: CommandCenterIcon;
   git?(action: GitAction): CommandCenterIcon | undefined;
 }
 
 export interface WorkspaceCommandCenterShortcuts {
-  newAgent?: ShortcutKey[][];
-  newTerminal?: ShortcutKey[][];
   splitRight?: ShortcutKey[][];
   splitDown?: ShortcutKey[][];
   archiveWorkspace?: ShortcutKey[][];
@@ -111,12 +93,9 @@ export interface WorkspaceCommandCenterSource {
   shortcuts: WorkspaceCommandCenterShortcuts;
   capabilities: {
     canSplitPanes: boolean;
-    canOpenBrowserTabs: boolean;
     isGit: boolean;
     /** Host supports the `workspacePinning` feature. */
     canPin: boolean;
-    /** The workspace has setup commands or a setup error — same gate as the header menu. */
-    canShowSetup: boolean;
   };
   activeTabKind: WorkspaceTabTarget["kind"] | null;
   activeTabIndex: number;
@@ -202,59 +181,21 @@ function buildQueryAction(
 function buildPanelContributions(
   source: WorkspaceCommandCenterSource,
 ): CommandCenterContribution[] {
-  const contributions: CommandCenterContribution[] = [];
-  const panelTargets: Array<{
-    target: WorkspacePanelTarget;
-    name: string;
-    icon?: CommandCenterIcon;
-  }> = [
-    { target: "changes", name: source.labels.changes, icon: source.icons.changes },
-    { target: "files", name: source.labels.files, icon: source.icons.files },
-    {
-      target: "pull-request",
-      name: source.labels.pullRequest,
-      icon: source.icons.pullRequest,
-    },
+  return [
+    buildQueryAction(source, {
+      id: "tab:open:files",
+      rank: 5,
+      title: source.labels.openPanel(source.labels.files, "supporting"),
+      keywords: ["open", "files", "tab", "supporting"],
+      icon: source.icons.files,
+      action: {
+        id: "workspace.tab.open",
+        scope: "workspace",
+        target: "files",
+        placement: "supporting",
+      },
+    }),
   ];
-  for (const [index, panel] of panelTargets.entries()) {
-    if (panel.target !== "files" && !source.capabilities.isGit) continue;
-    contributions.push(
-      buildQueryAction(source, {
-        id: `tab:open:${panel.target}`,
-        rank: 4 + index,
-        title: source.labels.openPanel(panel.name, "supporting"),
-        keywords: ["open", panel.target, "tab", "supporting"],
-        icon: panel.icon,
-        action: {
-          id: "workspace.tab.open",
-          scope: "workspace",
-          target: panel.target,
-          placement: "supporting",
-        },
-      }),
-    );
-    if (!source.capabilities.canSplitPanes) continue;
-    if (panel.target !== "pull-request") continue;
-    const placements = ["side-pane", "focused-pane"] as const;
-    for (const [placementIndex, placement] of placements.entries()) {
-      contributions.push(
-        buildQueryAction(source, {
-          id: `tab:open:${panel.target}:${placement}`,
-          rank: 10 + index * 2 + placementIndex,
-          title: source.labels.openPanel(panel.name, placement),
-          keywords: ["open", panel.target, "tab", placement, "pane"],
-          icon: panel.icon,
-          action: {
-            id: "workspace.tab.open",
-            scope: "workspace",
-            target: panel.target,
-            placement,
-          },
-        }),
-      );
-    }
-  }
-  return contributions;
 }
 
 function buildActiveTabContributions(
@@ -290,7 +231,7 @@ function buildActiveTabContributions(
       action: { id: "workspace.tab.close-current", scope: "workspace" },
     }),
   ];
-  if (source.activeTabKind === "agent" || source.activeTabKind === "terminal") {
+  if (source.activeTabKind === "agent") {
     contributions.push(
       buildQueryAction(source, {
         id: "tab:rename-current",
@@ -303,10 +244,7 @@ function buildActiveTabContributions(
       buildQueryAction(source, {
         id: "tab:copy-id",
         rank: 34,
-        title:
-          source.activeTabKind === "agent"
-            ? source.labels.copyAgentId
-            : source.labels.copyTerminalId,
+        title: source.labels.copyAgentId,
         keywords: ["tab", "copy", "id"],
         icon: source.icons.copy,
         action: { id: "workspace.tab.copy-id", scope: "workspace" },
@@ -530,45 +468,8 @@ function buildWorkspaceCallback(input: {
 function buildCreationContributions(
   source: WorkspaceCommandCenterSource,
 ): CommandCenterContribution[] {
-  const contributions: CommandCenterContribution[] = [
-    buildWorkspaceAction({
-      source,
-      id: "tab:new-agent",
-      rank: 0,
-      title: source.labels.newAgent,
-      keywords: ["tab", "new", "agent", "chat"],
-      icon: source.icons.newAgent,
-      shortcutKeys: source.shortcuts.newAgent,
-      action: { id: "workspace.agent.new", scope: "workspace" },
-      visibility: "always",
-    }),
-  ];
   const primary = source.gitActions.primary;
-  if (primary) contributions.push(buildGitContribution(source, primary, 1, "always"));
-  contributions.push(
-    buildQueryAction(source, {
-      id: "tab:new-terminal",
-      rank: 2,
-      title: source.labels.newTerminal,
-      keywords: ["terminal", "shell", "console"],
-      icon: source.icons.newTerminal,
-      shortcutKeys: source.shortcuts.newTerminal,
-      action: { id: "workspace.terminal.new", scope: "workspace" },
-    }),
-  );
-  if (source.capabilities.canOpenBrowserTabs) {
-    contributions.push(
-      buildQueryAction(source, {
-        id: "tab:new-browser",
-        rank: 3,
-        title: source.labels.newBrowser,
-        keywords: ["browser", "web", "preview"],
-        icon: source.icons.newBrowser,
-        action: { id: "workspace.browser.new", scope: "workspace" },
-      }),
-    );
-  }
-  return contributions;
+  return primary ? [buildGitContribution(source, primary, 1, "always")] : [];
 }
 
 export function buildWorkspaceCommandCenterContributions(
@@ -642,21 +543,6 @@ export function buildWorkspaceCommandCenterContributions(
     );
   }
 
-  if (source.capabilities.canShowSetup) {
-    contributions.push(
-      buildWorkspaceAction({
-        source,
-        id: "workspace:show-setup",
-        rank: 24,
-        title: source.labels.showSetup,
-        keywords: ["setup", "provision", "install", "bootstrap"],
-        icon: source.icons.showSetup,
-        action: { id: "workspace.setup.show", scope: "workspace" },
-        visibility: "query",
-      }),
-    );
-  }
-
   // Toggle Explorer sidebar and Toggle focus mode belong here, NOT in root-registration.tsx:
   // their handlers live in workspace-screen.tsx behind `enabled: isRouteFocused && ...`, so a
   // global registration would list two entries that silently no-op on /settings, /sessions,
@@ -668,7 +554,7 @@ export function buildWorkspaceCommandCenterContributions(
       id: "workspace:toggle-explorer-sidebar",
       rank: 25,
       title: source.labels.toggleExplorerSidebar,
-      keywords: ["toggle", "sidebar", "explorer", "files", "changes"],
+      keywords: ["toggle", "sidebar", "explorer", "files"],
       icon: source.icons.explorerSidebar,
       shortcutKeys: source.shortcuts.toggleExplorerSidebar,
       action: { id: "sidebar.toggle.right", scope: "sidebar" },

@@ -16,8 +16,6 @@ import {
 } from "../support/helpers/usage-reports";
 import {
   installLoginUsage,
-  installCodexWindowUsage,
-  expectCodexReportedWindows,
   refreshLoginUsage,
   hoverUsageWindow,
 } from "../support/helpers/usage-login";
@@ -381,52 +379,6 @@ test("compact usage rows always show the pin glyph", async ({ page }) => {
     await fixture.cleanup();
   }
 });
-
-for (const shape of ["seven-day-only", "Spark"] as const) {
-  test(`Codex ${shape} windows use provider durations on the card and sidebar`, async ({
-    page,
-  }) => {
-    const reset = Math.floor(Date.now() / 1000) + 5 * 86400;
-    const source = await installCodexWindowUsage({
-      rate_limit: {
-        primary_window: { used_percent: 11, limit_window_seconds: 604800, reset_at: reset },
-        secondary_window: null,
-      },
-      additional_rate_limits:
-        shape === "Spark"
-          ? [
-              {
-                limit_name: "GPT-5.3-Codex-Spark",
-                metered_feature: "codex_bengalfox",
-                rate_limit: {
-                  primary_window: {
-                    used_percent: 0,
-                    limit_window_seconds: 18000,
-                    reset_at: Math.floor(Date.now() / 1000) + 3600,
-                  },
-                  secondary_window: {
-                    used_percent: 0,
-                    limit_window_seconds: 604800,
-                    reset_at: reset,
-                  },
-                },
-              },
-            ]
-          : [],
-    });
-    try {
-      await page.setViewportSize({ width: 1440, height: 900 });
-      await gotoAppShell(page);
-      await expect(usageItem(page)).toBeVisible();
-      await openUsageFromItem(page);
-      await qaScreenshot(page, `codex-${shape}-card-and-summary`);
-      await expectCodexReportedWindows(page, shape);
-      await qaScreenshot(page, `codex-${shape}-pins`);
-    } finally {
-      await source.cleanup();
-    }
-  });
-}
 
 for (const theme of ["light", "dark"] as const) {
   for (const [size, viewport] of Object.entries({

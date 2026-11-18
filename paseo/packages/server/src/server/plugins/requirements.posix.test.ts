@@ -87,7 +87,9 @@ it("marks pre-0.8 plugins failed on startup and recovers after migration and rel
   await expect(service.reloadPlugin("example")).resolves.toMatchObject({ status: "running" });
   await writePlugin(root, ">=0.9.0");
   await expect(service.reloadPlugin("example")).rejects.toThrow("requires Paseo >=0.9.0");
-  expect(service.catalog()).toEqual([]);
+  // The reload is checked before the stop: the running (compatible) version is kept.
+  expect(service.catalog().map((plugin) => plugin.id)).toEqual(["example"]);
+  expect(await service.listPlugins()).toEqual([expect.objectContaining({ status: "running" })]);
 });
 
 it("still requires entry migration when an old plugin adds a compatible requirement", async () => {

@@ -157,13 +157,30 @@ describe("PluginRegistry", () => {
     Reflect.deleteProperty(globalThis, "__cleanupSeenByReplacement");
   });
 
-  it("replaces an unchanged bundle when explicit reload names the plugin", () => {
+  it("keeps an unchanged bundle when explicit reload names the plugin, refreshing its data", () => {
     const clientBundle = bundle("same");
     pluginRegistry.installCatalog("host-a", [{ id: "example", clientBundle }]);
     const first = pluginRegistry.getSnapshot()[0];
     first?.queryClient.setQueryData(["attachment-search"], "cached");
 
     pluginRegistry.installCatalog("host-a", [{ id: "example", clientBundle }], {
+      replacePluginId: "example",
+    });
+
+    const second = pluginRegistry.getSnapshot()[0];
+    expect(second).toBe(first);
+    expect(first?.lifetime.signal.aborted).toBe(false);
+    expect(first?.queryClient.getQueryData(["attachment-search"])).toBe("cached");
+    expect(first?.queryClient.getQueryState(["attachment-search"])?.isInvalidated).toBe(true);
+    expect(Reflect.get(globalThis, "__pluginCleanups")).toBeUndefined();
+  });
+
+  it("replaces a changed bundle when explicit reload names the plugin", () => {
+    pluginRegistry.installCatalog("host-a", [{ id: "example", clientBundle: bundle("one") }]);
+    const first = pluginRegistry.getSnapshot()[0];
+    first?.queryClient.setQueryData(["attachment-search"], "cached");
+
+    pluginRegistry.installCatalog("host-a", [{ id: "example", clientBundle: bundle("two") }], {
       replacePluginId: "example",
     });
 

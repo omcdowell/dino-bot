@@ -70,12 +70,6 @@ if (typeof globalThis.cancelAnimationFrame !== "function") {
 // reaches every vitest project through the resolve.alias in vitest.config.ts —
 // no vi.mock here, so there is a single copy of the fixture theme.
 
-vi.mock("@xterm/addon-ligatures", () => ({
-  LigaturesAddon: class LigaturesAddon {
-    dispose(): void {}
-  },
-}));
-
 // react-native-svg and expo-linking test doubles live in test-stubs/ and reach
 // every vitest project through the resolve.alias in vitest.config.ts, same as
 // react-native-unistyles and lucide-react-native.

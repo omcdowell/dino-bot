@@ -4,20 +4,14 @@ import {
   buildHostRootRoute,
   buildHostWorkspaceOpenRoute,
   buildHostWorkspaceRoute,
-  buildNewWorkspaceRoute,
-  buildOpenProjectRoute,
   resolveKnownHostRoute,
-  buildSessionsRoute,
   buildSettingsAddHostRoute,
-  buildProjectSettingsRoute,
-  buildProjectsSettingsRoute,
   decodeFilePathFromPathSegment,
   decodeWorkspaceIdFromPathSegment,
   encodeFilePathForPathSegment,
   encodeWorkspaceIdForPathSegment,
   isSettingsSectionSlug,
   normalizeHostSectionSlug,
-  normalizeProjectSettingsRouteId,
   parseHostAgentRouteFromPathname,
   parseHostWorkspaceOpenIntentFromPathname,
   parseHostWorkspaceRouteFromPathname,
@@ -99,23 +93,18 @@ describe("workspace route parsing", () => {
       kind: "agent",
       agentId: "agent-1",
     });
-    expect(parseWorkspaceOpenIntent("terminal:term-1")).toEqual({
-      kind: "terminal",
-      terminalId: "term-1",
-    });
-    expect(parseWorkspaceOpenIntent("draft:new")).toEqual({
-      kind: "draft",
-      draftId: "new",
-    });
     expect(parseWorkspaceOpenIntent("file:c3JjL2luZGV4LnRz")).toEqual({
       kind: "file",
       path: "src/index.ts",
     });
-    expect(parseWorkspaceOpenIntent("setup:L3RtcC9yZXBv")).toEqual({
-      kind: "setup",
-      workspaceId: "/tmp/repo",
-    });
   });
+
+  it.each(["terminal:term-1", "draft:new", "setup:L3RtcC9yZXBv"])(
+    "ignores the removed open intent %s",
+    (value) => {
+      expect(parseWorkspaceOpenIntent(value)).toBeNull();
+    },
+  );
 
   it("uses the plain workspace route when workspace context is provided", () => {
     expect(buildHostAgentDetailRoute("local", "agent-1", "164")).toBe(
@@ -184,62 +173,13 @@ describe("workspace route parsing", () => {
   });
 });
 
-describe("projects settings routes", () => {
+describe("settings add-host route", () => {
   it("buildSettingsAddHostRoute opens settings with the add-host flag", () => {
     expect(buildSettingsAddHostRoute()).toBe("/settings/general?addHost=1");
   });
 
   it("buildSettingsAddHostRoute accepts a repeatable intent id", () => {
     expect(buildSettingsAddHostRoute("retry 1")).toBe("/settings/general?addHost=retry%201");
-  });
-
-  it("buildProjectsSettingsRoute scopes the list to a host", () => {
-    expect(buildProjectsSettingsRoute("host a")).toBe("/settings/hosts/host%20a/projects");
-  });
-
-  it("buildProjectSettingsRoute addresses a host-local project id", () => {
-    expect(buildProjectSettingsRoute("host a", "project/1")).toBe(
-      "/settings/hosts/host%20a/projects/project%2F1",
-    );
-  });
-
-  it("keeps route ids opaque", () => {
-    expect(normalizeProjectSettingsRouteId("project%2F1")).toBe("project%2F1");
-  });
-});
-
-describe("global routes", () => {
-  it("buildSessionsRoute returns the all-host Sessions route", () => {
-    expect(buildSessionsRoute()).toBe("/sessions");
-  });
-
-  it("buildNewWorkspaceRoute returns the all-host New Workspace route", () => {
-    expect(buildNewWorkspaceRoute()).toBe("/new");
-  });
-
-  it("buildNewWorkspaceRoute accepts an initial host", () => {
-    expect(buildNewWorkspaceRoute({ serverId: "local" })).toBe("/new?serverId=local");
-  });
-
-  it("buildNewWorkspaceRoute accepts initial project context", () => {
-    expect(
-      buildNewWorkspaceRoute({
-        serverId: "local",
-        sourceDirectory: "/repo/project",
-        displayName: "Project",
-        projectId: "project-1",
-      }),
-    ).toBe("/new?serverId=local&dir=%2Frepo%2Fproject&name=Project&projectId=project-1");
-  });
-
-  it("buildNewWorkspaceRoute carries a draft context id", () => {
-    expect(
-      buildNewWorkspaceRoute({
-        serverId: "local",
-        sourceDirectory: "/repo/project",
-        draftId: "draft-1",
-      }),
-    ).toBe("/new?serverId=local&dir=%2Frepo%2Fproject&draftId=draft-1");
   });
 });
 
@@ -248,12 +188,16 @@ describe("host settings section slugs", () => {
     expect(normalizeHostSectionSlug("connections")).toBe("connections");
     expect(normalizeHostSectionSlug("pair-device")).toBe("pair-device");
     expect(normalizeHostSectionSlug("agents")).toBe("agents");
-    expect(normalizeHostSectionSlug("metadata")).toBe("metadata");
-    expect(normalizeHostSectionSlug("workspaces")).toBe("workspaces");
-    expect(normalizeHostSectionSlug("projects")).toBe("projects");
     expect(normalizeHostSectionSlug("providers")).toBe("providers");
     expect(normalizeHostSectionSlug("usage")).toBe("usage");
     expect(normalizeHostSectionSlug("host")).toBe("host");
+  });
+
+  it("drops the deleted Paseo host sections", () => {
+    expect(normalizeHostSectionSlug("projects")).toBeNull();
+    expect(normalizeHostSectionSlug("metadata")).toBeNull();
+    expect(normalizeHostSectionSlug("workspaces")).toBeNull();
+    expect(normalizeHostSectionSlug("terminals")).toBeNull();
   });
 
   it("maps old host settings sections to their new names", () => {
@@ -282,13 +226,13 @@ describe("resolveKnownHostRoute", () => {
     ).toEqual({ kind: "render" });
   });
 
-  it("sends removed host routes to the host-agnostic open project screen", () => {
+  it("sends removed host routes to the root resolver", () => {
     expect(
       resolveKnownHostRoute({
         routeServerId: "srv-removed",
         hosts: [{ serverId: "srv-next" }],
       }),
-    ).toEqual({ kind: "redirect", href: buildOpenProjectRoute() });
+    ).toEqual({ kind: "redirect", href: "/" });
   });
 
   it("sends host routes to welcome when no hosts are saved", () => {

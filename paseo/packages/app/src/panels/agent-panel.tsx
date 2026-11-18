@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { TFunction } from "i18next";
-import { SquarePen } from "lucide-react-native";
 import React, {
   memo,
   type ReactNode,
@@ -38,7 +37,6 @@ import { getActiveMessageSubmissions } from "@/composer/submission/model";
 import { RewindComposerRestoreProvider } from "@/components/rewind/composer-restore";
 import { useProviderIcon } from "@/components/provider-icons";
 import { useToastHost, type ToastApi, type ToastState } from "@/components/toast-host";
-import type { WorkspaceComposerAttachment } from "@/attachments/types";
 import { useWorkspaceAttachmentScopeKey } from "@/attachments/workspace-attachments-store";
 import { COMPACT_FORM_FACTOR_WIDTH, useIsCompactFormFactor } from "@/constants/layout";
 import { isNative, isWeb } from "@/constants/platform";
@@ -66,7 +64,6 @@ import { usePaneContext, usePaneFocus } from "@/panels/pane-context";
 import { definePanel, type PanelDescriptor } from "@/panels/panel-registry";
 import { RenderProfile } from "@/utils/render-profiler";
 import { useHasPluginComposerPills } from "@/plugins";
-import { buildDraftPanelDescriptor } from "@/panels/draft-panel-descriptor";
 import {
   type HostRuntimeConnectionStatus,
   useHostRuntimeClient,
@@ -79,10 +76,9 @@ import {
   deriveRouteBottomAnchorIntent,
   deriveRouteBottomAnchorRequest,
 } from "@/screens/agent/agent-ready-screen-bottom-anchor";
-import { WorkspaceDraftAgentTab } from "@/composer/draft/workspace-tab";
 import { AgentTracks, hasAgentTracks } from "@/panels/agent-tracks";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
-import { buildDraftStoreKey, generateDraftId } from "@/stores/draft-keys";
+import { buildDraftStoreKey } from "@/stores/draft-keys";
 import {
   selectAgentTimelineState,
   selectAgentTurnPresentation,
@@ -91,8 +87,6 @@ import {
 } from "@/stores/session-store";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
-import { openWorkspaceChanges } from "@/workspace-tabs/open-supporting-view";
-import { useSettings } from "@/hooks/use-settings";
 import type { Theme } from "@/styles/theme";
 import type { PendingPermission } from "@/types/shared";
 import type { StreamItem, TodoEntry } from "@/types/stream";
@@ -103,7 +97,7 @@ import { derivePendingPermissionKey, normalizeAgentSnapshot } from "@/utils/agen
 import { applyLegacyDaemonWorkspaceOwnership } from "@/workspace/legacy-daemon-workspaces";
 import type { WorkspaceFileOpenRequest } from "@/workspace/file-open";
 import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
-import { buildDraftAgentSetup, type ClientSlashCommand } from "@/client-slash-commands";
+import type { ClientSlashCommand } from "@/client-slash-commands";
 
 interface ChatAgentStateShape {
   serverId: string | null;
@@ -339,7 +333,7 @@ function useAgentPanelDescriptor(
       const agent =
         session?.agents?.get(target.agentId) ?? session?.agentDetails?.get(target.agentId) ?? null;
       return {
-        provider: agent?.provider ?? "codex",
+        provider: agent?.provider ?? "pi",
         title: agent?.title ?? null,
         status: agent?.status ?? null,
         pendingPermissionCount: agent?.pendingPermissions.length ?? 0,
@@ -388,85 +382,16 @@ function AgentPanel() {
   );
 }
 
-function DraftPanel() {
-  const {
-    serverId,
-    workspaceId,
-    tabId,
-    target,
-    openFileInWorkspace,
-    openImportSheet,
-    retargetCurrentTab,
-  } = usePaneContext();
-  const { isInteractive } = usePaneFocus();
-  invariant(target.kind === "draft", "DraftPanel requires draft target");
-
-  const handleCreated = useCallback(
-    (agentSnapshot: Parameters<typeof normalizeAgentSnapshot>[0]) => {
-      const normalized = normalizeAgentSnapshot(agentSnapshot, serverId);
-      const agent = applyLegacyDaemonWorkspaceOwnership({ serverId, agent: normalized });
-      getHostRuntimeStore().acceptAgentSnapshot(serverId, agent);
-      retargetCurrentTab({ kind: "agent", agentId: agentSnapshot.id });
-    },
-    [retargetCurrentTab, serverId],
-  );
-
-  return (
-    <WorkspaceDraftAgentTab
-      serverId={serverId}
-      workspaceId={workspaceId}
-      tabId={tabId}
-      draftId={target.draftId}
-      initialSetup={target.setup}
-      isPaneFocused={isInteractive}
-      onOpenWorkspaceFile={openFileInWorkspace}
-      onCreated={handleCreated}
-      onOpenImportSheet={openImportSheet}
-    />
-  );
-}
-
 export function AgentConversationPanel() {
   const { target } = usePaneContext();
-  if (target.kind === "draft") {
-    return <DraftPanel />;
-  }
-  if (target.kind === "agent") {
-    return <AgentPanel />;
-  }
-  invariant(false, "AgentConversationPanel requires an agent or draft target");
+  invariant(target.kind === "agent", "AgentConversationPanel requires an agent target");
+  return <AgentPanel />;
 }
 
 export const agentPanelRegistration = definePanel("agent", {
   component: AgentConversationPanel,
   useDescriptor: useAgentPanelDescriptor,
 });
-
-export function useDraftPanelDescriptor(
-  target: { kind: "draft"; draftId: string },
-  context: { serverId: string },
-) {
-  const createDescriptorState = useCreateFlowStore(
-    useShallow((state) => {
-      const pending = state.pendingByDraftId[target.draftId];
-      if (pending?.serverId !== context.serverId || pending.lifecycle !== "active") {
-        return {
-          isCreating: false,
-          pendingPrompt: null,
-        };
-      }
-      return {
-        isCreating: true,
-        pendingPrompt: pending.text,
-      };
-    }),
-  );
-
-  return buildDraftPanelDescriptor({
-    ...createDescriptorState,
-    icon: SquarePen,
-  });
-}
 
 const EMPTY_STREAM_ITEMS: StreamItem[] = [];
 const EMPTY_MESSAGE_SUBMISSIONS = [] as const;
@@ -1584,8 +1509,7 @@ function ActiveAgentComposer({
     { initialIsBelow: isCompactFormFactor },
   );
   const paneContext = usePaneContext();
-  const openInSidePane = useSettings((settings) => settings.openInSidePane);
-  const { workspaceId, tabId, retargetCurrentTab } = paneContext;
+  const { workspaceId, tabId } = paneContext;
   const { archiveAgent } = useArchiveAgent();
   const closeWorkspaceTab = useWorkspaceLayoutStore((state) => state.closeTab);
   const hideWorkspaceAgent = useWorkspaceLayoutStore((state) => state.hideAgent);
@@ -1599,23 +1523,9 @@ function ActiveAgentComposer({
     () => [workspaceAttachmentScopeKey],
     [workspaceAttachmentScopeKey],
   );
-  const handleOpenWorkspaceAttachment = useCallback(
-    (attachment: WorkspaceComposerAttachment) => {
-      if (attachment.kind !== "review") {
-        return;
-      }
-      openWorkspaceChanges({
-        isCompact: isCompactFormFactor,
-        workspaceKey: buildWorkspaceTabPersistenceKey({ serverId, workspaceId }),
-        checkout: { serverId, cwd, isGit: true },
-        preferences: openInSidePane,
-      });
-    },
-    [cwd, isCompactFormFactor, openInSidePane, serverId, workspaceId],
-  );
 
   const handleClientSlashCommand = useCallback(
-    async (command: ClientSlashCommand) => {
+    async (_command: ClientSlashCommand) => {
       const agent = resolveChatAgentFromSession(useSessionStore.getState(), serverId, agentId);
       if (!agent) {
         throw new Error("Agent not found");
@@ -1627,13 +1537,7 @@ function ActiveAgentComposer({
         hideWorkspaceAgent(workspaceKey, agentId);
       }
 
-      if (command.kind === "replace-agent-with-draft") {
-        retargetCurrentTab({
-          kind: "draft",
-          draftId: generateDraftId(),
-          setup: buildDraftAgentSetup(agent),
-        });
-      } else if (workspaceKey) {
+      if (workspaceKey) {
         closeWorkspaceTab(workspaceKey, tabId);
       }
 
@@ -1644,7 +1548,6 @@ function ActiveAgentComposer({
       archiveAgent,
       closeWorkspaceTab,
       hideWorkspaceAgent,
-      retargetCurrentTab,
       serverId,
       tabId,
       unpinWorkspaceAgent,
@@ -1665,7 +1568,6 @@ function ActiveAgentComposer({
         textReplacement={agentInputDraft.textReplacement}
         attachments={agentInputDraft.attachments}
         attachmentScopeKeys={attachmentScopeKeys}
-        onOpenWorkspaceAttachment={handleOpenWorkspaceAttachment}
         onChangeAttachments={agentInputDraft.setAttachments}
         cwd={cwd}
         clearDraft={agentInputDraft.clear}

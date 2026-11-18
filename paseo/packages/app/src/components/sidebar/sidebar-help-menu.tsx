@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { Text, View } from "react-native";
-import { Activity, CircleHelp, Gift, Keyboard } from "lucide-react-native";
+import { Activity, CircleHelp, Keyboard } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { DiscordIcon } from "@/components/icons/discord-icon";
@@ -27,15 +27,12 @@ import type { HostProfile } from "@/types/host-connection";
 import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
 import { resolveDisplayVersion } from "@/utils/app-version";
 import { formatHostVersionLabel } from "@/utils/display-version";
-import { openChangelog } from "@/changelog";
-import { RELEASE_POLICY } from "@/constants/flavour";
 import { openExternalUrl } from "@/utils/open-external-url";
 
 const DISCORD_URL = "https://discord.gg/jz8T2uahpH";
 const GITHUB_ISSUE_URL = "https://github.com/getpaseo/paseo/issues/new";
 const ThemedActivity = withUnistyles(Activity);
 const ThemedCircleHelp = withUnistyles(CircleHelp);
-const ThemedGift = withUnistyles(Gift);
 const ThemedKeyboard = withUnistyles(Keyboard);
 const ThemedDiscordIcon = withUnistyles(DiscordIcon);
 const ThemedGitHubIcon = withUnistyles(GitHubIcon);
@@ -54,9 +51,6 @@ const discordLeadingIcon = (
 );
 const githubLeadingIcon = (
   <ThemedGitHubIcon size={ICON_SIZE.sm} uniProps={foregroundMutedColorMapping} />
-);
-const changelogLeadingIcon = (
-  <ThemedGift size={ICON_SIZE.sm} uniProps={foregroundMutedColorMapping} />
 );
 
 function HostVersionHint({ host }: { host: HostProfile }) {
@@ -133,15 +127,6 @@ export function SidebarHelpMenu() {
             onSelect={openKeyboardShortcuts}
           >
             {t("sidebar.help.shortcuts")}
-          </DropdownMenuItem>
-        ) : null}
-        {RELEASE_POLICY.upstreamChangelog ? (
-          <DropdownMenuItem
-            testID="sidebar-help-changelog"
-            leading={changelogLeadingIcon}
-            onSelect={openChangelog}
-          >
-            {t("sidebar.help.whatsNew")}
           </DropdownMenuItem>
         ) : null}
         <DropdownMenuItem

@@ -120,15 +120,6 @@ function agentTab(): WorkspaceTabDescriptor {
   };
 }
 
-function terminalTab(): WorkspaceTabDescriptor {
-  return {
-    key: "terminal_abc",
-    tabId: "terminal_abc",
-    kind: "terminal",
-    target: { kind: "terminal", terminalId: "terminal-abc" },
-  };
-}
-
 function renderAccessory(
   tab: WorkspaceTabDescriptor,
   onRenameTab: (tab: WorkspaceTabDescriptor) => void,
@@ -142,7 +133,6 @@ function renderAccessory(
     menuTestIDBase: base,
     onCopyResumeCommand: vi.fn(),
     onCopyAgentId: vi.fn(),
-    onCopyTerminalId: vi.fn(),
     onCopyFilePath: vi.fn(),
     onReloadAgent: vi.fn(),
     onRenameTab,
@@ -216,17 +206,5 @@ describe("MobileTabTrailingAccessory", () => {
 
     expect(onRenameTab).toHaveBeenCalledTimes(1);
     expect(onRenameTab).toHaveBeenCalledWith(agentTab());
-  });
-
-  it("reaches Rename for a terminal session", () => {
-    const onRenameTab = vi.fn();
-    const rendered = renderAccessory(terminalTab(), onRenameTab);
-    current = rendered;
-
-    const renameButton = document.querySelector(`[data-testid="${rendered.base}-rename"]`);
-    expect(renameButton).not.toBeNull();
-    fireEvent.click(renameButton as HTMLElement);
-
-    expect(onRenameTab).toHaveBeenCalledWith(terminalTab());
   });
 });

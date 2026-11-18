@@ -65,15 +65,13 @@ export const ProviderOverrideSchema = z.object({
   order: z.number().optional(),
 });
 
-const BUILTIN_PROVIDER_IDS = ["claude", "codex", "copilot", "opencode", "pi", "omp"] as const;
+const BUILTIN_PROVIDER_IDS = ["pi"] as const;
 const PROVIDER_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 export const ProviderOverridesSchema = z
   .record(z.string(), ProviderOverrideSchema)
   .superRefine((providers, ctx) => {
     const builtinProviderIdSet = new Set<string>(BUILTIN_PROVIDER_IDS);
-    const validExtendsValues = new Set<string>([...BUILTIN_PROVIDER_IDS, "acp"]);
-
     for (const [providerId, provider] of Object.entries(providers)) {
       if (!PROVIDER_ID_PATTERN.test(providerId)) {
         ctx.addIssue({
@@ -95,21 +93,8 @@ export const ProviderOverridesSchema = z
         });
       }
 
-      if (provider.extends && !validExtendsValues.has(provider.extends)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: [providerId, "extends"],
-          message: `Provider "${providerId}" extends unknown provider "${provider.extends}".`,
-        });
-      }
-
-      if (provider.extends === "acp" && !provider.command) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: [providerId, "command"],
-          message: `Provider "${providerId}" extending "acp" must declare command.`,
-        });
-      }
+      // `extends` naming a provider this build lacks (deleted ACP/Codex/OpenCode/OMP/Claude SDK
+      // providers) is not a config error: the registry skips that provider with a warning.
     }
   });
 

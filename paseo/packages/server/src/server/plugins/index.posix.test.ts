@@ -208,7 +208,7 @@ describe("PluginService", () => {
       await store.patch({
         providers: {
           "plugin-agent": shadow
-            ? { extends: "acp", label: "Own provider", command: ["own-agent"] }
+            ? { extends: "pi", label: "Own provider", command: ["own-agent"] }
             : { command: ["configured-agent"], enabled: false },
         },
       });
@@ -381,7 +381,7 @@ describe("PluginService", () => {
     await service.stopAllPlugins();
   }, 20_000);
 
-  it("uses an explicit config key, exposes reload failure, and retries from disk", async () => {
+  it("uses an explicit config key, keeps the running version on a broken reload, exposes start failure, and retries from disk", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
     roots.push(home);
     const directory = await createPlugin(
@@ -404,7 +404,24 @@ describe("PluginService", () => {
       "choose another ID with --id",
     );
 
+    // A broken source does not take the running plugin down: it is validated before the stop.
     await writeFile(path.join(directory, "index.server.ts"), "export default broken syntax !!!");
+    const notified: string[] = [];
+    const unsubscribe = service.subscribe((pluginId) => notified.push(pluginId));
+    await expect(service.reloadPlugin("work-plugin")).rejects.toThrow(
+      "Plugin work-plugin was not reloaded (the running version is kept)",
+    );
+    unsubscribe();
+    expect(notified).toEqual([]);
+    expect(catalogIds(service)).toEqual(["work-plugin"]);
+    expect(await service.listPlugins()).toMatchObject([
+      expect.objectContaining({ id: "work-plugin", status: "running" }),
+    ]);
+
+    // Not running (stopped, or failed earlier): the reload starts it and exposes the failure.
+    await service.disablePlugin("work-plugin");
+    await expect(service.enablePlugin("work-plugin")).rejects.toThrow();
+    expect(service.catalog()).toEqual([]);
     await expect(service.reloadPlugin("work-plugin")).rejects.toThrow();
     expect(service.catalog()).toEqual([]);
     expect(await service.listPlugins()).toMatchObject([

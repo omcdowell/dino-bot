@@ -25,7 +25,7 @@ describe("bootstrap provider availability", () => {
     );
   });
 
-  test("loads a persisted Codex record without spawning a missing Codex binary", async () => {
+  test("loads a persisted Pi record without spawning a missing Pi binary", async () => {
     const { createPaseoDaemon } = await import("./bootstrap.js");
     const root = await mkdtemp(path.join(os.tmpdir(), "paseo-bootstrap-provider-"));
     tempRoots.push(root);
@@ -47,7 +47,7 @@ describe("bootstrap provider availability", () => {
       path.join(agentStoragePath, `${agentId}.json`),
       JSON.stringify({
         id: agentId,
-        provider: "codex",
+        provider: "pi",
         cwd: root,
         createdAt: now,
         updatedAt: now,
@@ -55,13 +55,13 @@ describe("bootstrap provider availability", () => {
         lastModeId: "auto",
         config: {
           modeId: "auto",
-          model: "gpt-5.4",
+          model: "openai-pi/gpt-5.4",
         },
         persistence: {
-          provider: "codex",
-          sessionId: "codex-session-1",
+          provider: "pi",
+          sessionId: "pi-session-1",
           metadata: {
-            provider: "codex",
+            provider: "pi",
             cwd: root,
           },
         },
@@ -97,7 +97,7 @@ describe("bootstrap provider availability", () => {
     try {
       await expect(daemon.agentStorage.list()).resolves.toHaveLength(1);
       await expect(daemon.agentManager.listProviderAvailability()).resolves.toContainEqual({
-        provider: "codex",
+        provider: "pi",
         available: false,
         error: null,
       });
@@ -107,7 +107,7 @@ describe("bootstrap provider availability", () => {
           agentStorage: daemon.agentStorage,
           logger: pino({ level: "silent" }),
         }),
-      ).rejects.toThrow("Provider 'codex' is not available");
+      ).rejects.toThrow("Provider 'pi' is not available");
       await new Promise((resolve) => setImmediate(resolve));
       expect(processFailures).toEqual([]);
     } finally {

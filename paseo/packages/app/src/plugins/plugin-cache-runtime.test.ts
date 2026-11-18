@@ -58,10 +58,15 @@ type Request = { knownBundles?: Array<{ id: string; hash: string }> } | undefine
 function fakeDaemon(options: { hashes: boolean; bundle: string }) {
   const requests: Request[] = [];
   const answers: Array<Array<{ id: string; clientBundle: string }>> = [];
-  const state = { bundle: options.bundle };
+  /** `loaded: false`: bots is missing from the catalog (failed to load, or not loaded yet). */
+  const state = { bundle: options.bundle, loaded: true };
   const client = {
     async getPluginCatalog(request?: Request) {
       requests.push(request);
+      if (!state.loaded) {
+        answers.push([]);
+        return [];
+      }
       const hash = `h${state.bundle.length}-${state.bundle.slice(-40, -20).replace(/\W/g, "")}`;
       const entry = { id: "bots", clientBundle: state.bundle, requirements: { paseo: ">=0.8.0" } };
       let answer: Array<Record<string, unknown>>;
@@ -211,6 +216,103 @@ describe("plugin cache at start-up and on connect", () => {
     ]);
     expect(registry.getSnapshot().map((plugin) => plugin.source)).toEqual(["live"]);
     expect(registry.getEvaluationError("host-a", "bots")).toBeUndefined();
+  });
+
+  it("a plugin briefly missing from the catalog comes back with its data and bundle, no refetch", async () => {
+    const { items, storage } = memoryStorage();
+    const removed: string[] = [];
+    const watching: PluginCacheStorage = {
+      ...storage,
+      removeItem: async (key) => {
+        removed.push(key);
+        await storage.removeItem(key);
+      },
+    };
+    const daemon = fakeDaemon({ hashes: true, bundle: bundle("one") });
+    const registry = createRegistry();
+    const cache = createPluginCache(watching);
+    const sync = () =>
+      syncLiveCatalog({
+        serverId: "host-a",
+        client: daemon.client,
+        audio,
+        registry,
+        cache,
+        isCancelled: () => false,
+      });
+    await sync();
+    const avatarCalls = { count: 0 };
+    const avatar = {
+      queryKey: ["bots", "avatar", "flint", "hash-1", "json"],
+      queryFn: async () => {
+        avatarCalls.count += 1;
+        return { dataUri: null, svg: "<svg/>" };
+      },
+      meta: { persist: true },
+      staleTime: Infinity,
+    };
+    await registry.getSnapshot()[0]?.queryClient.fetchQuery(avatar);
+    await cache.flush();
+    expect(avatarCalls.count).toBe(1);
+
+    // bots fails to load (or the app asks before it has loaded after a daemon restart).
+    removed.length = 0;
+    daemon.state.loaded = false;
+    await sync();
+    expect(registry.getSnapshot()).toEqual([]);
+    expect(items.has(`${pluginCacheKey("host-a")}:queries:bots`)).toBe(true);
+    expect(items.has(`${pluginCacheKey("host-a")}:bundle:bots`)).toBe(true);
+
+    // bots is back: unchanged bundle (no bytes), and the avatar is there without a call.
+    daemon.state.loaded = true;
+    await sync();
+    expect(daemon.requests.at(-1)?.knownBundles).toEqual([
+      { id: "bots", hash: expect.any(String) },
+    ]);
+    expect(bundleBytes(daemon.answers.at(-1))).toBe(0);
+    const [back] = registry.getSnapshot();
+    expect(back?.queryClient.getQueryData(avatar.queryKey)).toEqual({
+      dataUri: null,
+      svg: "<svg/>",
+    });
+    await back?.queryClient.fetchQuery(avatar);
+    expect(avatarCalls.count).toBe(1);
+    expect(removed).toEqual([]);
+  });
+
+  it("a plugin missing when the app last ran starts from its stored data when it comes back", async () => {
+    const { storage } = memoryStorage();
+    const daemon = fakeDaemon({ hashes: true, bundle: bundle("one") });
+    const first = await startApp({ storage, daemon });
+    await first.registry.getSnapshot()[0]?.queryClient.fetchQuery({
+      queryKey: ["bots", "avatar", "flint", "hash-1", "json"],
+      queryFn: async () => ({ dataUri: null, svg: "<svg/>" }),
+      meta: { persist: true },
+    });
+    await first.cache.flush();
+
+    daemon.state.loaded = false;
+    const second = await startApp({ storage, daemon });
+    expect(second.registry.getSnapshot()).toEqual([]);
+
+    // A new app session: bots is still missing at start-up, then loads.
+    const third = await startApp({ storage, daemon, connect: false });
+    expect(third.beforeConnect).toEqual([]);
+    daemon.state.loaded = true;
+    await syncLiveCatalog({
+      serverId: "host-a",
+      client: daemon.client,
+      audio,
+      registry: third.registry,
+      cache: third.cache,
+      isCancelled: () => false,
+    });
+    expect(bundleBytes(daemon.answers.at(-1))).toBe(0);
+    expect(
+      third.registry
+        .getSnapshot()[0]
+        ?.queryClient.getQueryData(["bots", "avatar", "flint", "hash-1", "json"]),
+    ).toEqual({ dataUri: null, svg: "<svg/>" });
   });
 
   it("the host forwarder fails calls until the host has a client, then follows it", async () => {

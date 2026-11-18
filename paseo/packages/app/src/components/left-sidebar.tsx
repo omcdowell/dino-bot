@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { CircleGauge, FolderPlus, GitBranch, Server, Settings, X } from "lucide-react-native";
+import { CircleGauge, GitBranch, Server, Settings, X } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
@@ -21,7 +21,6 @@ import {
   SIDEBAR_RESIZE_FAIL_OFFSET,
 } from "@/components/sidebar-resize-handle-layout";
 import { HostPicker } from "@/components/hosts/host-picker";
-import { SidebarDisplayPreferencesMenu } from "@/components/sidebar/display-preferences/menu";
 import { SidebarSeparator } from "@/components/sidebar/sidebar-separator";
 import { SidebarNavRows } from "@/components/sidebar/sidebar-nav-rows";
 import { SidebarHelpMenu } from "@/components/sidebar/sidebar-help-menu";
@@ -30,19 +29,8 @@ import { buttonControlHeight } from "@/components/ui/control-geometry";
 import { Shortcut } from "@/components/ui/shortcut";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { HEADER_INNER_HEIGHT, useIsCompactFormFactor } from "@/constants/layout";
-import { useOpenAddProject } from "@/hooks/use-open-add-project";
-import { useImportSession } from "@/hooks/use-import-session";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
-import {
-  type SidebarProjectEntry,
-  type SidebarWorkspaceEntry,
-} from "@/hooks/use-sidebar-workspaces-list";
-import { useSidebarModel } from "@/components/sidebar/sidebar-model";
-import type { PinnedSidebarGroups } from "@/hooks/use-sidebar-pins";
 import { RetainedPanelActivity } from "@/components/retained-panel";
-import type { SidebarWorkspaceGroup } from "@/components/sidebar/sidebar-labels";
-import type { SidebarProjectIconTarget } from "@/utils/sidebar-project-row-model";
-import { type SidebarGroupMode, useSidebarViewStore } from "@/stores/sidebar-view-store";
 import { useHosts } from "@/runtime/host-runtime";
 import { PluginSidebarItem } from "@/plugins/sidebar-items";
 import { builtinSidebarNavLabelKey } from "@/sidebar-nav/model";
@@ -59,9 +47,7 @@ import {
   useHasUsageSummary,
   useOpenSidebarUsage,
 } from "@/usage";
-import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
-import { SidebarWorkspaceList } from "./sidebar-workspace-list";
 
 type SidebarTheme = ReturnType<typeof useUnistyles>["theme"];
 
@@ -69,23 +55,6 @@ const DEV_BUILD_LABEL = process.env.EXPO_PUBLIC_PASEO_DEV_BUILD_LABEL?.trim() ||
 
 interface SidebarSharedProps {
   theme: SidebarTheme;
-  workspaceGroups: SidebarWorkspaceGroup[];
-  projectIconTargets: SidebarProjectIconTarget[];
-  pinnedGroups: PinnedSidebarGroups;
-  projects: SidebarProjectEntry[];
-  hasProjectsBeforeFilter: boolean;
-  hasActiveProjectFilter: boolean;
-  workspaceEntriesByKey: ReadonlyMap<string, SidebarWorkspaceEntry>;
-  isInitialLoad: boolean;
-  isRevalidating: boolean;
-  isManualRefresh: boolean;
-  groupMode: SidebarGroupMode;
-  collapsedProjectKeys: ReadonlySet<string>;
-  shortcutIndexByWorkspaceKey: Map<string, number>;
-  toggleProjectCollapsed: (projectViewKey: string) => void;
-  handleRefresh: () => void;
-  handleOpenProject: () => void;
-  handleImportSession: () => void;
   handleSettings: () => void;
   labels: SidebarLabels;
   handleAddHost: () => void;
@@ -93,7 +62,6 @@ interface SidebarSharedProps {
 }
 
 interface SidebarLabels {
-  addProject: string;
   hosts: string;
   settings: string;
   searchHosts: string;
@@ -119,49 +87,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const insets = useSafeAreaInsets();
   const isCompactLayout = useIsCompactFormFactor();
   const showMobileAgent = usePanelStore((state) => state.showMobileAgent);
-
-  const {
-    projects,
-    hasProjectsBeforeFilter,
-    resolvedProjectFilters,
-    workspaceEntriesByKey,
-    isInitialLoad,
-    isRevalidating,
-    refreshAll,
-    workspaceGroups,
-    projectIconTargets,
-    pinnedGroups,
-    collapsedProjectKeys,
-    toggleProjectCollapsed,
-    groupMode,
-    shortcutModel,
-  } = useSidebarModel();
-  const { shortcutIndexByWorkspaceKey } = shortcutModel;
-
-  const [isManualRefresh, setIsManualRefresh] = useState(false);
-
-  const handleRefresh = useCallback(() => {
-    setIsManualRefresh(true);
-    refreshAll();
-  }, [refreshAll]);
-
-  useEffect(() => {
-    if (!isRevalidating && isManualRefresh) {
-      setIsManualRefresh(false);
-    }
-  }, [isRevalidating, isManualRefresh]);
-
-  const openProjectPicker = useOpenAddProject();
-  const { open: openImportSession, sheet: importSessionSheet } = useImportSession();
-
-  const handleOpenProjectMobile = useCallback(() => {
-    showMobileAgent();
-    void openProjectPicker();
-  }, [showMobileAgent, openProjectPicker]);
-
-  const handleOpenProjectDesktop = useCallback(() => {
-    void openProjectPicker();
-  }, [openProjectPicker]);
 
   const handleSettingsMobile = useCallback(() => {
     showMobileAgent();
@@ -193,14 +118,8 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     openHostOverview(serverId);
   }, []);
 
-  const handleImportSessionMobile = useCallback(() => {
-    showMobileAgent();
-    openImportSession();
-  }, [openImportSession, showMobileAgent]);
-
   const labels = useMemo(
     (): SidebarLabels => ({
-      addProject: t("sidebar.actions.addProject"),
       hosts: t("sidebar.actions.hosts"),
       settings: t("sidebar.actions.settings"),
       searchHosts: t("sidebar.host.searchPlaceholder"),
@@ -210,64 +129,36 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     [t],
   );
 
-  const sharedProps = {
-    theme,
-    workspaceGroups,
-    projectIconTargets,
-    pinnedGroups,
-    projects,
-    hasProjectsBeforeFilter,
-    hasActiveProjectFilter: resolvedProjectFilters.length > 0,
-    workspaceEntriesByKey,
-    isInitialLoad,
-    isRevalidating,
-    isManualRefresh,
-    groupMode,
-    collapsedProjectKeys,
-    shortcutIndexByWorkspaceKey,
-    toggleProjectCollapsed,
-    handleRefresh,
-    labels,
-  };
+  const sharedProps = { theme, labels };
 
   if (isCompactLayout) {
     return (
-      <>
-        <RetainedPanelActivity active={active}>
-          <MobileSidebar
-            {...sharedProps}
-            active={active}
-            insetsTop={insets.top}
-            insetsBottom={insets.bottom}
-            closeSidebar={showMobileAgent}
-            handleOpenProject={handleOpenProjectMobile}
-            handleImportSession={handleImportSessionMobile}
-            handleSettings={handleSettingsMobile}
-            handleAddHost={handleAddHostMobile}
-            handleOpenHostSettings={handleOpenHostSettingsMobile}
-          />
-        </RetainedPanelActivity>
-        {importSessionSheet}
-      </>
+      <RetainedPanelActivity active={active}>
+        <MobileSidebar
+          {...sharedProps}
+          active={active}
+          insetsTop={insets.top}
+          insetsBottom={insets.bottom}
+          closeSidebar={showMobileAgent}
+          handleSettings={handleSettingsMobile}
+          handleAddHost={handleAddHostMobile}
+          handleOpenHostSettings={handleOpenHostSettingsMobile}
+        />
+      </RetainedPanelActivity>
     );
   }
 
   return (
-    <>
-      <RetainedPanelActivity active={active}>
-        <DesktopSidebar
-          {...sharedProps}
-          insetsTop={insets.top}
-          active={active}
-          handleOpenProject={handleOpenProjectDesktop}
-          handleImportSession={openImportSession}
-          handleSettings={handleSettingsDesktop}
-          handleAddHost={handleAddHostDesktop}
-          handleOpenHostSettings={handleOpenHostSettingsDesktop}
-        />
-      </RetainedPanelActivity>
-      {importSessionSheet}
-    </>
+    <RetainedPanelActivity active={active}>
+      <DesktopSidebar
+        {...sharedProps}
+        insetsTop={insets.top}
+        active={active}
+        handleSettings={handleSettingsDesktop}
+        handleAddHost={handleAddHostDesktop}
+        handleOpenHostSettings={handleOpenHostSettingsDesktop}
+      />
+    </RetainedPanelActivity>
   );
 });
 
@@ -288,7 +179,7 @@ function FooterIconButton({
   onPress: () => void;
   testID: string;
   label: string;
-  icon: typeof FolderPlus;
+  icon: typeof Settings;
   /** Only for a glyph that reads larger than the others at the same size. */
   iconSizeAdjustment?: number;
   shortcutKeys?: ReturnType<typeof useShortcutKeys>;
@@ -400,7 +291,6 @@ function IconTooltipContent({
 
 function SidebarFooter({
   theme,
-  handleOpenProject,
   handleSettings,
   labels,
   handleAddHost,
@@ -408,10 +298,8 @@ function SidebarFooter({
   onBeforeNavigate,
 }: {
   theme: SidebarTheme;
-  handleOpenProject: () => void;
   handleSettings: () => void;
   labels: {
-    addProject: string;
     hosts: string;
     settings: string;
     searchHosts: string;
@@ -421,23 +309,14 @@ function SidebarFooter({
   handleOpenHostSettings: (serverId: string) => void;
   onBeforeNavigate?: () => void;
 }) {
-  const newAgentKeys = useShortcutKeys("new-agent");
   const settingsKeys = useShortcutKeys("toggle-settings");
 
-  // One line of icons: Add project, Usage, Hosts, then Help and Settings at the end.
+  // One line of icons: Usage, Hosts, then Help and Settings at the end.
   return (
     <UsageSidebarRoot>
       <View style={styles.footerContainer} testID="sidebar-footer">
         <SidebarFooterRows onBeforeNavigate={onBeforeNavigate} />
         <View style={styles.sidebarFooter} testID="sidebar-footer-bottom-line">
-          <FooterIconButton
-            onPress={handleOpenProject}
-            testID="sidebar-add-project"
-            label={labels.addProject}
-            icon={FolderPlus}
-            shortcutKeys={newAgentKeys}
-            theme={theme}
-          />
           <SidebarUsageIcon label={labels.usage} theme={theme} />
           <SidebarHostPicker
             theme={theme}
@@ -509,25 +388,7 @@ function SidebarFooterRows({ onBeforeNavigate }: { onBeforeNavigate?: () => void
 }
 
 function MobileSidebar({
-  active,
   theme,
-  workspaceGroups,
-  projectIconTargets,
-  pinnedGroups,
-  projects,
-  hasProjectsBeforeFilter,
-  hasActiveProjectFilter,
-  workspaceEntriesByKey,
-  isInitialLoad,
-  isRevalidating,
-  isManualRefresh,
-  groupMode,
-  collapsedProjectKeys,
-  shortcutIndexByWorkspaceKey,
-  toggleProjectCollapsed,
-  handleRefresh,
-  handleOpenProject,
-  handleImportSession,
   handleSettings,
   labels,
   handleAddHost,
@@ -536,12 +397,7 @@ function MobileSidebar({
   insetsBottom,
   closeSidebar,
 }: MobileSidebarProps) {
-  const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
-  const { gesture: closeGesture, gestureRef: closeGestureRef } = useCloseAgentListGesture();
-
-  const handleWorkspacePress = useCallback(() => {
-    closeSidebar();
-  }, [closeSidebar]);
+  const { gesture: closeGesture } = useCloseAgentListGesture();
 
   const mobileSidebarInsetStyle = useMemo(
     () => ({
@@ -585,35 +441,10 @@ function MobileSidebar({
           </Pressable>
         </WindowChromeSafeArea>
 
-        {isInitialLoad && !hasActiveHostFilter ? (
-          <SidebarAgentListSkeleton />
-        ) : (
-          <SidebarWorkspaceList
-            collapsedProjectKeys={collapsedProjectKeys}
-            onToggleProjectCollapsed={toggleProjectCollapsed}
-            shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
-            groupMode={groupMode}
-            workspaceGroups={workspaceGroups}
-            projectIconTargets={projectIconTargets}
-            pinnedGroups={pinnedGroups}
-            projects={projects}
-            hasProjectsBeforeFilter={hasProjectsBeforeFilter}
-            hasActiveProjectFilter={hasActiveProjectFilter}
-            workspaceEntriesByKey={workspaceEntriesByKey}
-            isRefreshing={isManualRefresh && isRevalidating}
-            onRefresh={handleRefresh}
-            onWorkspacePress={handleWorkspacePress}
-            onAddProject={handleOpenProject}
-            onImportSession={handleImportSession}
-            parentGestureRef={closeGestureRef}
-            dragGestureHostActive={active}
-            listHeaderComponent={workspacesSectionHeaderElement}
-          />
-        )}
+        <View style={styles.sidebarBody} />
 
         <SidebarFooter
           theme={theme}
-          handleOpenProject={handleOpenProject}
           handleSettings={handleSettings}
           labels={labels}
           handleAddHost={handleAddHost}
@@ -627,23 +458,6 @@ function MobileSidebar({
 
 function DesktopSidebar({
   theme,
-  workspaceGroups,
-  projectIconTargets,
-  pinnedGroups,
-  projects,
-  hasProjectsBeforeFilter,
-  hasActiveProjectFilter,
-  workspaceEntriesByKey,
-  isInitialLoad,
-  isRevalidating,
-  isManualRefresh,
-  groupMode,
-  collapsedProjectKeys,
-  shortcutIndexByWorkspaceKey,
-  toggleProjectCollapsed,
-  handleRefresh,
-  handleOpenProject,
-  handleImportSession,
   handleSettings,
   labels,
   handleAddHost,
@@ -652,7 +466,6 @@ function DesktopSidebar({
   active,
 }: DesktopSidebarProps) {
   const ownsTopLeft = useOwnsWindowChromeCorner("top-left");
-  const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const setSidebarWidth = usePanelStore((state) => state.setSidebarWidth);
   const { width: viewportWidth } = useWindowDimensions();
@@ -763,34 +576,12 @@ function DesktopSidebar({
           <SidebarNavRows style={sidebarHeaderGroupStyle} />
         </View>
 
-        {isInitialLoad && !hasActiveHostFilter ? (
-          <SidebarAgentListSkeleton />
-        ) : (
-          <SidebarWorkspaceList
-            collapsedProjectKeys={collapsedProjectKeys}
-            onToggleProjectCollapsed={toggleProjectCollapsed}
-            shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
-            groupMode={groupMode}
-            workspaceGroups={workspaceGroups}
-            projectIconTargets={projectIconTargets}
-            pinnedGroups={pinnedGroups}
-            projects={projects}
-            hasProjectsBeforeFilter={hasProjectsBeforeFilter}
-            hasActiveProjectFilter={hasActiveProjectFilter}
-            workspaceEntriesByKey={workspaceEntriesByKey}
-            isRefreshing={isManualRefresh && isRevalidating}
-            onRefresh={handleRefresh}
-            onAddProject={handleOpenProject}
-            onImportSession={handleImportSession}
-            listHeaderComponent={workspacesSectionHeaderElement}
-          />
-        )}
+        <View style={styles.sidebarBody} />
 
         <SidebarCalloutSlot />
 
         <SidebarFooter
           theme={theme}
-          handleOpenProject={handleOpenProject}
           handleSettings={handleSettings}
           labels={labels}
           handleAddHost={handleAddHost}
@@ -807,30 +598,6 @@ function DesktopSidebar({
     </Animated.View>
   );
 }
-
-function WorkspacesSectionHeader() {
-  return (
-    <View style={styles.workspacesSectionHeader}>
-      <Text style={styles.workspacesSectionTitle}>Workspaces</Text>
-      <View style={styles.workspacesSectionActions}>
-        <Tooltip delayDuration={300}>
-          <TooltipTrigger asChild>
-            <View>
-              <SidebarDisplayPreferencesMenu />
-            </View>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" align="center" offset={8}>
-            <IconTooltipContent label="Display preferences" />
-          </TooltipContent>
-        </Tooltip>
-      </View>
-    </View>
-  );
-}
-
-// Stable element so the sidebar list's listHeaderComponent prop keeps identity across
-// renders (WorkspacesSectionHeader takes no props).
-const workspacesSectionHeaderElement = <WorkspacesSectionHeader />;
 
 // Static styles for Animated.Views — must NOT use Unistyles dynamic theme to
 // avoid the "Unable to find node on an unmounted component" crash when Unistyles
@@ -855,28 +622,8 @@ const styles = StyleSheet.create((theme) => ({
   sidebarHeaderGroupBelowChrome: {
     paddingTop: 0,
   },
-  workspacesSectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: theme.spacing[2],
-    // Rendered inside the scroll's listContent (paddingHorizontal spacing[2]). The title
-    // lands at spacing[2] left to align with project icons. Settings2's painted path stops
-    // inside its 14px SVG, so 4px aligns the ink rather than the SVG box to the row rail.
-    paddingLeft: theme.spacing[2],
-    paddingRight: 4,
-    paddingTop: theme.spacing[1],
-    paddingBottom: theme.spacing[1],
-  },
-  workspacesSectionTitle: {
-    color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.normal,
-  },
-  workspacesSectionActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[1],
+  sidebarBody: {
+    flex: 1,
   },
   sidebarContent: {
     flex: 1,

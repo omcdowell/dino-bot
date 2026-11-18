@@ -33,6 +33,12 @@ export const CC_ALIASES: readonly CcModel[] = [
   { id: "fable", label: "Fable", description: "The latest Fable (Claude Code alias)" },
 ];
 
+/**
+ * The aliases alone, for when no list can be had: each keeps Claude Code's effort levels (the Models API cannot say
+ * which a model takes), so the picker still offers effort, as it does for a model the list does not know.
+ */
+export const aliasesOnly = (): CcModel[] => CC_ALIASES.map((m) => ({ ...m, thinkingOptions: CC_EFFORTS.map(effortOption) }));
+
 export const ANTHROPIC_API = "https://api.anthropic.com";
 const VERSION = "2023-06-01";
 const OAUTH_BETA = "oauth-2025-04-20";
@@ -160,8 +166,8 @@ export interface CcModelsOptions {
 
 /** Model lists per source, cached; aliases alone when a source fails (logged once until it works again). */
 export class CcModels {
-  private readonly cache = new Map<string, { at: number; ttl: number; models: CcModel[] }>();
-  private readonly pending = new Map<string, Promise<CcModel[]>>();
+  private readonly cache = new Map<string, { at: number; ttl: number; models: CcModel[]; aliases: boolean }>();
+  private readonly pending = new Map<string, { at: number; work: Promise<CcModel[]> }>();
   private readonly failing = new Set<string>();
   constructor(private readonly opts: CcModelsOptions = {}) {}
 
@@ -174,30 +180,45 @@ export class CcModels {
     const source = modelSource(cwd, env, this.now());
     if (!source) {
       this.fail("no-source", "no proxy and no current Claude login to ask");
-      return CC_ALIASES.map((m) => ({ ...m }));
+      return aliasesOnly();
     }
     this.failing.delete("no-source");
     const hit = this.cache.get(source.key);
     if (hit && this.now() - hit.at < hit.ttl) return hit.models;
     const running = this.pending.get(source.key);
-    if (running) return running;
+    if (running) return running.work;
     const work = (async () => {
       try {
         const models = pickerModels(await fetchModels(source, this.opts.fetch));
-        this.cache.set(source.key, { at: this.now(), ttl: this.opts.ttlMs ?? 60 * 60_000, models });
+        this.cache.set(source.key, { at: this.now(), ttl: this.opts.ttlMs ?? 60 * 60_000, models, aliases: false });
         this.failing.delete(source.key);
         return models;
       } catch (error) {
         this.fail(source.key, (error as Error).message);
-        const models = CC_ALIASES.map((m) => ({ ...m }));
-        this.cache.set(source.key, { at: this.now(), ttl: this.opts.retryMs ?? 5 * 60_000, models });
+        const models = aliasesOnly();
+        this.cache.set(source.key, { at: this.now(), ttl: this.opts.retryMs ?? 5 * 60_000, models, aliases: true });
         return models;
       } finally {
         this.pending.delete(source.key);
       }
     })();
-    this.pending.set(source.key, work);
+    this.pending.set(source.key, { at: this.now(), work });
     return work;
+  }
+
+  /**
+   * Names the list a bot's folder gets now, for the daemon's catalogue cache (getCatalogCacheKey): its source and which
+   * fetch of it (live, aliases after a failure, or one still running). It changes when the bot's proxy changes in
+   * .bot.json, when an aliases-only list is due a retry, and when an hour-old list is due again, so the daemon's
+   * snapshot for the folder is rebuilt instead of keeping an aliases-only list. A due list is fetched in the background.
+   */
+  catalogKey(cwd: string | undefined, env: Record<string, string | undefined> = process.env): string {
+    const source = modelSource(cwd, env, this.now());
+    if (!source) return "none";
+    const hit = this.cache.get(source.key);
+    if (hit && this.now() - hit.at < hit.ttl) return `${source.key} ${hit.aliases ? "aliases" : "live"}@${hit.at}`;
+    if (!this.pending.has(source.key)) void this.list(cwd, env);
+    return `${source.key} pending@${this.pending.get(source.key)?.at ?? this.now()}`;
   }
 
   private fail(key: string, why: string) {

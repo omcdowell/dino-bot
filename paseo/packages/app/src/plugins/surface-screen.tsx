@@ -54,7 +54,7 @@ import {
 } from "@/screens/workspace/mobile-floating-header-chrome";
 import { resolveMobileFloatingHeaderInset } from "@/screens/workspace/mobile-floating-header-model";
 import { useLastWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
-import { buildHostOpenProjectRoute, buildHostWorkspaceRoute } from "@/utils/host-routes";
+import { buildHostRootRoute, buildHostWorkspaceRoute } from "@/utils/host-routes";
 
 const EMPTY_SHORTCUT_KEYS: ShortcutKey[] = [];
 const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -485,7 +485,7 @@ function MobileHomeLoading({ serverId }: { serverId: string }) {
     router.replace(
       lastWorkspace
         ? buildHostWorkspaceRoute(lastWorkspace.serverId, lastWorkspace.workspaceId)
-        : buildHostOpenProjectRoute(serverId),
+        : buildHostRootRoute(serverId),
     );
   }, [gone, lastWorkspace, serverId]);
   return (

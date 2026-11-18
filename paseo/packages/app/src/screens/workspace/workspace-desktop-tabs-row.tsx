@@ -22,7 +22,6 @@ import {
   Ellipsis,
   Maximize,
   Minimize,
-  Plus,
   X,
 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -46,7 +45,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
 import { WORKSPACE_SECONDARY_HEADER_HEIGHT, useIsCompactFormFactor } from "@/constants/layout";
 import { buttonControlHeight } from "@/components/ui/control-geometry";
-import type { ShortcutKey } from "@/utils/format-shortcut";
 import { Shortcut } from "@/components/ui/shortcut";
 import { useWorkspaceTabLayout } from "@/screens/workspace/use-workspace-tab-layout";
 import { retainWorkspaceTabMeasuredWidth } from "@/screens/workspace/workspace-tab-layout";
@@ -63,18 +61,12 @@ import {
   type WorkspaceTabMenuLabels,
 } from "@/screens/workspace/workspace-tab-menu";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
-import type { PaneHost } from "@/panels/panel-manifest";
-import type { WorkspaceTabLaunchPurpose } from "@/workspace-tabs/launcher";
 import type { SurfaceBackdrop } from "@/styles/surface-backdrop";
 import type { Theme } from "@/styles/theme";
 import { RenderProfile } from "@/utils/render-profiler";
 import { TrailingActionScrim } from "@/components/ui/trailing-action-scrim";
-import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
 import { useCompactTimeAgo } from "@/hooks/use-time-ago";
 import { formatCompactTimeAgoAsProse } from "@/utils/time";
-import { buildWorkspaceKeyboardHandlerId } from "@/keyboard/handler-id";
-import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
-import { WorkspaceNewTabMenuContent } from "@/screens/workspace/workspace-new-tab-menu";
 import {
   paneContentToolbarTrailingPadding,
   ToolbarButton,
@@ -124,7 +116,6 @@ const ThemedArrowLeftToLine = withUnistyles(ArrowLeftToLine);
 const ThemedArrowRightToLine = withUnistyles(ArrowRightToLine);
 const ThemedCopyX = withUnistyles(CopyX);
 const ThemedPencil = withUnistyles(Pencil);
-const ThemedPlus = withUnistyles(Plus);
 const ThemedColumns2 = withUnistyles(Columns2);
 const ThemedRows2 = withUnistyles(Rows2);
 const ThemedEllipsis = withUnistyles(Ellipsis);
@@ -211,78 +202,17 @@ function TabLabelMeasurement({
   );
 }
 
-type PanePanelKinds = readonly WorkspaceTabDescriptor["kind"][];
-
-interface WorkspaceNewTabButtonProps {
-  panePanelKinds: PanePanelKinds;
-  host: PaneHost;
-  launchPurpose: WorkspaceTabLaunchPurpose;
-  serverId: string;
-  paneId?: string;
-  shortcutKeys: ShortcutKey[][] | null;
-  placement: "inline" | "toolbar";
-}
-
-function WorkspaceNewTabButton({
-  panePanelKinds,
-  host,
-  launchPurpose,
-  serverId,
-  paneId,
-  shortcutKeys,
-  placement,
-}: WorkspaceNewTabButtonProps) {
-  const { t } = useTranslation();
-  const tooltipText = t("workspace.tabs.actions.newTab");
-  const menu = (
-    <DropdownMenu>
-      <ToolbarButton
-        kind="menu"
-        label={tooltipText}
-        shortcut={shortcutKeys}
-        testID="workspace-new-tab-button"
-        style={placement === "inline" ? styles.inlineNewTabButton : undefined}
-      >
-        <ThemedPlus size={14} uniProps={extraMutedColorMapping} />
-      </ToolbarButton>
-      <WorkspaceNewTabMenuContent
-        serverId={serverId}
-        purpose={launchPurpose}
-        host={host}
-        panePanelKinds={panePanelKinds}
-        paneId={paneId}
-      />
-    </DropdownMenu>
-  );
-
-  return placement === "inline" ? <View style={styles.inlineAddButton}>{menu}</View> : menu;
-}
-
 function WorkspacePaneToolbarActions({
-  panePanelKinds,
-  host,
-  launchPurpose,
-  showNewTabButton,
   showSplitActions,
   showMaximizeAction,
   paneMaximized,
-  serverId,
-  paneId,
-  newTabShortcutKeys,
   onSplitRight,
   onSplitDown,
   onTogglePaneMaximized,
 }: {
-  panePanelKinds: PanePanelKinds;
-  host: PaneHost;
-  launchPurpose: WorkspaceTabLaunchPurpose;
-  showNewTabButton: boolean;
   showSplitActions: boolean;
   showMaximizeAction: boolean;
   paneMaximized: boolean;
-  serverId: string;
-  paneId?: string;
-  newTabShortcutKeys: ShortcutKey[][] | null;
   onSplitRight?: () => void;
   onSplitDown?: () => void;
   onTogglePaneMaximized?: () => void;
@@ -308,21 +238,10 @@ function WorkspacePaneToolbarActions({
     [splitDownKeys],
   );
   const maximizeActionVisible = showMaximizeAction && Boolean(onTogglePaneMaximized);
-  if (!showNewTabButton && !splitActionsVisible && !maximizeActionVisible) return null;
+  if (!splitActionsVisible && !maximizeActionVisible) return null;
 
   return (
     <ToolbarControls style={styles.paneSplitActions}>
-      {showNewTabButton ? (
-        <WorkspaceNewTabButton
-          panePanelKinds={panePanelKinds}
-          host={host}
-          launchPurpose={launchPurpose}
-          placement="toolbar"
-          serverId={serverId}
-          paneId={paneId}
-          shortcutKeys={newTabShortcutKeys}
-        />
-      ) : null}
       {maximizeActionVisible && onTogglePaneMaximized ? (
         <ToolbarButton
           label={t(
@@ -513,8 +432,6 @@ function sameWidths(left: number[], right: number[]): boolean {
 }
 
 export interface WorkspaceDesktopTabsRowProps {
-  host?: PaneHost;
-  launchPurpose?: WorkspaceTabLaunchPurpose;
   paneId?: string;
   isFocused?: boolean;
   ownsKeyboardShortcuts?: boolean;
@@ -526,14 +443,12 @@ export interface WorkspaceDesktopTabsRowProps {
   onCloseTab: (tabId: string) => Promise<void> | void;
   onCopyResumeCommand: (agentId: string) => Promise<void> | void;
   onCopyAgentId: (agentId: string) => Promise<void> | void;
-  onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
   onCloseTabsToLeft: (tabId: string) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
-  onCreateNewTab: (input: { paneId?: string }) => void;
   onReorderTabs: (nextTabs: WorkspaceTabDescriptor[]) => void;
   externalDndContext?: boolean;
   activeDragTabId?: string | null;
@@ -597,40 +512,13 @@ function WorkspaceDesktopTabPresentationCommit({
 
 function getFallbackTabLabel(
   tab: WorkspaceTabDescriptor,
-  labels: {
-    newTab: string;
-    newAgent: string;
-    setup: string;
-    terminal: string;
-    agent: string;
-    changes: string;
-    files: string;
-    pullRequest: string;
-  },
+  labels: { agent: string; files: string },
 ): string {
-  if (tab.target.kind === "new_tab") {
-    return labels.newTab;
-  }
-  if (tab.target.kind === "draft") {
-    return labels.newAgent;
-  }
-  if (tab.target.kind === "setup") {
-    return labels.setup;
-  }
-  if (tab.target.kind === "terminal") {
-    return labels.terminal;
-  }
   if (tab.target.kind === "file") {
     return tab.target.path.split("/").findLast(Boolean) ?? tab.target.path;
   }
-  if (tab.target.kind === "working_diff" || tab.target.kind === "changes_tree") {
-    return labels.changes;
-  }
   if (tab.target.kind === "files") {
     return labels.files;
-  }
-  if (tab.target.kind === "pull_request") {
-    return labels.pullRequest;
   }
   return labels.agent;
 }
@@ -834,8 +722,7 @@ function TabChip({
   );
 
   const tabAccessibilityState = useMemo(() => ({ selected: isActive }), [isActive]);
-  const testIdentity =
-    tab.target.kind === "new_tab" ? tab.tabId : buildDeterministicWorkspaceTabId(tab.target);
+  const testIdentity = buildDeterministicWorkspaceTabId(tab.target);
   const tabLabelSkeletonStyle = styles.tabLabelSkeleton;
   const tabLabelStyle = useMemo(
     () => [styles.tabLabel, isHighlighted && styles.tabLabelActive],
@@ -1011,27 +898,21 @@ export function WorkspaceDesktopTabsRow(props: WorkspaceDesktopTabsRowProps) {
 }
 
 function ResolvedWorkspaceDesktopTabsRow({
-  host = "main",
-  launchPurpose = "primary",
   paneId,
   isFocused = false,
-  ownsKeyboardShortcuts = isFocused,
   tabs,
   normalizedServerId,
-  normalizedWorkspaceId,
   setHoveredCloseTabKey,
   onNavigateTab,
   onCloseTab,
   onCopyResumeCommand,
   onCopyAgentId,
-  onCopyTerminalId,
   onCopyFilePath,
   onReloadAgent,
   onRenameTab,
   onCloseTabsToLeft,
   onCloseTabsToRight,
   onCloseOtherTabs,
-  onCreateNewTab,
   onReorderTabs,
   externalDndContext = false,
   activeDragTabId = null,
@@ -1046,7 +927,6 @@ function ResolvedWorkspaceDesktopTabsRow({
   onExitFocusMode,
 }: ResolvedWorkspaceDesktopTabsRowProps) {
   const { t } = useTranslation();
-  const newTabKeys = useShortcutKeys("workspace-tab-new");
   const [tabsContainerWidth, setTabsContainerWidth] = useState<number>(0);
   const [exitFocusModeWidth, setExitFocusModeWidth] = useState<number>(0);
   const tabScrollBoundary = useHorizontalScrollBoundary();
@@ -1085,18 +965,10 @@ function ResolvedWorkspaceDesktopTabsRow({
     [exitFocusModeWidth, focusModeEnabled, showPaneMaximizeAction, showPaneSplitActions],
   );
 
-  const panePanelKinds = useMemo(() => tabs.map(({ tab }) => tab.kind), [tabs]);
-
   const fallbackTabLabels = useMemo(
     () => ({
-      newTab: t("workspace.tabs.actions.newTab"),
-      newAgent: t("workspace.tabs.fallback.newAgent"),
-      setup: t("workspace.tabs.fallback.setup"),
-      terminal: t("workspace.tabs.fallback.terminal"),
       agent: t("workspace.tabs.fallback.agent"),
-      changes: t("panels.diff.changesLabel"),
       files: t("panels.files.label"),
-      pullRequest: t("panels.pullRequest.label"),
     }),
     [t],
   );
@@ -1104,7 +976,6 @@ function ResolvedWorkspaceDesktopTabsRow({
     () => ({
       copyResumeCommand: t("workspace.tabs.menu.copyResumeCommand"),
       copyAgentId: t("workspace.tabs.menu.copyAgentId"),
-      copyTerminalId: t("workspace.tabs.menu.copyTerminalId"),
       copyFilePath: t("workspace.tabs.menu.copyFilePath"),
       rename: t("workspace.tabs.menu.rename"),
       closeAbove: t("workspace.tabs.menu.closeAbove"),
@@ -1227,33 +1098,6 @@ function ResolvedWorkspaceDesktopTabsRow({
     });
   }, [paneId]);
 
-  const createNewTab = useCallback(() => onCreateNewTab({ paneId }), [onCreateNewTab, paneId]);
-
-  const handleNewTabKeyboardAction = useCallback(
-    (action: KeyboardActionDefinition): boolean => {
-      if (!ownsKeyboardShortcuts) return false;
-      if (action.id === "workspace.tab.menu.open") {
-        createNewTab();
-        return true;
-      }
-      return false;
-    },
-    [createNewTab, ownsKeyboardShortcuts],
-  );
-
-  useKeyboardActionHandler({
-    handlerId: buildWorkspaceKeyboardHandlerId({
-      name: "workspace-new-tab",
-      serverId: normalizedServerId,
-      workspaceId: normalizedWorkspaceId,
-      paneId,
-    }),
-    actions: ["workspace.tab.menu.open"],
-    enabled: ownsKeyboardShortcuts,
-    priority: 200,
-    handle: handleNewTabKeyboardAction,
-  });
-
   const renderTab = useCallback(
     ({
       item,
@@ -1283,7 +1127,6 @@ function ResolvedWorkspaceDesktopTabsRow({
           tabCount={displayedTabs.length}
           onCopyResumeCommand={onCopyResumeCommand}
           onCopyAgentId={onCopyAgentId}
-          onCopyTerminalId={onCopyTerminalId}
           onCopyFilePath={onCopyFilePath}
           onReloadAgent={onReloadAgent}
           onRenameTab={onRenameTab}
@@ -1314,7 +1157,6 @@ function ResolvedWorkspaceDesktopTabsRow({
       onCloseTabsToLeft,
       onCloseTabsToRight,
       onCopyAgentId,
-      onCopyTerminalId,
       onCopyFilePath,
       onCopyResumeCommand,
       onNavigateTab,
@@ -1387,17 +1229,6 @@ function ResolvedWorkspaceDesktopTabsRow({
             getItemData={getTabDragData}
             renderItem={renderTab}
           />
-          {!layout.requiresHorizontalScrollFallback ? (
-            <WorkspaceNewTabButton
-              panePanelKinds={panePanelKinds}
-              host={host}
-              launchPurpose={launchPurpose}
-              placement="inline"
-              serverId={normalizedServerId}
-              paneId={paneId}
-              shortcutKeys={newTabKeys}
-            />
-          ) : null}
         </Animated.ScrollView>
         <HorizontalScrollBoundaryShades
           visible={layout.requiresHorizontalScrollFallback}
@@ -1408,16 +1239,9 @@ function ResolvedWorkspaceDesktopTabsRow({
         />
       </View>
       <WorkspacePaneToolbarActions
-        panePanelKinds={panePanelKinds}
-        host={host}
-        launchPurpose={launchPurpose}
-        showNewTabButton={layout.requiresHorizontalScrollFallback}
         showSplitActions={showPaneSplitActions}
         showMaximizeAction={showPaneMaximizeAction}
         paneMaximized={paneMaximized}
-        serverId={normalizedServerId}
-        paneId={paneId}
-        newTabShortcutKeys={newTabKeys}
         onSplitRight={onSplitRight}
         onSplitDown={onSplitDown}
         onTogglePaneMaximized={onTogglePaneMaximized}
@@ -1436,7 +1260,6 @@ function ResolvedDesktopTabChip({
   tabCount,
   onCopyResumeCommand,
   onCopyAgentId,
-  onCopyTerminalId,
   onCopyFilePath,
   onReloadAgent,
   onRenameTab,
@@ -1462,7 +1285,6 @@ function ResolvedDesktopTabChip({
   tabCount: number;
   onCopyResumeCommand: (agentId: string) => Promise<void> | void;
   onCopyAgentId: (agentId: string) => Promise<void> | void;
-  onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
@@ -1490,7 +1312,6 @@ function ResolvedDesktopTabChip({
         tabCount,
         onCopyResumeCommand,
         onCopyAgentId,
-        onCopyTerminalId,
         onCopyFilePath,
         onReloadAgent,
         onRenameTab,
@@ -1508,7 +1329,6 @@ function ResolvedDesktopTabChip({
       onCloseTabsToLeft,
       onCloseTabsToRight,
       onCopyAgentId,
-      onCopyTerminalId,
       onCopyFilePath,
       onCopyResumeCommand,
       labels,

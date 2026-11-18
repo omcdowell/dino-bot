@@ -2,7 +2,7 @@
 # Build the one prebuilt tarball the installer downloads (rel-bench §3.2: Node, daemon, pi, OptChat,
 # the bots plugin and herdr inside; no `npm install` on the user's machine).
 #
-#   build/build-tarball.sh [--out DIR] [--full] [--target OS-ARCH]
+#   build/build-tarball.sh [--out DIR] [--target OS-ARCH]
 #
 # Output: DIR/dinobot-OS-ARCH.tar.gz and .tar.zst (same tree; .sha256 beside each), DIR/install.sh.
 # node_modules are pruned (build/prune-stage.mjs; PRUNE=0 keeps all); the Node binary is nodejs.org's,
@@ -28,19 +28,15 @@
 #   PASEO_REPO/PASEO_REF  the Paseo fork (LICENSE, NOTICE)    default: this repo, tree HEAD:paseo
 #   HERDR_BIN      herdr binary (optional)                   default: command -v herdr
 #
-# --full keeps the bundled Claude Code binary (@anthropic-ai/claude-agent-sdk-<os>-<arch>, ~240 MB).
-# The default drops it: bots run on pi/OptChat; the Claude Code provider then uses a system `claude`.
 # Never includes a private part (build/private-guard.sh checks the whole tarball).
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 OUT="$HERE/dist"
-FULL=0
 TARGET=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --out) OUT=$2; shift 2 ;;
-    --full) FULL=1; shift ;;
     --target) TARGET=$2; shift 2 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
@@ -139,19 +135,6 @@ say "daemon   $DAEMON_DIR"
 # Hard links where possible: staging is a copy of an installed tree, never edited in place.
 cp -al "$DAEMON_DIR" "$STAGE/daemon" 2>/dev/null || cp -a "$DAEMON_DIR" "$STAGE/daemon"
 rm -f "$STAGE"/daemon/*_DEPLOY.txt
-if [ "$FULL" = 0 ]; then
-  # Owner decision, 27 Oct: the Claude Agent SDK is proprietary, so it is not redistributed (JS or binary).
-  # A placeholder answers the daemon's import; `dinobot claude-code install` fetches the real one
-  # from npm on the user's computer. (rm on the hard-linked stage only drops the links.)
-  SDK_VERSION=$(node -p "require('$STAGE/daemon/node_modules/@anthropic-ai/claude-agent-sdk/package.json').version" 2>/dev/null || echo "")
-  rm -rf "$STAGE"/daemon/node_modules/@anthropic-ai/claude-agent-sdk "$STAGE"/daemon/node_modules/@anthropic-ai/claude-agent-sdk-*
-  mkdir -p "$STAGE/daemon/node_modules/@anthropic-ai/claude-agent-sdk"
-  for f in sdk.mjs package.json; do
-    sed -e "s/__SDK_VERSION__/$SDK_VERSION/" -e "s/__PRODUCT__/$PRODUCT_NAME/g" -e "s/__PRODUCT_ID__/$PRODUCT_ID/g" \
-      "$HERE/build/claude-agent-sdk-stub/$f" >"$STAGE/daemon/node_modules/@anthropic-ai/claude-agent-sdk/$f"
-  done
-  say "         claude-agent-sdk $SDK_VERSION replaced by a placeholder (not redistributed)"
-fi
 # Paseo's licence and our NOTICE (the daemon is a modified Paseo, Apache-2.0 section 4).
 PASEO_REPO=${PASEO_REPO:-$HERE}
 PASEO_REF=${PASEO_REF:-$(git -C "$HERE" rev-parse HEAD:paseo)}
@@ -440,7 +423,7 @@ cat >"$STAGE/MANIFEST.json" <<EOF
   "bots": "$BOTS_REF $(git -C "$BOTS_REPO" rev-parse --short "$BOTS_REF")",
   "installer": "$(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || echo dirty)",
   "piPackages": "$PI_PACKAGES",
-  "slim": $([ "$FULL" = 0 ] && echo true || echo false)
+  "slim": true
 }
 EOF
 

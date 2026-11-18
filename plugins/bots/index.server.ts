@@ -1,7 +1,8 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { BotsService, setClaudeCodeReady, setDefaultChatModel, type BotsPaseo } from "./server/bots";
+import { BotsService, setCcChatCreated, setClaudeCodeReady, setDefaultChatModel, type BotsPaseo } from "./server/bots";
+import { reloadIfHistory } from "./server/cc/history-reload";
 import { DmsService, type DmsPaseo } from "./server/dms";
 import { WorkersService } from "./server/workers";
 import { botDmSender } from "./server/bot-dm-send";
@@ -103,6 +104,14 @@ export default function contribute(server: PluginServerContext) {
   // Bots on Claude Code (provider optchat-cc): OptChat memory here, the TUI in herdr (server/cc/). A host with no pi
   // model chosen and a Claude plan login starts new bot chats there.
   setClaudeCodeReady(() => claudePlanReady(process.env));
+  // A new Claude Code chat for a bot with a history shows it (server/cc/history-reload.ts).
+  setCcChatCreated((bot, agentId) => {
+    void reloadIfHistory(bot.cwd, agentId, {
+      botsRoot: root,
+      optchatHome: process.env.OPTCHAT_HOME ?? join(homedir(), ".optchat"),
+      warn: (line) => console.warn(line),
+    });
+  });
   const ccHost = new CcHost(join(root, ".cc"));
   const ccMods = ccModsDir(process.env);
   server.registerProvider(

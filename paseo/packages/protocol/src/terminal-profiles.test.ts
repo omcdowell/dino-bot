@@ -41,21 +41,26 @@ describe("resolveTerminalProfiles", () => {
   // adoption on the id would never match a real user's config.
   it("appends the sentinel for a generated id, keying on the command instead", () => {
     const persisted = [
-      { id: "profile_1739308800000_a1b2c3", name: "Codex", command: "codex", args: ["--yolo"] },
+      {
+        id: "profile_1739308800000_a1b2c3",
+        name: "Claude",
+        command: "claude",
+        args: ["--verbose"],
+      },
     ];
     const result = resolveTerminalProfiles(persisted);
-    expect(result[0]?.args).toEqual(["--yolo", PROMPT_SENTINEL]);
+    expect(result[0]?.args).toEqual(["--verbose", PROMPT_SENTINEL]);
   });
 
   it("appends the sentinel after the user's own args, preserving them", () => {
-    const persisted = [{ id: "codex", name: "Codex", command: "codex", args: ["--yolo"] }];
+    const persisted = [{ id: "claude", name: "Claude", command: "claude", args: ["--verbose"] }];
     const result = resolveTerminalProfiles(persisted);
-    expect(result[0]?.args).toEqual(["--yolo", PROMPT_SENTINEL]);
+    expect(result[0]?.args).toEqual(["--verbose", PROMPT_SENTINEL]);
   });
 
   it("appends the sentinel for an absolute path to a known agent", () => {
     const persisted = [
-      { id: "profile_1739308800001_d4e5f6", name: "Codex", command: "/usr/local/bin/codex" },
+      { id: "profile_1739308800001_d4e5f6", name: "Pi", command: "/usr/local/bin/pi" },
     ];
     const result = resolveTerminalProfiles(persisted);
     expect(result[0]?.args).toEqual([PROMPT_SENTINEL]);
@@ -75,7 +80,7 @@ describe("resolveTerminalProfiles", () => {
 
   it("does not append when the profile already carries a sentinel", () => {
     const persisted = [
-      { id: "codex", name: "Codex", command: "codex", args: [PROMPT_SENTINEL, "--yolo"] },
+      { id: "claude", name: "Claude", command: "claude", args: [PROMPT_SENTINEL, "--verbose"] },
     ];
     const result = resolveTerminalProfiles(persisted);
     expect(result[0]).toBe(persisted[0]);
@@ -99,11 +104,8 @@ describe("resolveTerminalProfiles", () => {
     expect(result[1]).toBe(otherAgent);
   });
 
-  it("default profiles include claude, codex, opencode", () => {
-    const ids = DEFAULT_TERMINAL_PROFILES.map((p) => p.id);
-    expect(ids).toContain("claude");
-    expect(ids).toContain("codex");
-    expect(ids).toContain("opencode");
+  it("default profiles are claude and pi", () => {
+    expect(DEFAULT_TERMINAL_PROFILES.map((p) => p.id)).toEqual(["claude", "pi"]);
   });
 
   it("claude profile has the correct icon", () => {
@@ -122,39 +124,31 @@ describe("resolveTerminalProfiles", () => {
 
   it("ships the prompt form each CLI actually accepts", () => {
     const byId = new Map(DEFAULT_TERMINAL_PROFILES.map((profile) => [profile.id, profile]));
-    // claude, codex, and pi take the prompt as a trailing positional.
-    for (const id of ["claude", "codex", "pi"]) {
+    // claude and pi take the prompt as a trailing positional.
+    for (const id of ["claude", "pi"]) {
       expect(byId.get(id)?.args).toEqual(["{{{prompt}}}"]);
     }
-    // opencode's positional is the project directory, so the prompt is a flag.
-    expect(byId.get("opencode")?.args).toEqual(["--prompt={{{prompt}}}"]);
   });
 
-  it("adopts the right prompt form per command, not a blanket trailing positional", () => {
-    const [adoptedOpencode] = resolveTerminalProfiles([
-      { id: "profile_generated", name: "OpenCode", command: "opencode" },
-    ]);
-    expect(adoptedOpencode?.args).toEqual(["--prompt={{{prompt}}}"]);
-
+  it("adopts the prompt form of the command's shipped default", () => {
     const [adoptedPi] = resolveTerminalProfiles([
       { id: "profile_generated", name: "Pi", command: "pi", args: ["--thinking", "high"] },
     ]);
     expect(adoptedPi?.args).toEqual(["--thinking", "high", "{{{prompt}}}"]);
   });
 
-  it.each([
-    ["codex", ["--profile", "work", "login"]],
-    ["opencode", ["--model", "anthropic/claude", "run"]],
-  ])("does not adopt %s when a subcommand follows global options", (command, args) => {
-    const persisted = { id: "profile_generated", name: command, command, args };
-    const [resolved] = resolveTerminalProfiles([persisted]);
+  it.each([["claude", ["--model", "opus", "doctor"]]])(
+    "does not adopt %s when a subcommand follows global options",
+    (command, args) => {
+      const persisted = { id: "profile_generated", name: command, command, args };
+      const [resolved] = resolveTerminalProfiles([persisted]);
 
-    expect(resolved).toBe(persisted);
-  });
+      expect(resolved).toBe(persisted);
+    },
+  );
 
   it.each([
-    ["codex", ["--profile", "work"]],
-    ["opencode", ["--model", "anthropic/claude"]],
+    ["claude", ["--model", "opus"]],
     ["pi", ["--thinking", "high"]],
   ])("adopts %s when global options are the only existing args", (command, args) => {
     const [resolved] = resolveTerminalProfiles([
@@ -163,51 +157,35 @@ describe("resolveTerminalProfiles", () => {
 
     expect(resolved?.args).toEqual([...args, expect.stringContaining("{{{prompt}}}")]);
   });
-
-  it("codex profile has the correct icon", () => {
-    const codex = DEFAULT_TERMINAL_PROFILES.find((p) => p.id === "codex");
-    expect(codex?.icon).toBe("codex");
-  });
-
-  it("opencode profile has the correct icon", () => {
-    const opencode = DEFAULT_TERMINAL_PROFILES.find((p) => p.id === "opencode");
-    expect(opencode?.icon).toBe("opencode");
-  });
 });
 
 describe("guessTerminalProfileIcon", () => {
   it.each([
     ["claude", "claude"],
-    ["codex", "codex"],
-    ["opencode", "opencode"],
-    ["copilot", "copilot"],
-    ["kiro", "kiro"],
-    ["omp", "omp"],
     ["pi", "pi"],
-    ["gemini", "gemini"],
-    ["cursor", "cursor"],
-    ["goose", "goose"],
-    ["grok", "grok"],
-    ["kimi", "kimi"],
     ["Claude", "claude"],
-    ["CODEX", "codex"],
+    ["PI", "pi"],
     ["/usr/local/bin/claude", "claude"],
-    ["C:\\\\Program Files\\\\Codex\\\\codex.exe", "codex"],
-    ["/usr/local/bin/gemini", "gemini"],
+    ["C:\\\\Program Files\\\\nodejs\\\\claude.cmd", "claude"],
     ["agy", "agy"],
     ["/usr/local/bin/agy", "agy"],
-    ["cursor-agent", "cursor"],
-    ["/usr/local/bin/cursor-agent", "cursor"],
   ])("guesses %s -> %s", (command, expected) => {
     expect(guessTerminalProfileIcon(command)).toBe(expected);
   });
 
-  it.each([["zsh"], ["bash"], ["fish"], [""], ["/usr/bin/foo"], ["cursor-tool"]])(
-    "returns undefined for unknown command %s",
-    (command) => {
-      expect(guessTerminalProfileIcon(command)).toBeUndefined();
-    },
-  );
+  it.each([
+    ["zsh"],
+    ["bash"],
+    ["fish"],
+    [""],
+    ["/usr/bin/foo"],
+    ["cursor-agent"],
+    ["gemini"],
+    ["codex"],
+    ["opencode"],
+  ])("returns undefined for unknown command %s", (command) => {
+    expect(guessTerminalProfileIcon(command)).toBeUndefined();
+  });
 });
 
 describe("getTerminalProfileIcon", () => {
@@ -221,17 +199,7 @@ describe("getTerminalProfileIcon", () => {
     expect(getTerminalProfileIcon(profile)).toBe("claude");
   });
 
-  it("shows the Cursor icon for a profile created in settings with the Cursor CLI", () => {
-    const profile = {
-      id: "profile_1",
-      name: "Cursor",
-      command: "cursor-agent",
-      args: [PROMPT_SENTINEL],
-    };
-    expect(getTerminalProfileIcon(profile)).toBe("cursor");
-  });
-
-  it("keeps an explicit icon over the Cursor CLI guess", () => {
+  it("keeps an explicit icon for an unrecognised command", () => {
     const profile = {
       id: "profile_1",
       name: "Cursor",

@@ -25,7 +25,6 @@ import {
   type ProviderSnapshot,
   resolveSnapshotCwd,
 } from "./provider-snapshot-manager.js";
-import { OpenCodeAgentClient } from "./providers/opencode-agent.js";
 
 const TEST_CAPABILITIES = {
   supportsStreaming: false,
@@ -328,9 +327,7 @@ describe("ProviderSnapshotManager public surface", () => {
     const manager = new ProviderSnapshotManager({ logger: createTestLogger() });
     try {
       const ids = manager.listRegisteredProviderIds();
-      expect(ids).toEqual(
-        expect.arrayContaining(["claude", "codex", "opencode", "copilot", "pi", "omp"]),
-      );
+      expect(ids).toEqual(expect.arrayContaining(["pi"]));
     } finally {
       manager.destroy();
     }
@@ -340,12 +337,12 @@ describe("ProviderSnapshotManager public surface", () => {
     const manager = new ProviderSnapshotManager({
       logger: createTestLogger(),
       providerOverrides: {
-        "zai-claude": { extends: "claude", label: "ZAI", enabled: true },
+        "zai-pi": { extends: "pi", label: "ZAI", enabled: true },
       },
     });
     try {
-      expect(manager.hasProvider("claude")).toBe(true);
-      expect(manager.hasProvider("zai-claude")).toBe(true);
+      expect(manager.hasProvider("pi")).toBe(true);
+      expect(manager.hasProvider("zai-pi")).toBe(true);
       expect(manager.hasProvider("not-a-provider" as AgentProvider)).toBe(false);
     } finally {
       manager.destroy();
@@ -356,12 +353,12 @@ describe("ProviderSnapshotManager public surface", () => {
     const manager = new ProviderSnapshotManager({
       logger: createTestLogger(),
       providerOverrides: {
-        "qwen-codex": { extends: "codex", label: "Qwen Code", enabled: true },
+        "qwen-codex": { extends: "pi", label: "Qwen Code", enabled: true },
       },
     });
     try {
       expect(manager.getProviderLabel("qwen-codex")).toBe("Qwen Code");
-      expect(manager.getProviderLabel("claude")).toBe("Claude");
+      expect(manager.getProviderLabel("pi")).toBe("Pi");
     } finally {
       manager.destroy();
     }
@@ -371,12 +368,10 @@ describe("ProviderSnapshotManager public surface", () => {
     const manager = new ProviderSnapshotManager({ logger: createTestLogger() });
     try {
       const snapshot = manager.getSnapshot("/tmp/project").records.map(({ entry }) => entry);
-      const claude = snapshot.find((entry) => entry.provider === "claude");
-      const codex = snapshot.find((entry) => entry.provider === "codex");
-      expect(claude?.status).toBe("loading");
-      expect(claude?.label).toBe("Claude");
-      expect(claude?.defaultModeId).toBe("auto");
-      expect(codex?.defaultModeId).toBe("auto-review");
+      const pi = snapshot.find((entry) => entry.provider === "pi");
+      expect(pi?.status).toBe("loading");
+      expect(pi?.label).toBe("Pi");
+      expect(pi?.defaultModeId).toBeNull();
     } finally {
       manager.destroy();
     }
@@ -604,7 +599,7 @@ describe("ProviderSnapshotManager public surface", () => {
         manager.getProvider({ cwd: "/tmp/project", provider: "codex", wait: true }),
       ).resolves.toMatchObject({
         status: "error",
-        error: "Timed out refreshing Codex after 1ms; pending: availability",
+        error: "Timed out refreshing codex after 1ms; pending: availability",
       });
     } finally {
       manager.destroy();
@@ -640,7 +635,7 @@ describe("ProviderSnapshotManager public surface", () => {
 
       await expect(entryPromise).resolves.toMatchObject({
         status: "error",
-        error: "Timed out refreshing Codex after 120000ms; pending: availability",
+        error: "Timed out refreshing codex after 120000ms; pending: availability",
       });
       recovered = true;
       await manager.refreshSnapshotForCwd({ cwd: "/tmp/project", providers: ["codex"] });
@@ -662,7 +657,7 @@ describe("ProviderSnapshotManager public surface", () => {
       logger: createTestLogger(),
       refreshTimeoutMs: 100,
       extraClients: {
-        codex: createExtraClient("codex", {
+        pi: createExtraClient("pi", {
           isAvailable: () =>
             new Promise((settle) => {
               setTimeout(() => settle(true), 60);
@@ -678,16 +673,16 @@ describe("ProviderSnapshotManager public surface", () => {
     try {
       const entryPromise = manager.getProvider({
         cwd: "/tmp/project",
-        provider: "codex",
+        provider: "pi",
         wait: true,
       });
 
       await vi.advanceTimersByTimeAsync(120);
 
       await expect(entryPromise).resolves.toMatchObject({
-        provider: "codex",
+        provider: "pi",
         status: "error",
-        error: "Timed out refreshing Codex after 100ms",
+        error: "Timed out refreshing Pi after 100ms",
       });
     } finally {
       manager.destroy();
@@ -716,7 +711,7 @@ describe("ProviderSnapshotManager public surface", () => {
       logger: createTestLogger(),
       refreshTimeoutMs: 100,
       extraClients: {
-        codex: createExtraClient("codex", {
+        pi: createExtraClient("pi", {
           isAvailable: async () => true,
           fetchCatalog,
         }),
@@ -726,22 +721,22 @@ describe("ProviderSnapshotManager public surface", () => {
     try {
       const first = manager.getProvider({
         cwd: "/tmp/project",
-        provider: "codex",
+        provider: "pi",
         wait: true,
       });
       await vi.advanceTimersByTimeAsync(100);
       await expect(first).resolves.toMatchObject({
         status: "error",
-        error: "Timed out refreshing Codex after 100ms; pending: provider.list",
+        error: "Timed out refreshing Pi after 100ms; pending: provider.list",
       });
       expect(cleanupState.cleanedUp).toBe(true);
 
-      await manager.refreshSnapshotForCwd({ cwd: "/tmp/project", providers: ["codex"] });
+      await manager.refreshSnapshotForCwd({ cwd: "/tmp/project", providers: ["pi"] });
       expect(fetchCatalog).toHaveBeenCalledTimes(2);
       expect(
-        manager.getSnapshot("/tmp/project").records.find(({ entry }) => entry.provider === "codex")
+        manager.getSnapshot("/tmp/project").records.find(({ entry }) => entry.provider === "pi")
           ?.entry,
-      ).toMatchObject({ provider: "codex", status: "ready" });
+      ).toMatchObject({ provider: "pi", status: "ready" });
     } finally {
       manager.destroy();
       vi.useRealTimers();
@@ -876,7 +871,7 @@ describe("ProviderSnapshotManager public surface", () => {
     try {
       const entries = await manager.listProviders({ cwd: "/tmp/project", wait: true });
       const providers = entries.map((entry) => entry.provider).sort();
-      expect(providers).toEqual(["claude", "codex", "copilot", "omp", "opencode", "pi"]);
+      expect(providers).toEqual(["pi"]);
       for (const entry of entries) {
         expect(entry.enabled).toBe(false);
         expect(entry.status).toBe("unavailable");
@@ -907,11 +902,11 @@ describe("ProviderSnapshotManager public surface", () => {
   test("listModels rejects when the provider is disabled", async () => {
     const manager = new ProviderSnapshotManager({
       logger: createTestLogger(),
-      providerOverrides: { codex: { enabled: false } },
+      providerOverrides: { pi: { enabled: false } },
     });
     try {
       await expect(
-        manager.listModels({ cwd: "/tmp/project", provider: "codex", wait: true }),
+        manager.listModels({ cwd: "/tmp/project", provider: "pi", wait: true }),
       ).rejects.toThrow(/disabled/);
     } finally {
       manager.destroy();
@@ -953,11 +948,11 @@ describe("ProviderSnapshotManager public surface", () => {
   test("listModes rejects when the provider is disabled", async () => {
     const manager = new ProviderSnapshotManager({
       logger: createTestLogger(),
-      providerOverrides: { codex: { enabled: false } },
+      providerOverrides: { pi: { enabled: false } },
     });
     try {
       await expect(
-        manager.listModes({ cwd: "/tmp/project", provider: "codex", wait: true }),
+        manager.listModes({ cwd: "/tmp/project", provider: "pi", wait: true }),
       ).rejects.toThrow(/disabled/);
     } finally {
       manager.destroy();
@@ -1106,7 +1101,7 @@ describe("ProviderSnapshotManager public surface", () => {
       logger: createTestLogger(),
       refreshTimeoutMs: TEST_REFRESH_TIMEOUT_MS,
       extraClients: {
-        codex: createExtraClient("codex", {
+        pi: createExtraClient("pi", {
           isAvailable: async () => true,
           fetchCatalog: async (_options, context) => {
             await context?.runActivity("model/list", () => waitUntilAborted(context.signal));
@@ -1120,7 +1115,7 @@ describe("ProviderSnapshotManager public surface", () => {
       },
     });
     try {
-      const diagnosticRequest = manager.getProviderDiagnostic("codex");
+      const diagnosticRequest = manager.getProviderDiagnostic("pi");
       expect(diagnosticStarted).toBe(true);
 
       const diagnosticOrBlocked = Promise.race([
@@ -1136,7 +1131,7 @@ describe("ProviderSnapshotManager public surface", () => {
       const result = await diagnosticRequest;
       expect(result.diagnostic).toContain("codex diagnostics available");
       expect(result.diagnostic).toContain(
-        `Status: Error: Timed out refreshing Codex after ${TEST_REFRESH_TIMEOUT_MS}ms`,
+        `Status: Error: Timed out refreshing Pi after ${TEST_REFRESH_TIMEOUT_MS}ms`,
       );
     } finally {
       manager.destroy();
@@ -1152,7 +1147,7 @@ describe("ProviderSnapshotManager public surface", () => {
       logger: createTestLogger(),
       refreshTimeoutMs: TEST_REFRESH_TIMEOUT_MS,
       extraClients: {
-        codex: createExtraClient("codex", {
+        pi: createExtraClient("pi", {
           isAvailable: async () => true,
           fetchCatalog: async (_options, context) => {
             snapshotStarted = true;
@@ -1167,7 +1162,7 @@ describe("ProviderSnapshotManager public surface", () => {
       },
     });
     try {
-      const diagnosticRequest = manager.getProviderDiagnostic("codex");
+      const diagnosticRequest = manager.getProviderDiagnostic("pi");
       await vi.advanceTimersByTimeAsync(0);
 
       expect(diagnosticStarted).toBe(true);
@@ -1176,10 +1171,10 @@ describe("ProviderSnapshotManager public surface", () => {
       await vi.advanceTimersByTimeAsync(TEST_REFRESH_TIMEOUT_MS);
       const result = await diagnosticRequest;
       expect(result.diagnostic).toContain(
-        `Error: Timed out collecting Codex diagnostic after ${TEST_REFRESH_TIMEOUT_MS}ms`,
+        `Error: Timed out collecting Pi diagnostic after ${TEST_REFRESH_TIMEOUT_MS}ms`,
       );
       expect(result.diagnostic).toContain(
-        `Status: Error: Timed out refreshing Codex after ${TEST_REFRESH_TIMEOUT_MS}ms`,
+        `Status: Error: Timed out refreshing Pi after ${TEST_REFRESH_TIMEOUT_MS}ms`,
       );
     } finally {
       manager.destroy();
@@ -1193,10 +1188,10 @@ describe("ProviderSnapshotManager public surface", () => {
       logger: createTestLogger(),
       refreshTimeoutMs: TEST_REFRESH_TIMEOUT_MS,
       extraClients: {
-        codex: createExtraClient("codex", {
+        pi: createExtraClient("pi", {
           isAvailable: async () => true,
           fetchCatalog: async () => ({
-            models: [{ provider: "codex", id: "gpt-5.4-mini", label: "GPT 5.4 Mini" }],
+            models: [{ provider: "pi", id: "gpt-5.4-mini", label: "GPT 5.4 Mini" }],
             modes: [] as AgentMode[],
           }),
           getDiagnostic: async () => new Promise(() => {}),
@@ -1204,12 +1199,12 @@ describe("ProviderSnapshotManager public surface", () => {
       },
     });
     try {
-      const diagnosticRequest = manager.getProviderDiagnostic("codex");
+      const diagnosticRequest = manager.getProviderDiagnostic("pi");
       await vi.advanceTimersByTimeAsync(TEST_REFRESH_TIMEOUT_MS);
 
       const result = await diagnosticRequest;
       expect(result.diagnostic).toContain(
-        `Error: Timed out collecting Codex diagnostic after ${TEST_REFRESH_TIMEOUT_MS}ms`,
+        `Error: Timed out collecting Pi diagnostic after ${TEST_REFRESH_TIMEOUT_MS}ms`,
       );
       expect(result.diagnostic).toContain("Models: 1");
       expect(result.diagnostic).toContain("Status: Ready");
@@ -1262,19 +1257,18 @@ describe("ProviderSnapshotManager public surface", () => {
   });
 
   test("getAgentManagerProviderState exposes extraClients verbatim", () => {
-    const codexClient = createExtraClient("codex");
-    const claudeClient = createExtraClient("claude");
+    const piClient = createExtraClient("pi");
+    const fakeClient = createExtraClient("fake-agent");
     const manager = new ProviderSnapshotManager({
       logger: createTestLogger(),
-      providerOverrides: { opencode: { enabled: false }, copilot: { enabled: false } },
-      extraClients: { codex: codexClient, claude: claudeClient },
+      extraClients: { pi: piClient, "fake-agent": fakeClient },
     });
     try {
       const state = manager.getAgentManagerProviderState();
-      expect(state.clients.codex).toBe(codexClient);
-      expect(state.clients.claude).toBe(claudeClient);
-      expect(state.providerDefinitions.opencode).toMatchObject({ enabled: false });
-      expect(state.providerDefinitions.codex).toMatchObject({ enabled: true });
+      expect(state.clients.pi).toBe(piClient);
+      expect(state.clients["fake-agent"]).toBe(fakeClient);
+      expect(state.providerDefinitions.pi).toMatchObject({ enabled: true });
+      expect(state.providerDefinitions["fake-agent"]).toMatchObject({ enabled: true });
     } finally {
       manager.destroy();
     }
@@ -1417,63 +1411,6 @@ describe("ProviderSnapshotManager public surface", () => {
       manager.destroy();
     }
   });
-
-  test("treats an OpenCode parent with auto accept as unattended when resolving an explicit child mode", async () => {
-    const openCode = new OpenCodeAgentClient(createTestLogger());
-    const modes: AgentMode[] = [
-      { id: "build", label: "Build" },
-      { id: "base", label: "Base" },
-      { id: "orchestrator", label: "Orchestrator" },
-    ];
-    const manager = new ProviderSnapshotManager({
-      logger: createTestLogger(),
-      providerOverrides: {
-        claude: { enabled: false },
-        codex: { enabled: false },
-        copilot: { enabled: false },
-        pi: { enabled: false },
-      },
-      extraClients: {
-        opencode: createExtraClient("opencode", {
-          async isAvailable() {
-            return true;
-          },
-          async fetchCatalog() {
-            return { models: [] as AgentModelDefinition[], modes };
-          },
-          resolveCreateConfig: openCode.resolveCreateConfig.bind(openCode),
-          isCreateConfigUnattended: openCode.isCreateConfigUnattended.bind(openCode),
-        }),
-      },
-    });
-    try {
-      const parent: ManagedAgent = {
-        ...CLOSED_PARENT,
-        id: "parent-agent",
-        provider: "opencode",
-        currentModeId: "orchestrator",
-        availableModes: modes,
-        config: {
-          provider: "opencode",
-          cwd: "/tmp/project",
-          featureValues: { auto_accept: true },
-        },
-      };
-
-      const resolved = await manager.resolveCreateConfig({
-        cwd: "/tmp/project",
-        provider: "opencode",
-        requestedMode: "base",
-        featureValues: undefined,
-        parent,
-        unattended: false,
-      });
-
-      expect(resolved).toEqual({ modeId: "base", featureValues: { auto_accept: true } });
-    } finally {
-      manager.destroy();
-    }
-  });
 });
 
 describe("ProviderSnapshotManager applyMutableProviderConfig", () => {
@@ -1489,20 +1426,20 @@ describe("ProviderSnapshotManager applyMutableProviderConfig", () => {
       },
     });
     try {
-      expect(manager.hasProvider("zai-claude")).toBe(false);
+      expect(manager.hasProvider("zai-pi")).toBe(false);
 
       const state = manager.applyMutableProviderConfig({
-        "zai-claude": { extends: "claude", label: "ZAI", enabled: true },
+        "zai-pi": { extends: "pi", label: "ZAI", enabled: true },
       });
 
-      expect(manager.hasProvider("zai-claude")).toBe(true);
-      expect(state.providerDefinitions["zai-claude"]).toMatchObject({ enabled: true });
-      expect(manager.listRegisteredProviderIds()).toContain("zai-claude");
+      expect(manager.hasProvider("zai-pi")).toBe(true);
+      expect(state.providerDefinitions["zai-pi"]).toMatchObject({ enabled: true });
+      expect(manager.listRegisteredProviderIds()).toContain("zai-pi");
       expect(
         manager
           .getSnapshot()
           .records.map(({ entry }) => entry)
-          .find((entry) => entry.provider === "zai-claude")?.source,
+          .find((entry) => entry.provider === "zai-pi")?.source,
       ).toBe("custom");
     } finally {
       manager.destroy();
@@ -1513,25 +1450,25 @@ describe("ProviderSnapshotManager applyMutableProviderConfig", () => {
     const manager = new ProviderSnapshotManager({
       logger: createTestLogger(),
       providerOverrides: {
-        "zai-claude": { extends: "claude", label: "ZAI", enabled: true },
+        "zai-pi": { extends: "pi", label: "ZAI", enabled: true },
       },
     });
     try {
-      expect(manager.hasProvider("zai-claude")).toBe(true);
+      expect(manager.hasProvider("zai-pi")).toBe(true);
 
-      const state = manager.applyMutableProviderConfig({}, { removeProviders: ["zai-claude"] });
+      const state = manager.applyMutableProviderConfig({}, { removeProviders: ["zai-pi"] });
 
-      expect(manager.hasProvider("zai-claude")).toBe(false);
-      expect(state.providerDefinitions["zai-claude"]).toBeUndefined();
+      expect(manager.hasProvider("zai-pi")).toBe(false);
+      expect(state.providerDefinitions["zai-pi"]).toBeUndefined();
       expect(
         manager
           .getSnapshot()
           .records.map(({ entry }) => entry)
-          .some((entry) => entry.provider === "zai-claude"),
+          .some((entry) => entry.provider === "zai-pi"),
       ).toBe(false);
 
       manager.applyMutableProviderConfig({ codex: { enabled: false } });
-      expect(manager.hasProvider("zai-claude")).toBe(false);
+      expect(manager.hasProvider("zai-pi")).toBe(false);
     } finally {
       manager.destroy();
     }
@@ -1540,24 +1477,23 @@ describe("ProviderSnapshotManager applyMutableProviderConfig", () => {
   test("drops disabled built-in providers from clients while preserving providerDefinitions", () => {
     const manager = new ProviderSnapshotManager({
       logger: createTestLogger(),
+      isDev: true,
       providerOverrides: {
-        claude: { enabled: true },
-        codex: { enabled: true },
-        copilot: { enabled: false },
-        opencode: { enabled: false },
+        mock: { enabled: true },
         pi: { enabled: false },
       },
     });
     try {
       const before = manager.getAgentManagerProviderState();
-      expect(before.providerDefinitions.copilot).toMatchObject({ enabled: false });
-      expect(before.clients.copilot).toBeUndefined();
+      expect(before.providerDefinitions.pi).toMatchObject({ enabled: false });
+      expect(before.clients.pi).toBeUndefined();
+      expect(before.clients.mock).toBeDefined();
 
-      const state = manager.applyMutableProviderConfig({ codex: { enabled: false } });
-      expect(state.providerDefinitions.codex).toMatchObject({ enabled: false });
-      expect(state.clients.codex).toBeUndefined();
-      expect(state.providerDefinitions.copilot).toMatchObject({ enabled: false });
-      expect(state.clients.copilot).toBeUndefined();
+      const state = manager.applyMutableProviderConfig({ mock: { enabled: false } });
+      expect(state.providerDefinitions.mock).toMatchObject({ enabled: false });
+      expect(state.clients.mock).toBeUndefined();
+      expect(state.providerDefinitions.pi).toMatchObject({ enabled: false });
+      expect(state.clients.pi).toBeUndefined();
     } finally {
       manager.destroy();
     }
@@ -1587,7 +1523,7 @@ describe("ProviderSnapshotManager applyMutableProviderConfig", () => {
 
       listener.mockClear();
       manager.applyMutableProviderConfig({
-        "zai-claude": { extends: "claude", label: "ZAI", enabled: true },
+        "zai-pi": { extends: "pi", label: "ZAI", enabled: true },
       });
 
       const cwds = [...new Set(listener.mock.calls.map((call) => call[0].current.cwd))].sort();
@@ -1693,14 +1629,14 @@ describe("ProviderSnapshotManager applyMutableProviderConfig", () => {
       const pending = manager.warmUpSnapshotForCwd({ cwd });
       await vi.waitFor(() => expect(calls).toBe(1));
       manager.applyMutableProviderConfig(
-        { ...config, claude: { enabled: false, label: "Changed" } },
+        { ...config, pi: { enabled: false, label: "Changed" } },
         { replace: true },
       );
       const staged = manager.prepareMutableProviderConfig(
-        { ...config, claude: { enabled: false, label: "Rollback" } },
+        { ...config, pi: { enabled: false, label: "Rollback" } },
         { replace: true },
       );
-      expect(staged.agentManagerState.providerDefinitions.claude?.enabled).toBe(false);
+      expect(staged.agentManagerState.providerDefinitions.pi?.enabled).toBe(false);
       finish();
       await pending;
       expect(
@@ -1718,46 +1654,34 @@ describe("ProviderSnapshotManager applyMutableProviderConfig", () => {
 
   test("reload replaces derived clients only when their provider configuration changes", async () => {
     const config = {
-      claude: { enabled: true },
-      codex: { enabled: true },
-      "codex-2": { extends: "codex", label: "Codex 2", enabled: true },
-      copilot: { enabled: false },
-      opencode: { enabled: false },
-      pi: { enabled: false },
-      omp: { enabled: false },
+      mock: { enabled: true },
+      pi: { enabled: true },
+      "pi-2": { extends: "pi", label: "Pi 2", enabled: true },
     };
     const manager = new ProviderSnapshotManager({
       logger: createTestLogger(),
+      isDev: true,
       providerOverrides: config,
     });
     try {
       const before = manager.getAgentManagerProviderState().clients;
-      for (const provider of ["codex", "claude", "codex-2"]) {
-        expect(
-          await before[provider]!.getCatalogCacheKey?.({ scope: "global", force: false }),
-        ).toBe("host");
-        expect(
-          await before[provider]!.getCatalogCacheKey?.({
-            scope: "workspace",
-            cwd: resolveSnapshotCwd("/project"),
-            force: true,
-          }),
-        ).toBe("host");
+      for (const provider of ["pi", "mock", "pi-2"]) {
+        expect(before[provider]).toBeDefined();
       }
       const unchanged = manager.applyMutableProviderConfig(config, { replace: true }).clients;
-      expect(unchanged.codex).toBe(before.codex);
-      expect(unchanged["codex-2"]).toBe(before["codex-2"]);
+      expect(unchanged.pi).toBe(before.pi);
+      expect(unchanged["pi-2"]).toBe(before["pi-2"]);
       const changed = manager.applyMutableProviderConfig(
-        { ...config, codex: { enabled: true, env: { CODEX_HOME: "/tmp/other-codex-home" } } },
+        { ...config, pi: { enabled: true, env: { PI_CODING_AGENT_DIR: "/tmp/other-pi-home" } } },
         { replace: true },
       ).clients;
-      expect(changed.claude).toBe(before.claude);
-      expect(changed.codex).not.toBe(before.codex);
-      expect(changed["codex-2"]).not.toBe(before["codex-2"]);
-      const { "codex-2": _removedProvider, ...withoutDerived } = config;
+      expect(changed.mock).toBe(before.mock);
+      expect(changed.pi).not.toBe(before.pi);
+      expect(changed["pi-2"]).not.toBe(before["pi-2"]);
+      const { "pi-2": _removedProvider, ...withoutDerived } = config;
       const removed = manager.applyMutableProviderConfig(withoutDerived, { replace: true }).clients;
-      expect(removed["codex-2"]).toBeUndefined();
-      expect(removed.claude).toBe(before.claude);
+      expect(removed["pi-2"]).toBeUndefined();
+      expect(removed.mock).toBe(before.mock);
     } finally {
       manager.destroy();
     }
@@ -1782,8 +1706,8 @@ describe("ProviderSnapshotManager applyMutableProviderConfig", () => {
       const config = {
         ...PUBLICATION_PROVIDERS,
         codex: { enabled: false },
-        claude: { enabled: false, label: "Changed" },
-        custom: { extends: "codex", label: "Custom", enabled: false },
+        pi: { enabled: false, label: "Changed" },
+        custom: { extends: "pi", label: "Custom", enabled: false },
       };
       const prepared = manager.prepareMutableProviderConfig(config, { replace: true });
       expect(prepared.agentManagerState.providerDefinitions.custom?.enabled).toBe(false);
@@ -1794,10 +1718,7 @@ describe("ProviderSnapshotManager applyMutableProviderConfig", () => {
       expect(manager.getSnapshot(cwds[0])).toBe(previous[0]);
       expect(observations).toEqual([]);
       expect(() =>
-        manager.prepareMutableProviderConfig(
-          { custom: { extends: "missing-provider" } },
-          { replace: true },
-        ),
+        manager.prepareMutableProviderConfig({ custom: { extends: "pi" } }, { replace: true }),
       ).toThrow();
       expect(manager.getSnapshot(cwds[0])).toBe(previous[0]);
       prepared.commit();
@@ -1811,8 +1732,8 @@ describe("ProviderSnapshotManager applyMutableProviderConfig", () => {
       expect(manager.hasProvider("custom")).toBe(true);
       expect(
         committed[0]!.records.map(({ entry }) => [entry.provider, entry.status, entry.label]),
-      ).toContainEqual(["codex", "unavailable", "Codex"]);
-      expect(manager.getProviderLabel("claude")).toBe("Changed");
+      ).toContainEqual(["codex", "unavailable", "codex"]);
+      expect(manager.getProviderLabel("pi")).toBe("Changed");
     } finally {
       manager.destroy();
     }
@@ -1862,11 +1783,7 @@ describe("ProviderSnapshotManager lifecycle", () => {
   test("owns every materialized client generation until daemon shutdown", async () => {
     const providerConfig = (label: string) => ({
       claude: { enabled: false },
-      codex: { enabled: true, label },
-      copilot: { enabled: false },
-      omp: { enabled: false },
-      opencode: { enabled: false },
-      pi: { enabled: false },
+      pi: { enabled: true, label },
     });
     const manager = new ProviderSnapshotManager({
       logger: createTestLogger(),
@@ -1874,35 +1791,35 @@ describe("ProviderSnapshotManager lifecycle", () => {
     });
     const shutdowns: Array<ReturnType<typeof vi.fn>> = [];
     const trackShutdown = (client: AgentClient | undefined): AgentClient => {
-      if (!client) throw new Error("Expected materialized Codex client");
+      if (!client) throw new Error("Expected materialized Pi client");
       const shutdown = vi.fn(async () => undefined);
       client.shutdown = shutdown;
       shutdowns.push(shutdown);
       return client;
     };
 
-    const initialClient = trackShutdown(manager.getAgentManagerProviderState().clients.codex);
+    const initialClient = trackShutdown(manager.getAgentManagerProviderState().clients.pi);
     const published = manager.prepareMutableProviderConfig(providerConfig("Published"), {
       replace: true,
     });
-    const publishedClient = trackShutdown(published.agentManagerState.clients.codex);
+    const publishedClient = trackShutdown(published.agentManagerState.clients.pi);
     published.commit();
 
     const rolledBack = manager.prepareMutableProviderConfig(providerConfig("Rolled back"), {
       replace: true,
     });
-    trackShutdown(rolledBack.agentManagerState.clients.codex);
+    trackShutdown(rolledBack.agentManagerState.clients.pi);
 
-    expect(manager.getAgentManagerProviderState().clients.codex).toBe(publishedClient);
+    expect(manager.getAgentManagerProviderState().clients.pi).toBe(publishedClient);
 
     const newest = manager.prepareMutableProviderConfig(providerConfig("Newest"), {
       replace: true,
     });
-    const newestClient = trackShutdown(newest.agentManagerState.clients.codex);
+    const newestClient = trackShutdown(newest.agentManagerState.clients.pi);
     newest.commit();
 
     expect(initialClient).not.toBe(publishedClient);
-    expect(manager.getAgentManagerProviderState().clients.codex).toBe(newestClient);
+    expect(manager.getAgentManagerProviderState().clients.pi).toBe(newestClient);
     for (const shutdown of shutdowns) expect(shutdown).not.toHaveBeenCalled();
 
     await manager.shutdown();
@@ -1926,12 +1843,12 @@ describe("ProviderSnapshotManager lifecycle", () => {
       const listener = vi.fn();
       manager.on("change", listener);
       manager.getSnapshot("/tmp/project");
-      manager.applyMutableProviderConfig({ claude: { enabled: false, label: "Changed" } });
+      manager.applyMutableProviderConfig({ pi: { enabled: false, label: "Changed" } });
       const firstCallCount = listener.mock.calls.length;
       expect(firstCallCount).toBe(1);
 
       manager.off("change", listener);
-      manager.applyMutableProviderConfig({ claude: { enabled: false, label: "Changed again" } });
+      manager.applyMutableProviderConfig({ pi: { enabled: false, label: "Changed again" } });
       expect(listener.mock.calls.length).toBe(firstCallCount);
     } finally {
       manager.destroy();
@@ -2021,7 +1938,7 @@ describe("ProviderSnapshotManager cwd routing", () => {
     }
   });
 
-  test.each(["codex", "custom-codex"])(
+  test.each(["pi", "custom-pi"])(
     "shares %s discovery and refresh recovery across snapshot directories",
     async (provider) => {
       const requests: FetchCatalogOptions[] = [];
@@ -2029,7 +1946,7 @@ describe("ProviderSnapshotManager cwd routing", () => {
       const manager = new ProviderSnapshotManager({
         logger: createTestLogger(),
         providerOverrides: {
-          "custom-codex": { extends: "codex", label: "Custom Codex", enabled: true },
+          "custom-pi": { extends: "pi", label: "Custom Pi", enabled: true },
         },
         extraClients: {
           [provider]: createExtraClient(provider, {
@@ -2179,7 +2096,7 @@ describe("ProviderSnapshotManager cwd routing", () => {
       const listener = vi.fn();
       manager.on("change", listener);
       manager.getSnapshot();
-      manager.applyMutableProviderConfig({ claude: { enabled: false, label: "Changed" } });
+      manager.applyMutableProviderConfig({ pi: { enabled: false, label: "Changed" } });
       const cwds = listener.mock.calls.map((call) => call[0].current.cwd);
       expect(cwds).toContain(GLOBAL_PROVIDER_SNAPSHOT_KEY);
     } finally {
@@ -2421,8 +2338,8 @@ describe("provider-owned catalogue identity", () => {
       logger: createTestLogger(),
       providerOverrides: {
         ...disabledProviders,
-        first: { extends: "codex", label: "First", enabled: true },
-        second: { extends: "codex", label: "Second", enabled: true },
+        first: { extends: "pi", label: "First", enabled: true },
+        second: { extends: "pi", label: "Second", enabled: true },
       },
       extraClients: { first: client("first"), second: client("second") },
     });
@@ -2954,7 +2871,7 @@ test("an unchanged provider publishes a pending key failure after an unrelated c
     });
     await began;
     manager.applyMutableProviderConfig(
-      { ...config, claude: { enabled: false, label: "Changed" } },
+      { ...config, pi: { enabled: false, label: "Changed" } },
       { replace: true },
     );
     release();
@@ -3220,10 +3137,7 @@ test("result identity covers content, metadata and status while unchanged refres
 });
 
 const PUBLICATION_PROVIDERS = Object.fromEntries(
-  ["claude", "codex", "copilot", "opencode", "pi", "omp"].map((provider) => [
-    provider,
-    { enabled: provider === "codex" },
-  ]),
+  ["claude", "codex", "pi"].map((provider) => [provider, { enabled: provider === "codex" }]),
 );
 
 test("reads retain the target snapshot and cold binding publishes only the resolved transition", async () => {
@@ -3662,7 +3576,7 @@ describe("plugin provider overrides and launch", () => {
       providerOverrides: {
         "typo-provider": { enabled: false },
         [registration.id]: { enabled: false },
-        codex: { enabled: false },
+        pi: { enabled: false },
       },
     });
     try {
@@ -3699,7 +3613,7 @@ describe("plugin provider overrides and launch", () => {
       logger,
       providerOverrides: {
         [registration.id]: {
-          extends: "acp",
+          extends: "pi",
           label: "Own provider",
           command: [process.execPath],
           enabled: true,

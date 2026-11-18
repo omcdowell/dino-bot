@@ -199,3 +199,58 @@ describe("cc provider: models", () => {
     await host.close();
   });
 });
+
+// Bug: a snapshot built while a bot had no proxy (or its list failed) kept the aliases, without effort, for good.
+describe("cc models: a stale list is rebuilt", () => {
+  it("the aliases offered when no list can be had keep Claude Code's effort levels", async () => {
+    const m = new CcModels({ fetch: async () => ({ ok: false, status: 502, json: async () => ({}) }) });
+    const { cwd } = botDir("eff", { cc: { baseUrl: "http://gw/eff" } });
+    for (const list of [await m.list(cwd, {}), await new CcModels().list(undefined, { DINOBOT_CLAUDE_CONFIG_DIR: join(TMP, "none") })]) {
+      assert.deepEqual(list.map((x) => x.id), CC_ALIASES.map((x) => x.id));
+      for (const x of list) assert.deepEqual(x.thinkingOptions?.map((o) => o.id), ["low", "medium", "high", "xhigh", "max"]);
+    }
+  });
+
+  it("catalogKey names the source and fetch: it changes with the bot's proxy, an aliases retry and a fresh list", async () => {
+    const { cwd } = botDir("keyed", { cc: { baseUrl: "http://gw/a" } });
+    let now = 1_000;
+    let ok = false;
+    const good = api([[["claude-opus-5-5", "Claude Opus 5.5", "2026-09-21T16:24:00Z"]]]);
+    const fetchFn = async (url: string, init: { headers: Record<string, string> }) => (ok ? good(url, init) : { ok: false, status: 503, json: async () => ({}) });
+    const m = new CcModels({ fetch: fetchFn, now: () => now, retryMs: 60_000 });
+    const k0 = m.catalogKey(cwd, {}); // nothing cached: a fetch starts
+    assert.match(k0, /^http:\/\/gw\/a pending@/);
+    await tick();
+    const k1 = m.catalogKey(cwd, {});
+    assert.match(k1, /aliases@/);
+    assert.notEqual(k1, k0);
+    now += 30_000;
+    assert.equal(m.catalogKey(cwd, {}), k1, "stable while the aliases are fresh");
+    // The proxy works again: once the retry is due the key moves on, and the next list is the live one.
+    ok = true;
+    now += 31_000;
+    assert.notEqual(m.catalogKey(cwd, {}), k1);
+    await tick();
+    const k2 = m.catalogKey(cwd, {});
+    assert.match(k2, /live@/);
+    const list = await m.list(cwd, {});
+    assert.ok(list.some((x) => x.id === "claude-opus-5-5"));
+    // .bot.json names another proxy: another source, another key.
+    writeFileSync(join(cwd, ".bot.json"), JSON.stringify({ cc: { baseUrl: "http://gw/b" } }));
+    assert.match(m.catalogKey(cwd, {}), /^http:\/\/gw\/b /);
+  });
+
+  it("the provider gives the daemon a catalogue key per bot folder that follows .bot.json cc and chat", async () => {
+    // An unreachable proxy: the list fails fast, so the key settles on aliases.
+    const { root, cwd } = botDir("prov", { cc: { baseUrl: "http://127.0.0.1:9/x" }, chat: { provider: "optchat-cc/claude-opus-5-5" } });
+    const provider = createCcProvider({ host: new CcHost(join(root, ".cc")), launcher: {} as any, botsRoot: root, optchatHome: join(TMP, "oc") });
+    assert.equal(typeof provider.getCatalogCacheKey, "function");
+    const key = () => provider.getCatalogCacheKey!({ scope: "workspace", cwd });
+    const a = await key();
+    assert.ok(a?.startsWith(`${cwd} optchat-cc/claude-opus-5-5 http://127.0.0.1:9/x `));
+    writeFileSync(join(cwd, ".bot.json"), JSON.stringify({ cc: { baseUrl: "http://127.0.0.1:9/y" }, chat: { provider: "optchat-cc/claude-opus-5-5" } }));
+    assert.ok((await key())?.includes("http://127.0.0.1:9/y"));
+    writeFileSync(join(cwd, ".bot.json"), JSON.stringify({ cc: { baseUrl: "http://127.0.0.1:9/y" }, chat: { provider: "pi/x" } }));
+    assert.ok((await key())?.includes(" pi/x "));
+  });
+});

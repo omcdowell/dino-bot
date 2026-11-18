@@ -180,7 +180,7 @@ describe("cc provider", () => {
     conn.onEvent((e) => events.push(e));
     await conn.send({ type: "session.open", requestId: "r1", sessionId: "s1", history: "skip", config: { cwd: join(root, "kit"), env: {}, mcpServers: {}, settings: {}, persist: true } });
     await tick(50);
-    assert.deepEqual(events.map((e) => e.type), ["session.opened", "session.config", "session.ready"]);
+    assert.deepEqual(events.map((e) => e.type), ["session.opened", "session.config", "session.commands", "session.ready"]);
     assert.deepEqual(ensured, ["kit"]);
     await conn.send({ type: "session.prompt", sessionId: "s1", prompt: { clientMessageId: "c1", delivery: "auto", input: { type: "message", content: [{ type: "text", text: "hi kit" }] } } });
     await tick(20);
@@ -195,7 +195,7 @@ describe("cc provider", () => {
     await engine.handle("POST", "/turn", new URLSearchParams(), { running: false, answered: true });
     // A prompt typed in the TUI shows too, as its own turn.
     await engine.handle("POST", "/turn", new URLSearchParams(), { running: true, typed: true, text: "<chat>\nview\n</chat>\n\ntyped here" });
-    const shown = events.slice(3).map((e) =>
+    const shown = events.slice(4).map((e) =>
       e.type === "timeline.item" ? `${e.item.type}:${(e.item as any).text ?? (e.item as any).status}` : e.type === "session.turn" ? `turn:${e.turnId}:${e.state}` : e.type,
     );
     assert.deepEqual(shown, [
@@ -437,7 +437,46 @@ exit 0
     assert.ok(!settings.permissions.allow.includes("zoom")); // lowercase rules stop the TUI at a settings warning
     assert.equal(settings.env.ANTHROPIC_BASE_URL, undefined);
     assert.equal(settings.showThinkingSummaries, true); // else Opus 5.x thinking reaches the mods empty
+    // The workers' 200k cap is not for a bot (OptChat compacts after each turn, as for a pi bot).
+    assert.equal(settings.autoCompactWindow, undefined);
     assert.equal(JSON.parse(readFileSync(join(cfg, ".claude.json"), "utf8")).hasCompletedOnboarding, true);
+  });
+
+  it("CC_BOTS_WORKSPACE: a workspace of its own (the release smoke test), never a tab in the bots' workspace", () => {
+    const d = mkdtempSync(join(TMP, "launch-ws-"));
+    const bin = join(d, "bin");
+    mkdirSync(bin);
+    const log = join(d, "herdr.log");
+    // A "bots" workspace exists (the live bots'): the smoke test's bot must not land in it.
+    writeFileSync(
+      join(bin, "herdr"),
+      `#!/bin/sh
+printf '%s\\n' "$*" >>${JSON.stringify(log)}
+case "$1 $2" in
+  "agent get") exit 1 ;;
+  "workspace list") echo '{"result":{"workspaces":[{"label":"bots","workspace_id":"w9"}]}}' ;;
+  "workspace create") echo '{"result":{"workspace":{"workspace_id":"w2"},"tab":{"tab_id":"w2:t1"},"root_pane":{"pane_id":"w2:p1"}}}' ;;
+  "tab create") echo '{"result":{"tab":{"tab_id":"w9:t2"},"root_pane":{"pane_id":"w9:p2"}}}' ;;
+  "agent start") echo '{"result":{"agent":{"agent_session":{"value":"/s/z.jsonl"}}}}' ;;
+esac
+exit 0
+`,
+    );
+    writeFileSync(join(bin, "claude"), "#!/bin/sh\nexit 0\n");
+    chmodSync(join(bin, "herdr"), 0o755);
+    chmodSync(join(bin, "claude"), 0o755);
+    const ccdir = join(d, "state", "smk");
+    mkdirSync(ccdir, { recursive: true });
+    writeFileSync(join(ccdir, "env.sh"), "export X=1\n");
+    const r = spawnSync("sh", [join(__dirname, "..", "claude-code", "start-bot.sh")], {
+      encoding: "utf8",
+      env: { PATH: `${bin}:/usr/bin:/bin`, HOME: d, BOT: "smk", CWD: d, CCDIR: ccdir, DINOBOT_CLAUDE_CONFIG_DIR: join(d, "cfg"), CC_BOTS_WORKSPACE: "ccsmoke-smk" },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), { pane: "w2:p1", tab: "w2:t1", session_file: "/s/z.jsonl" });
+    const calls = readFileSync(log, "utf8");
+    assert.match(calls, /workspace create --cwd .+ --label ccsmoke-smk --no-focus/);
+    assert.doesNotMatch(calls, /tab create/);
   });
 
   it("through the owner's proxy (CC_PROXY=1): the shell's Claude API route is cleared before env.sh, no plan-login unset after it", () => {

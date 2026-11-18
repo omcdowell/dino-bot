@@ -38,6 +38,11 @@
 # The worker's pi always starts with --no-skills, so it sees only the bundled shortlist
 # (worker-skills.txt next to this script: folders next to this skill's folder) plus
 # WORKER_SKILLS: not the bot's skills, not the user's global ones, not this one.
+#   WORKER_COMPACT_EXT  pi extension that caps the worker's context (default
+#                 ~/.agents/pi-extensions/worker-compact-cap.ts; loaded only when the file exists;
+#                 empty: none)
+#   PI_WORKER_COMPACT_AT  that extension's cap in tokens for this one worker (its own default
+#                 otherwise); set in the worker's pane, as an env prefix on pi would not reach it
 # Prints one JSON line (also written to <brief without .md>.launch.json) with the pane and the
 # pi session id needed to resume the worker. Exit 0 started, 1 a step failed, 2 usage error.
 set -eu
@@ -66,6 +71,7 @@ CWD=${4:-$PWD}
 
 printf '%s\n' "$NAME" | grep -Eq '^[a-z][a-z0-9_-]{0,31}$' || { echo "launch: name must match [a-z][a-z0-9_-]{0,31}" >&2; exit 2; }
 case $MINUTES in '' | *[!0-9]*) echo "launch: minutes must be a whole number" >&2; exit 2 ;; esac
+case ${PI_WORKER_COMPACT_AT:-0} in *[!0-9]*) echo "launch: PI_WORKER_COMPACT_AT must be a whole number of tokens" >&2; exit 2 ;; esac
 [ -f "$BRIEF" ] || { echo "launch: no brief file at $BRIEF" >&2; exit 2; }
 [ -d "$CWD" ] || { echo "launch: no folder at $CWD" >&2; exit 2; }
 BRIEF="$(cd "$(dirname "$BRIEF")" && pwd)/$(basename "$BRIEF")"
@@ -133,7 +139,13 @@ if [ -n "$PIDIR" ] && [ -d "$PIDIR" ]; then
   herdr pane run "$PANE" "export PI_CODING_AGENT_DIR='$Q'" >/dev/null || fail "cannot set PI_CODING_AGENT_DIR in pane $PANE"
   sleep 1
 fi
+if [ -n "${PI_WORKER_COMPACT_AT:-}" ]; then
+  herdr pane run "$PANE" "export PI_WORKER_COMPACT_AT=$PI_WORKER_COMPACT_AT" >/dev/null || fail "cannot set PI_WORKER_COMPACT_AT in pane $PANE"
+  sleep 1
+fi
 set -- --no-skills --session-id "$SESSION_ID" --name "$NAME"
+COMPACT_EXT=${WORKER_COMPACT_EXT-$HOME/.agents/pi-extensions/worker-compact-cap.ts}
+[ -z "$COMPACT_EXT" ] || [ ! -f "$COMPACT_EXT" ] || set -- "$@" --extension "$COMPACT_EXT"
 # Bundled shortlist first (unless WORKER_SKILLS has `none`), then WORKER_SKILLS.
 case ":${WORKER_SKILLS:-}:" in
   *:none:*) ;;
@@ -175,7 +187,10 @@ if ! herdr agent prompt "$NAME" "$PROMPT" --wait --until working --until blocked
   arrived || fail "first prompt not confirmed; check with: herdr agent read $NAME --source recent-unwrapped --lines 40"
 fi
 
-bot-worker add "$NAME" --pane "$PANE" --bot "$BOT" >/dev/null || echo "launch: bot-worker add failed; run it yourself: bot-worker add $NAME" >&2
+# --session: the session file, so `bot-worker list` can tell a stall from it (herdr reports none for Claude Code).
+# Without it (an older bot-worker), the record still goes in and the check falls back to the pane.
+bot-worker add "$NAME" --pane "$PANE" --bot "$BOT" ${SESSION_FILE:+--session "$SESSION_FILE"} >/dev/null 2>&1 ||
+  bot-worker add "$NAME" --pane "$PANE" --bot "$BOT" >/dev/null || echo "launch: bot-worker add failed; run it yourself: bot-worker add $NAME" >&2
 
 INFO=$(node -e 'const [name,bot,project,workspace,tab,pane,cwd,brief,minutes,model,session_id,session_file,engine,cc]=process.argv.slice(1);process.stdout.write(JSON.stringify({name,bot,project,workspace,tab,pane,cwd,brief,minutes:Number(minutes),model:model||null,session_id,session_file,...(engine==="cc"?{engine,cc_dir:cc}:{})}))' \
   "$NAME" "$BOT" "$PROJECT" "$WS" "$TAB" "$PANE" "$CWD" "$BRIEF" "$MINUTES" "$MODEL" "$SESSION_ID" "$SESSION_FILE" "$ENGINE" "${CCDIR:-}")

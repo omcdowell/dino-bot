@@ -4,9 +4,6 @@ import { goToMobileHome, useMobileHome } from "@/plugins/mobile-home-runtime";
 import type { MobileHome } from "@/plugins/mobile-home";
 import { navigateToLastWorkspace } from "@/stores/navigation-active-workspace-store";
 import {
-  buildOpenProjectRoute,
-  buildProjectSettingsRoute,
-  buildProjectsSettingsRoute,
   buildSettingsHostSectionRoute,
   buildSettingsRoute,
   type HostSectionSlug,
@@ -17,15 +14,10 @@ export type SettingsView =
   | { kind: "plugin"; serverId: string; pluginId: string; screenId: string }
   | { kind: "root" }
   | { kind: "section"; section: SettingsSectionSlug }
-  | { kind: "host"; serverId: string; section: HostSectionSlug }
-  | { kind: "project"; serverId: string; projectId: string };
+  | { kind: "host"; serverId: string; section: HostSectionSlug };
 
 export function openHostOverview(serverId: string): void {
   router.push(buildSettingsHostSectionRoute(serverId, "host"));
-}
-
-export function openProjectSettings(serverId: string, projectId: string): void {
-  router.push(buildProjectSettingsRoute(serverId, projectId));
 }
 
 export function returnFromSettings(view: SettingsView, mobileHome: MobileHome | null = null): void {
@@ -37,14 +29,13 @@ export function returnFromSettings(view: SettingsView, mobileHome: MobileHome | 
       return;
     }
     if (!navigateToLastWorkspace()) {
-      router.replace(buildOpenProjectRoute());
+      router.replace("/");
     }
     return;
   }
 
   let parent: Href = buildSettingsRoute();
   if (view.kind === "plugin") parent = buildSettingsHostSectionRoute(view.serverId, "plugins");
-  if (view.kind === "project") parent = buildProjectsSettingsRoute(view.serverId);
   router.dismissTo(parent as Href);
 }
 

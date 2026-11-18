@@ -843,7 +843,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
   }
   const ProviderModelInputSchema = AgentProviderEnum.trim()
     .refine((value) => value.includes("/"), {
-      message: "provider must be provider/model, for example codex/gpt-5.4",
+      message: "provider must be provider/model, for example pi/openai-codex/gpt-5.4",
     })
     .refine(
       (value) => {
@@ -854,7 +854,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
           return false;
         }
       },
-      { message: "provider must be provider/model, for example codex/gpt-5.4" },
+      { message: "provider must be provider/model, for example pi/openai-codex/gpt-5.4" },
     );
   const ProviderOrProviderModelInputSchema = AgentProviderEnum.trim()
     .min(1, "provider is required")
@@ -870,7 +870,9 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
           return false;
         }
       },
-      { message: "provider must be provider or provider/model, for example codex/gpt-5.4" },
+      {
+        message: "provider must be provider or provider/model, for example pi/openai-codex/gpt-5.4",
+      },
     );
   const CreateAgentSettingsInputSchema = z
     .object({
@@ -879,7 +881,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       features: z
         .record(z.string(), z.unknown())
         .optional()
-        .describe("Provider-specific feature values, for example { fast_mode: true } for Codex."),
+        .describe("Provider-specific feature values, for example { fast_mode: true }."),
     })
     .strict();
   const UpdateAgentSettingsInputSchema = z
@@ -894,7 +896,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       features: z
         .record(z.string(), z.unknown())
         .optional()
-        .describe("Provider-specific feature values, for example { fast_mode: true } for Codex."),
+        .describe("Provider-specific feature values, for example { fast_mode: true }."),
     })
     .strict();
   const InspectProviderSettingsInputSchema = z
@@ -1010,7 +1012,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       .max(60, "Title must be 60 characters or fewer")
       .describe("Short descriptive title (<= 60 chars) summarizing the agent's focus."),
     provider: ProviderModelInputSchema.describe(
-      "Required provider/model pair, for example codex/gpt-5.4.",
+      "Required provider/model pair, for example pi/openai-codex/gpt-5.4.",
     ),
     labels: z.record(z.string(), z.string()).optional().describe("Labels to set on the agent"),
     settings: CreateAgentSettingsInputSchema.optional().describe(
@@ -1149,7 +1151,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
     : topLevelSendAgentPromptInputSchema;
   const inspectProviderInputSchema = {
     provider: ProviderOrProviderModelInputSchema.describe(
-      "Provider ID, optionally with a model ID (for example codex or codex/gpt-5.4).",
+      "Provider ID, optionally with a model ID (for example pi or pi/openai-codex/gpt-5.4).",
     ),
     cwd: z
       .string()
@@ -1429,7 +1431,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
     {
       title: "Create agent",
       description:
-        "Create an agent. Agent-scoped creation defaults to your workspace and creates your subagent. Top-level creation without workspaceId creates a new local workspace. Requires provider/model (for example codex/gpt-5.4) and an initial prompt. Do not guess; call list_providers and list_models first if uncertain.",
+        "Create an agent. Agent-scoped creation defaults to your workspace and creates your subagent. Top-level creation without workspaceId creates a new local workspace. Requires provider/model (for example pi/openai-codex/gpt-5.4) and an initial prompt. Do not guess; call list_providers and list_models first if uncertain.",
       inputSchema: createAgentInputSchema,
       outputSchema: {
         agentId: z.string(),
@@ -2509,7 +2511,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
           .describe("IANA time zone for the cron cadence. For example: America/New_York."),
         name: z.string().optional(),
         provider: (callerAgentId ? AgentProviderEnum.optional() : AgentProviderEnum).describe(
-          "Provider, or provider/model (for example: codex or codex/gpt-5.4). Defaults to the caller's provider in an agent-scoped session.",
+          "Provider, or provider/model (for example: pi or pi/openai-codex/gpt-5.4). Defaults to the caller's provider in an agent-scoped session.",
         ),
         cwd: z.string().optional(),
         isolation: z.enum(["local", "worktree"]).optional(),

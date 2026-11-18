@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { cap, flat, type Memory } from './memory.ts';
 
 /**
@@ -38,6 +41,47 @@ export function textContent(content: unknown, images = true): string {
     .filter(Boolean)
     .join('\n');
 }
+
+const IMAGE_EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
+/** The notes Pi appends after the typed text when it resizes, converts or omits an attached image (transcript.ts). */
+export const PI_IMAGE_NOTES = /\n\n\[Image[ :][^\n]*\](?:\n\[Image[ :][^\n]*\])*$/;
+/** How a kept image is named in memory; the DinoBot bots plugin reads it back (server/cc/provider.ts promptImages). */
+export const imageLine = (path: string) => `[image: ${path} (read the file to see it)]`;
+
+/** Writes an image to `dir`/<sha256>.<ext> (kept by content, so a resent image is one file) and returns its path. */
+export function keepImage(dir: string, data: string, mimeType: string): string {
+  const bytes = Buffer.from(data, 'base64');
+  const path = join(dir, `${createHash('sha256').update(bytes).digest('hex')}.${IMAGE_EXT[mimeType] ?? 'bin'}`);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (!existsSync(path)) writeFileSync(path, bytes, { mode: 0o600 });
+  return path;
+}
+
+/**
+ * A user message's text for memory. With `imagesDir`, each attached image is kept there and named by an image line,
+ * as a Claude Code bot logs one, so the chat shows it again whichever engine the bot runs on later; Pi's notes about
+ * the resize go, as they describe the copy in the Pi session. Without it (or if an image cannot be written), an image
+ * is the text placeholder.
+ */
+export function userText(content: unknown, imagesDir?: string): string {
+  if (!imagesDir || !Array.isArray(content)) return textContent(content);
+  const parts = content as { type?: unknown; text?: unknown; data?: unknown; mimeType?: unknown }[];
+  const images = parts.filter(p => typeof p === 'object' && p !== null && p.type === 'image');
+  if (!images.length || !images.every(p => typeof p.data === 'string' && typeof p.mimeType === 'string')) return textContent(content);
+  let lines: string[];
+  try {
+    lines = images.map(p => imageLine(keepImage(imagesDir, p.data as string, p.mimeType as string)));
+  } catch {
+    return textContent(content);
+  }
+  const out: string[] = [];
+  for (const p of parts) {
+    if (typeof p !== 'object' || p === null) continue;
+    if (p.type === 'text' && typeof p.text === 'string') out.push(p.text.replace(PI_IMAGE_NOTES, ''));
+    else if (p.type === 'image') out.push(lines.shift()!);
+  }
+  return out.filter(Boolean).join('\n').trim();
+}
 type Failure = { stopReason: string; message: string; date: string };
 const failureOf = (message: AgentMessage, date: string): Failure | undefined =>
   message.role === 'assistant' && (message.stopReason === 'error' || message.stopReason === 'aborted')
@@ -56,9 +100,10 @@ export function logMessage(
   message: AgentMessage,
   receipt?: string,
   onFailure: (failure: Failure) => void = failure => void memory.append('echo', failureLine(failure), failure.date),
+  imagesDir?: string,
 ) {
   const date = new Date(message.timestamp).toISOString();
-  if (message.role === 'user') memory.append('user', textContent(message.content), date, receipt);
+  if (message.role === 'user') memory.append('user', userText(message.content, imagesDir), date, receipt);
   else if (message.role === 'assistant') {
     for (const block of blocks(message)) {
       if (block.type === 'text' && block.text?.trim()) memory.append('talk', block.text, date);
@@ -88,10 +133,12 @@ export class RunLog {
   constructor(
     private readonly memory: Memory,
     private readonly digest: boolean,
+    /** Where the images a user message carries are kept (the profile's images/); unset, memory keeps a placeholder. */
+    private readonly imagesDir?: string,
   ) {}
   write(message: AgentMessage, receipt?: string) {
     if (!bareFailure(message)) this.endFailure();
-    if (!this.digest) return logMessage(this.memory, message, receipt, failure => this.fail(failure));
+    if (!this.digest) return logMessage(this.memory, message, receipt, failure => this.fail(failure), this.imagesDir);
     const date = new Date(message.timestamp).toISOString();
     if (message.role === 'assistant' && blocks(message).some(block => block.type === 'toolCall')) {
       for (const block of blocks(message)) {
@@ -115,7 +162,7 @@ export class RunLog {
       return;
     }
     this.endSteps();
-    logMessage(this.memory, message, receipt, failure => this.fail(failure));
+    logMessage(this.memory, message, receipt, failure => this.fail(failure), this.imagesDir);
   }
   /** Writes the pending digest and error line, if any. */
   end() {

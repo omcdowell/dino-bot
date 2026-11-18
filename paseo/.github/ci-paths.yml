@@ -65,8 +65,6 @@ browser:
   - "packages/protocol/src/client-capabilities.ts"
   - "packages/server/src/server/agent/provider-registry.ts"
   - "packages/server/src/server/agent/agent-sdk-types.ts"
-  - "packages/server/src/server/agent/providers/codex-app-server-agent.ts"
-  - "packages/server/src/server/agent/providers/claude/agent.ts"
   - "packages/server/src/server/agent/plugin-provider.ts"
   - "packages/server/src/server/plugins/{index,plugin-process,plugin-process-protocol,runtime}.ts"
   - "packages/server/src/executable-resolution/**"

@@ -12,7 +12,6 @@ const entries = {
   "./server": "server",
   "./server/provider": "server",
   "./server/usage": "server",
-  "./server/acp": "server",
   "./client": "client",
   "./client/host": "client",
   "./client/react-native": "client",

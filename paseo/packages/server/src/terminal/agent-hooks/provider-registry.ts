@@ -10,8 +10,6 @@ import {
   uninstallAgentHooks,
 } from "./agent-hook-installer.js";
 import { claudeAgentHookProvider } from "./claude/claude.js";
-import { codexAgentHookProvider } from "./codex/codex.js";
-import { opencodeAgentHookProvider } from "./opencode/opencode.js";
 
 export type {
   AgentHookActivityInput,
@@ -21,8 +19,6 @@ export type {
 
 export const AGENT_HOOK_PROVIDERS = {
   [claudeAgentHookProvider.id]: claudeAgentHookProvider,
-  [codexAgentHookProvider.id]: codexAgentHookProvider,
-  [opencodeAgentHookProvider.id]: opencodeAgentHookProvider,
 } satisfies Record<string, AgentHookProvider>;
 
 export type AgentHookProviderId = keyof typeof AGENT_HOOK_PROVIDERS;

@@ -5,11 +5,14 @@
  * `$XDG_STATE_HOME/bot-dm/launches.jsonl` (default `~/.local/state/bot-dm/launches.jsonl`), with
  * `bot-worker add <name>` (bin/bot-worker.mjs). One JSON record per line, append only:
  *
- *   {"v":1,"type":"launch","ts":"…Z","worker":"dm-wp4","pane":"w73:p4","agent":"<paseo agent id>","bot":"emmet-brickowski"}
+ *   {"v":1,"type":"launch","ts":"…Z","worker":"dm-wp4","pane":"w73:p4","agent":"<paseo agent id>","bot":"emmet-brickowski",
+ *    "session":"/home/…/.claude/projects/-home-…/<uuid>.jsonl"}
  *   {"v":1,"type":"done","ts":"…Z","worker":"dm-wp4"}
  *
  * `agent` is the launching bot's Paseo agent id (its PASEO_AGENT_ID); `bot` is optional and wins
- * when present. A launched worker is outstanding while herdr shows it working or blocked, whatever
+ * when present. `session` (optional) is the worker's session file as launch.sh knows it: herdr reports
+ * none for Claude Code agents, so this is how their transcript is found for the error check below.
+ * A launched worker is outstanding while herdr shows it working or blocked, whatever
  * it has reported, and otherwise until the first of:
  *   - it has reported and herdr shows it idle/done: bot-dm wrote a delivered status
  *     (steered/started) to its worker outbox (`$XDG_STATE_HOME/bot-dm/workers/<name>/outbox.jsonl`)
@@ -18,7 +21,7 @@
  *   - a later `done` record for the same worker (wins even over working);
  *   - its herdr agent is gone, or idle/done once the start-up grace period has passed;
  *   - the launch is older than MAX_AGE_MS (wins even over working).
- * Exception: an idle/done worker whose pi session (or pane) ends on an error written after its
+ * Exception: an idle/done worker whose session (pi or Claude Code; or pane) ends on an error written after its
  * launch and after its last report is "stalled", not finished (server/worker-errors.ts), until it
  * reports again, is marked done, its pane closes or the launch expires. The plugin DMs the bot
  * once per stall (server/stall-notify.ts).
@@ -60,6 +63,8 @@ export type LaunchRecord = {
   agent?: string | null;
   bot?: string | null;
   cwd?: string | null;
+  /** Session file recorded at launch (absolute path): the Claude Code transcript, which herdr does not report. */
+  session?: string | null;
 };
 export type DoneRecord = { v: 1; type: "done"; ts: string; worker: string };
 export type RegistryRecord = LaunchRecord | DoneRecord;
@@ -71,7 +76,7 @@ export type HerdrAgent = {
   agent_status: string;
   cwd?: string | null;
   foreground_cwd?: string | null;
-  /** The agent's session as herdr knows it; for pi, `kind: "path"` and the session jsonl. */
+  /** The agent's session as herdr knows it; for pi, `kind: "path"` and the session jsonl; none for Claude Code. */
   agent_session?: { kind?: string | null; value?: string | null } | null;
 };
 
@@ -128,6 +133,7 @@ export function parseRegistryLine(line: string): RegistryRecord | null {
     agent: str(value.agent),
     bot: str(value.bot),
     cwd: str(value.cwd),
+    ...(typeof value.session === "string" && value.session.startsWith("/") ? { session: value.session } : {}),
   };
 }
 
@@ -236,13 +242,16 @@ export async function resolveWorker(
   if ((view.reason !== "idle" && view.reason !== "reported") || !ctx.agents) return view;
   const agent = findAgent(launch, ctx.agents);
   if (!agent || (agent.agent_status !== "idle" && agent.agent_status !== "done")) return view;
-  const error = await ctx.readError(agent).catch(() => null);
+  const error = await ctx.readError(agent, launch.session ?? null).catch(() => null);
+  // Claude Code still on its turn (its own retries) while herdr shows it idle: running, as pi is.
+  const live = { worker: view.worker, pane: agent.pane_id, since: view.since, herdr: view.herdr, source: view.source };
+  if (error === "working") return { ...live, state: "running" };
   if (!error) return view;
   // An error from before this launch belongs to an earlier task in the same pane.
   if (error.at !== null && Date.parse(error.at) < Date.parse(launch.ts)) return view;
   // Reported: only an error after the report stalls it; one without a time (pane output) does not.
   if (view.reason === "reported" && (error.at === null || Date.parse(error.at) <= ctx.reportAt!)) return view;
-  return { worker: view.worker, pane: agent.pane_id, since: view.since, state: "stalled", herdr: view.herdr, source: view.source, error };
+  return { ...live, state: "stalled", error };
 }
 
 function inside(path: string | null | undefined, dir: string): boolean {

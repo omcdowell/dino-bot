@@ -20,6 +20,7 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
     "smoke:bot-dm": "node bin/bot-dm-smoke.mjs",
+    "smoke:cc": "tsx scripts/cc-smoke.ts",
     "avatar:pack": "node scripts/avatar/build-pack.mjs",
     "avatar:parity": "tsx scripts/avatar/parity.mjs"
   },

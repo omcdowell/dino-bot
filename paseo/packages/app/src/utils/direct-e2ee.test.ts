@@ -56,7 +56,10 @@ describe("direct connections carry the daemon key", () => {
   };
 
   test("from the pairing offer", () => {
-    expect(directConnectionsFromOffer(offer).map((c) => c.daemonPublicKeyB64)).toEqual([KEY, KEY]);
+    // One route per host (IO1): the MagicDNS name beside the tailnet IP on the same port is dropped.
+    const connections = directConnectionsFromOffer(offer);
+    expect(connections.map((c) => c.endpoint)).toEqual(["100.64.0.7:6767"]);
+    expect(connections.map((c) => c.daemonPublicKeyB64)).toEqual([KEY]);
   });
 
   test("through storage", () => {

@@ -92,9 +92,11 @@ test("setup.models: pi's models and Claude Code's together; pi's suggestions win
     assert.deepEqual(both.providers, ["openai-codex", "claude-code"]);
     assert.equal(both.suggested.bots!.model, "sonnet"); // pi suggested none here; Pro plan: Sonnet
 
-    // (no installer module there: a plain Paseo host stays "not available")
+    // No installer module there (a plain Paseo host, or noble adopted by hand): no pi list, but Claude Code's models
+    // are offered (BF2 bug 2: "not available" made the Bot models screen a silent no-op).
     const plain = await new Onboarding(parseSettings({}), join(home, "bots"), { HOME: home, DINOBOT_HOME: join(home, "none") }, cc).models(false);
-    assert.equal(plain.available, false);
+    assert.equal(plain.available, true);
+    assert.deepEqual(plain.providers, ["claude-code"]);
     const brokenLib = join(home, "broken", "app", "installer", "lib");
     mkdirSync(brokenLib, { recursive: true });
     writeFileSync(join(brokenLib, "phone-signin.mjs"), `export function createOnboarding() { return { models: async () => { throw new Error("pi did not list its models"); }, recordModels() {} }; }\n`);
@@ -150,4 +152,30 @@ test("Claude Code picks map to where they run", () => {
   assert.deepEqual(ccCompactorPick({ provider: "claude-code", model: "claude-opus-5-5", thinking: "low" }), { provider: "anthropic", model: "claude-opus-5-5", thinking: "low" });
   assert.deepEqual(ccCompactorPick({ provider: "x", model: "y", thinking: null }), { provider: "x", model: "y", thinking: null });
   assert.deepEqual(hostProfileConfig({ bots: null, compaction: { provider: "claude-code", model: "sonnet", thinking: "medium" }, workers: null })?.compactor, { provider: "anthropic", model: "claude-sonnet", thinking: "medium" });
+});
+
+// BF2 bug 2: on a host with no DinoBot onboarding module (no DINOBOT_HOME: noble, adopted by hand) setup.models said
+// available:false, so the app's Bot models screen skipped itself: a silent no-op even with Claude Code signed in.
+test("no onboarding module: Bot models still offers Claude Code's models, and apply checks a pick against them", async () => {
+  const home = mkdtempSync(join(tmpdir(), "ccsm-nohome-"));
+  try {
+    const env = { HOME: home };
+    const bots = join(home, "bots");
+    mkdirSync(bots, { recursive: true });
+    const none = await new Onboarding(parseSettings({}), bots, env, { claudeCode: async () => null }).models(false);
+    assert.equal(none.available, false, "nothing to offer: the screen may still skip");
+    const ob = new Onboarding(parseSettings({}), bots, env, { claudeCode: async () => ({ models: CC_LIST, plan: "max" }) });
+    const a = await ob.models(false);
+    assert.equal(a.available, true);
+    assert.equal(a.error, null);
+    assert.deepEqual(a.models.map((m) => `${m.provider}/${m.id}`), CC_LIST.map((m) => `claude-code/${m.id}`));
+    await assert.rejects(
+      ob.apply({ models: { bots: { provider: "claude-code", model: "claude-nope-1", thinking: null }, compaction: null, workers: null } }),
+      /Claude Code does not offer claude-code\/claude-nope-1/,
+    );
+    const ok = await ob.apply({ models: { bots: { provider: "claude-code", model: "opus", thinking: "medium" }, compaction: null, workers: null } });
+    assert.ok(ok.applied.includes("settings"));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });

@@ -15,22 +15,54 @@ import {
   type ProviderInput,
   type ProviderRegistration,
   type ProviderContent,
+  type ProviderCommand,
 } from "@getpaseo/plugin/server/provider";
 import type { CcEngine, CcEvent, CcHost } from "./engine";
 import { ccProxyFor, findClaude, type CcLauncher } from "./launch";
-import { CC_EFFORTS, CcModels, effortOption, modelSource, withModel, type CcModel } from "./models";
+import { aliasesOnly, CC_EFFORTS, CcModels, effortOption, modelSource, withModel, type CcModel } from "./models";
 import { ccToolDetail } from "./tool-detail";
 import { parseTaskNotification, taskNotificationItem } from "./task-notification";
 import { CcUsageLedger } from "./usage";
 import { isBotTraffic } from "./deliver";
+import { skillCommandText, skillPrompt, type CcSkill } from "./skills";
+import { addHidden, ccPersistence, hiddenOf, listCcSessions, rewindRange, shown, type Hidden } from "./sessions";
+import { OPTCHAT_COMMAND, optchatCommand, withProfileLock } from "./profile-tools";
 
 export const CC_PROVIDER = "optchat-cc";
 /**
  * prompt.steer: a message sent while a turn runs is taken for that turn and goes into the inbox like any other; the
  * engine types it once the TUI is free (it never types into a running turn), so it is answered next.
  * permission: a prompt held in the bot's terminal is a card in the app (and a push); it is answered there.
+ * prompt.command: the app's slash commands, as a pi bot's (commandList); /optchat is the profile tools (profile-tools.ts).
+ * session.list, session.revert.conversation: sessions.ts.
  */
-const CAPABILITIES = ["prompt.message", "prompt.image", "prompt.steer", "session.persistence", "session.configure", "permission"] as const;
+const CAPABILITIES = [
+  "prompt.message",
+  "prompt.image",
+  "prompt.steer",
+  "prompt.command",
+  "session.persistence",
+  "session.configure",
+  "session.list",
+  "session.revert.conversation",
+  "permission",
+] as const;
+
+/** pi-optchat's answer to /compact (its session_before_compact hook), worded for Claude Code. */
+const COMPACT_NOTE = "OptChat manages history between turns: it compacts after every turn, so there is nothing to compact now.";
+
+/**
+ * The app's slash commands for a bot on Claude Code, as pi offers them to a pi bot: /compact (OptChat answers it, as
+ * on pi), /optchat (the profile tools) and /skill:<name> for each skill in the bot's prompt (pi's skill commands). The
+ * commands of pi's own packages are pi's.
+ */
+export function commandList(skills: readonly CcSkill[]): ProviderCommand[] {
+  return [
+    { name: "compact", description: "Manually compact the session context", argumentHint: "[instructions]" },
+    OPTCHAT_COMMAND,
+    ...skills.map((k) => ({ name: `skill:${k.name}`, description: k.description })),
+  ];
+}
 /** Every level, for a model whose levels are not known (Claude Code lowers one the model does not take). */
 const EFFORTS = CC_EFFORTS.map(effortOption);
 
@@ -44,6 +76,8 @@ export interface CcProviderDeps {
   warn?: (s: string) => void;
   /** The model list for a bot's folder (or the daemon's default): server/cc/models.ts, live from the Models API. */
   models?: (cwd: string | undefined, env: Record<string, string | undefined>) => Promise<CcModel[]>;
+  /** Names the list `models` gives a folder now (CcModels.catalogKey), so the daemon rebuilds its snapshot when it changes. */
+  catalogKey?: (cwd: string | undefined, env: Record<string, string | undefined>) => string;
   /** The bots plugin's shared skills folder (plugins/bots/skills), listed in each bot's prompt (skills.ts). */
   skillsDir?: string;
 }
@@ -101,6 +135,24 @@ export function promptImages(text: string, profileDir: string): { text: string; 
   return images.length ? { text: rest.trim(), images } : { text, images };
 }
 
+/** What pi-optchat logged for an image before it kept images (its text memory had no bytes or path). */
+const PI_IMAGE_PLACEHOLDER = "[image attachment: available in Pi session; text memory does not preserve image bytes]";
+/** Shown for each such image in a reopened chat. */
+export const IMAGE_NOT_KEPT = "(image not kept)";
+
+/**
+ * A logged user message from a bot's time on pi, before images were kept: each placeholder becomes a short note and
+ * Pi's resize notes (`[Image: original …]`, about the copy only the Pi session has) go. Other text is left as it is.
+ */
+export function piImageText(text: string): string {
+  if (!text.includes(PI_IMAGE_PLACEHOLDER)) return text;
+  return text
+    .replace(/\n\n(?:\[Image[ :][^\n]*\]\n)+(?=\[image attachment: )/g, "\n")
+    .split(PI_IMAGE_PLACEHOLDER)
+    .join(IMAGE_NOT_KEPT)
+    .trim();
+}
+
 /** The first bot folder (by name) whose .bot.json names an Anthropic API proxy (launch.ts ccProxyFor), if any. */
 export function firstProxiedBot(botsRoot: string): string | undefined {
   try {
@@ -131,7 +183,8 @@ export function replayItems(entries: ReturnType<CcEngine["recent"]>): Array<{ ti
   const open: Array<{ name: string; input: unknown; at: number }> = [];
   for (const e of entries) {
     const id = `m-${e.i}`;
-    if (e.kind === "user" || e.kind === "talk") out.push({ timestamp: e.date, item: { type: e.kind === "user" ? "user_message" : "assistant_message", id, text: e.text } });
+    if (e.kind === "user") out.push({ timestamp: e.date, item: { type: "user_message", id, text: skillCommandText(e.text) || e.text, revertToken: { i: e.i } } });
+    else if (e.kind === "talk") out.push({ timestamp: e.date, item: { type: "assistant_message", id, text: e.text } });
     else if (e.kind === "tool") {
       const sp = e.text.indexOf(" ");
       const name = sp < 0 ? e.text : e.text.slice(0, sp);
@@ -176,12 +229,52 @@ interface Session {
   step: number;
   /** The permission card for a prompt held in the bot's terminal, until the bot moves on or the owner dismisses it. */
   blocked: string | null;
+  /** The slash commands last sent to the app (JSON), so an unchanged list is not sent again. */
+  commands: string;
+  /** Log ranges this chat rewound past (sessions.ts); they ride in its persistence. */
+  hidden: Hidden;
   stop: () => void;
 }
 
+/** The folder a catalogue is listed for: a bot's folder, else none (the daemon's default source, else the first bot with a proxy). */
+export function catalogCwd(cwd: string | undefined, deps: Pick<CcProviderDeps, "botsRoot" | "optchatHome">): string | undefined {
+  let out: string | undefined;
+  if (cwd)
+    try {
+      resolveBot(cwd, deps.botsRoot, deps.optchatHome);
+      out = resolve(cwd);
+    } catch {}
+  // Asked for no bot, and the daemon has no proxy or Claude login of its own: the first bot with a proxy.
+  if (!out && !modelSource(undefined, process.env)) out = firstProxiedBot(deps.botsRoot);
+  return out;
+}
+
+/** The engine a bot's .bot.json `chat` names (part of the catalogue key: an engine switch rebuilds the snapshot). */
+function chatEngine(cwd: string | undefined): string {
+  if (!cwd) return "";
+  try {
+    const chat = (JSON.parse(readFileSync(join(cwd, ".bot.json"), "utf8")) as { chat?: { provider?: unknown } }).chat;
+    return typeof chat?.provider === "string" ? chat.provider : "";
+  } catch {
+    return "";
+  }
+}
+
 export function createCcProvider(deps: CcProviderDeps): ProviderRegistration {
+  // One model list cache for the catalogue key and every connection, so the key names the list a catalogue gets.
+  const live = deps.models ? null : new CcModels({ warn: deps.warn });
+  const shared: CcProviderDeps = live
+    ? { ...deps, models: (cwd, env) => live.list(cwd, env), catalogKey: (cwd, env) => live.catalogKey(cwd, env) }
+    : deps;
   return {
     id: CC_PROVIDER,
+    // The daemon keeps a folder's catalogue under this key: without one it kept the first list (aliases only, if it was
+    // built while the bot had no proxy) until a forced refresh.
+    async getCatalogCacheKey(options) {
+      const cwd = catalogCwd(options.scope === "workspace" ? options.cwd : undefined, deps);
+      const key = shared.catalogKey?.(cwd, process.env);
+      return key === undefined ? undefined : `${cwd ?? "(daemon)"} ${chatEngine(cwd)} ${key}`;
+    },
     label: "Claude Code",
     description: "OptChat bots on your own Claude Code login",
     async status() {
@@ -189,7 +282,7 @@ export function createCcProvider(deps: CcProviderDeps): ProviderRegistration {
     },
     async connect(request) {
       if (!request.versions.includes(1)) throw new Error("Provider protocol version 1 is required");
-      return connection(deps, negotiateProviderCapabilities(request.capabilities, CAPABILITIES));
+      return connection(shared, negotiateProviderCapabilities(request.capabilities, CAPABILITIES));
     },
   };
 }
@@ -211,8 +304,8 @@ function connection(deps: CcProviderDeps, capabilities: readonly string[]): Prov
     if (!l) ledgers.set(bot, (l = new CcUsageLedger(join(deps.host.botDir(bot), "usage.json"))));
     return l;
   };
-  const live = deps.models ? null : new CcModels({ warn });
-  const models = deps.models ?? ((cwd: string | undefined, env: Record<string, string | undefined>) => live!.list(cwd, env));
+  // createCcProvider always passes one (the shared list cache).
+  const models = deps.models ?? (async () => aliasesOnly());
   const configEvent = async (s: Session): Promise<ProviderEvent> => {
     const list = withModel(await models(s.cwd, s.env), s.model);
     const levels = list.find((m) => m.id === s.model)?.thinkingOptions ?? EFFORTS;
@@ -227,6 +320,49 @@ function connection(deps: CcProviderDeps, capabilities: readonly string[]): Prov
         emit({ type: "session.notice", sessionId: s.id, notice: { id: `tui-${Date.now()}`, severity: "error", title: "Claude Code did not start", description: error.message } });
       });
 
+  /** The bot's engine (opened on first use); messages are typed into its TUI (herdr agent prompt): deliver.ts. */
+  const engineFor = async (bot: string, profileDir: string, env: Record<string, string | undefined>, cwd: string) => {
+    const engine = await deps.host.engine(bot, profileDir, { env, warn, botDir: resolve(cwd), skillsDir: deps.skillsDir });
+    if (typeof deps.launcher.delivery === "function") engine.setDelivery(deps.launcher.delivery(bot));
+    return engine;
+  };
+
+  /** `/optchat <args>` (profile-tools.ts): its answer is a notice row, as pi-optchat's notify on a pi bot. */
+  async function command(s: Session, id: string, name: string, args: string) {
+    const note = (level: "info" | "error", message: string) => emit({ type: "timeline.item", sessionId: s.id, item: { type: "notification", id: `cmd-${id}`, level, message } });
+    try {
+      if (name !== OPTCHAT_COMMAND.name) throw new Error(`Claude Code bots have /${OPTCHAT_COMMAND.name} only.`);
+      const mine = [...sessions.values()].filter((o) => o.bot === s.bot);
+      note(
+        "info",
+        await optchatCommand(args, {
+          bot: s.bot,
+          profileDir: s.profileDir,
+          memory: s.engine.memory,
+          usage: ledger(s.bot).usage(s.id),
+          busy: mine.some((o) => o.current || o.waiting.length) || !s.engine.idle() || s.engine.queued > 0,
+          reopen: async (swap) => {
+            // The engine lets the profile go (memory closed, lock freed), the swap runs under the lock, and every chat
+            // of the bot follows the engine opened on the new memory; the TUI's mods re-read engine.json.
+            await deps.host.close(s.bot);
+            await withProfileLock(s.profileDir, s.bot, swap);
+            const engine = await engineFor(s.bot, s.profileDir, s.env, s.cwd);
+            for (const o of mine) {
+              o.stop();
+              o.engine = engine;
+              o.stop = engine.onEvent((e) => onEngine(o, e));
+            }
+            const shower = mine.find((o) => owner.get(o.bot) === o.id) ?? s;
+            engine.setRun({ model: shower.model, effort: shower.effort });
+          },
+        }),
+      );
+    } catch (error) {
+      note("error", (error as Error).message);
+    }
+    emit({ type: "session.prompt_result", sessionId: s.id, clientMessageId: id, result: { type: "completed" } });
+  }
+
   /** The chat that shows the bot's turns; the TUI runs on its model and effort. */
   const own = (s: Session) => {
     owner.set(s.bot, s.id);
@@ -239,6 +375,21 @@ function connection(deps: CcProviderDeps, capabilities: readonly string[]): Prov
     s.blocked = null;
   };
 
+  /** The app's slash commands (commandList), sent when they changed (a skill added or removed). */
+  const publishCommands = (s: Session) => {
+    let skills: CcSkill[] = [];
+    try {
+      skills = s.engine.skills();
+    } catch (error) {
+      warn(`cc ${s.bot}: skills: ${(error as Error).message}`);
+    }
+    const commands = commandList(skills);
+    const json = JSON.stringify(commands);
+    if (json === s.commands) return;
+    s.commands = json;
+    emit({ type: "session.commands", sessionId: s.id, commands });
+  };
+
   function onEngine(s: Session, e: CcEvent) {
     if (owner.get(s.bot) !== s.id) return;
     // The bot moved on: what held it in the terminal was answered there.
@@ -249,7 +400,7 @@ function connection(deps: CcProviderDeps, capabilities: readonly string[]): Prov
     const submitted = (raw: string, origin: string | undefined, id: string) => {
       const text = afterView(raw);
       const notice = parseTaskNotification(text) ?? (origin === "task-notification" ? { taskId: null, toolUseId: null, status: null, summary: text.slice(0, 300) || null, outputFile: null } : null);
-      item(notice ? taskNotificationItem(notice, id) : { type: "user_message", id: `u-${id}`, text });
+      item(notice ? taskNotificationItem(notice, id) : { type: "user_message", id: `u-${id}`, text, revertToken: { turn: id } });
     };
     switch (e.type) {
       case "started": {
@@ -359,9 +510,7 @@ function connection(deps: CcProviderDeps, capabilities: readonly string[]): Prov
   async function open(input: Extract<ProviderInput, { type: "session.open" }>) {
     const { bot, profileDir } = resolveBot(input.config.cwd, deps.botsRoot, deps.optchatHome);
     const env = { ...process.env, ...input.config.env };
-    const engine = await deps.host.engine(bot, profileDir, { env, warn, botDir: resolve(input.config.cwd), skillsDir: deps.skillsDir });
-    // Messages are typed into the bot's TUI (herdr agent prompt): deliver.ts.
-    if (typeof deps.launcher.delivery === "function") engine.setDelivery(deps.launcher.delivery(bot));
+    const engine = await engineFor(bot, profileDir, env, input.config.cwd);
     const s: Session = {
       id: input.sessionId,
       bot,
@@ -377,6 +526,8 @@ function connection(deps: CcProviderDeps, capabilities: readonly string[]): Prov
       current: null,
       step: 0,
       blocked: null,
+      commands: "",
+      hidden: hiddenOf(input.persistence),
       stop: () => {},
     };
     s.stop = engine.onEvent((e) => onEngine(s, e));
@@ -388,19 +539,20 @@ function connection(deps: CcProviderDeps, capabilities: readonly string[]): Prov
       sessionId: s.id,
       capabilities,
       restoration: "core",
-      persistence: { version: 1, data: { bot } },
+      persistence: ccPersistence(bot, s.hidden),
       title: input.config.title,
       cwd: s.cwd,
     });
     emit(await configEvent(s));
+    publishCommands(s);
     // What this chat counted before (a reopened chat, a restarted daemon): the meter shows it until the next turn.
     const known = ledger(bot).usage(s.id);
     if (known) emit({ type: "session.usage", sessionId: s.id, usage: known });
     if (input.history === "replay")
-      for (const r of replayItems(engine.recent())) {
+      for (const r of replayItems(engine.recent().filter(shown(s.hidden)))) {
         // The images the person sent show again, as on a pi bot's reopened chat (the app stores them by content).
         const sent = r.item.type === "user_message" ? promptImages(r.item.text, profileDir) : null;
-        const item = sent ? { ...r.item, text: sent.text, ...(sent.images.length ? { images: sent.images } : {}) } : r.item;
+        const item = sent ? { ...r.item, text: piImageText(sent.text), ...(sent.images.length ? { images: sent.images } : {}) } : r.item;
         emit({ type: "timeline.item", sessionId: s.id, timestamp: r.timestamp, item });
       }
     emit({ type: "session.ready", requestId: input.requestId, sessionId: s.id });
@@ -412,16 +564,38 @@ function connection(deps: CcProviderDeps, capabilities: readonly string[]): Prov
     const p = input.prompt;
     const fail = (message: string) =>
       emit({ type: "session.prompt_result", sessionId: s.id, clientMessageId: p.clientMessageId, result: { type: "failed", error: { message } } });
-    if (p.input.type !== "message") return fail("Claude Code bots take messages, not commands.");
-    const text = promptText(p.input.content, s.profileDir);
-    if (!text) return fail("The message is empty.");
+    publishCommands(s);
+    let text: string;
+    let display: string;
+    if (p.input.type === "command") {
+      const { name, arguments: args } = p.input;
+      if (name === OPTCHAT_COMMAND.name) return void command(s, p.clientMessageId, name, args);
+      if (name === "compact") {
+        // As on a pi bot (pi-optchat cancels pi's compaction and says why): a note, no turn.
+        emit({ type: "timeline.item", sessionId: s.id, item: { type: "notification", id: `n-${p.clientMessageId}`, level: "info", message: COMPACT_NOTE } as never });
+        emit({ type: "session.prompt_result", sessionId: s.id, clientMessageId: p.clientMessageId, result: { type: "completed" } });
+        return;
+      }
+      const skill = name.startsWith("skill:") ? s.engine.skills().find((k) => k.name === name.slice(6)) : undefined;
+      if (!skill) return fail(`Unknown command: /${name}`);
+      try {
+        text = skillPrompt(skill, args);
+      } catch (error) {
+        return fail(`Cannot read the skill ${skill.name}: ${(error as Error).message}`);
+      }
+      display = `/${name}${args.trim() ? ` ${args.trim()}` : ""}`;
+    } else {
+      text = promptText(p.input.content, s.profileDir);
+      if (!text) return fail("The message is empty.");
+      display = text;
+    }
     const turnId = p.clientMessageId;
     if (p.delivery === "steer") {
       // Into the turn Paseo last saw start: the latest one sent, else the one the TUI runs. None: Paseo sends it as a turn.
       const active = s.waiting.at(-1) ?? s.current;
       if (!active) return fail("No turn is running to steer into.");
       own(s);
-      emit({ type: "timeline.item", sessionId: s.id, item: { type: "user_message", id: `u-${turnId}`, text, clientMessageId: turnId } });
+      emit({ type: "timeline.item", sessionId: s.id, item: { type: "user_message", id: `u-${turnId}`, text: display, clientMessageId: turnId, revertToken: { turn: turnId } } });
       s.engine.enqueue(text, turnId);
       s.steered.add(turnId);
       emit({ type: "session.prompt_result", sessionId: s.id, clientMessageId: turnId, result: { type: "steer", turnId: active } });
@@ -429,7 +603,7 @@ function connection(deps: CcProviderDeps, capabilities: readonly string[]): Prov
       return;
     }
     own(s);
-    emit({ type: "timeline.item", sessionId: s.id, item: { type: "user_message", id: `u-${turnId}`, text, clientMessageId: turnId } });
+    emit({ type: "timeline.item", sessionId: s.id, item: { type: "user_message", id: `u-${turnId}`, text: display, clientMessageId: turnId, revertToken: { turn: turnId } } });
     s.engine.enqueue(text, turnId);
     s.waiting.push(turnId);
     emit({ type: "session.prompt_result", sessionId: s.id, clientMessageId: turnId, result: { type: "turn", turnId } });
@@ -441,14 +615,7 @@ function connection(deps: CcProviderDeps, capabilities: readonly string[]): Prov
     switch (input.type) {
       case "catalog": {
         // A bot's folder (the app asks per workspace) names its proxy; else the daemon's default source.
-        let cwd: string | undefined;
-        if (input.cwd)
-          try {
-            resolveBot(input.cwd, deps.botsRoot, deps.optchatHome);
-            cwd = resolve(input.cwd);
-          } catch {}
-        // Asked for no bot, and the daemon has no proxy or Claude login of its own: the first bot with a proxy.
-        if (!cwd && !modelSource(undefined, process.env)) cwd = firstProxiedBot(deps.botsRoot);
+        const cwd = catalogCwd(input.cwd, deps);
         emit({ type: "catalog", requestId: input.requestId, catalog: { models: await models(cwd, process.env), modes: [], thinkingOptions: EFFORTS } });
         return;
       }
@@ -461,6 +628,24 @@ function connection(deps: CcProviderDeps, capabilities: readonly string[]): Prov
         emit({ type: "request.completed", requestId: input.requestId });
         // The TUI's next step runs on them (the inbox mod's turn.step asks /run), as a pi bot's setModel: no restart.
         if (owner.get(s.bot) === s.id) s.engine.setRun({ model: s.model, effort: s.effort });
+        return;
+      }
+      case "sessions":
+        emit({ type: "sessions", requestId: input.requestId, sessions: listCcSessions(input, deps.botsRoot, deps.optchatHome, deps.host.engines.keys()) });
+        return;
+      case "session.revert": {
+        // As pi: not while a turn runs (Paseo stops it first). The chat stops showing the message and what followed.
+        const s = sessions.get(input.sessionId)!;
+        try {
+          if (input.scope !== "conversation") throw new Error("Claude Code bots rewind the conversation only.");
+          if (s.current || s.waiting.length) throw new Error("Cannot rewind while a turn is running.");
+          s.hidden = addHidden(s.hidden, rewindRange(input.token, s.engine.memory.root));
+        } catch (error) {
+          emit({ type: "request.failed", requestId: input.requestId, error: { message: (error as Error).message } });
+          return;
+        }
+        emit({ type: "session.persistence", sessionId: s.id, persistence: ccPersistence(s.bot, s.hidden) });
+        emit({ type: "request.completed", requestId: input.requestId });
         return;
       }
       case "session.open":

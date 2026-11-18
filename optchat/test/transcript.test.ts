@@ -750,8 +750,14 @@ test("inputs with images are claimed too, including /skill: commands and Pi's im
       log.map(entry => entry.kind),
       ['user', 'talk', 'user', 'talk'],
     );
-    assert.match(log[0].text, /^<skill name="demo"[\s\S]*\ngo\n\[image attachment/);
-    assert.match(log[2].text, /^look at this\n\[image attachment/);
+    // The image is kept in the profile and named by path (as a Claude Code bot logs it), so it survives an engine switch.
+    const kept = readdirSync(join(dir, 'profiles', 'fixture', 'images'));
+    assert.equal(kept.length, 1);
+    const line = `[image: ${join(dir, 'profiles', 'fixture', 'images', kept[0])} (read the file to see it)]`;
+    assert.match(log[0].text, /^<skill name="demo"[\s\S]*\ngo\n\[image: /);
+    assert.ok(log[0].text.endsWith(`\n${line}`));
+    assert.equal(log[2].text, `look at this\n${line}`);
+    assert.deepEqual(readFileSync(join(dir, 'profiles', 'fixture', 'images', kept[0])), Buffer.from(PNG, 'base64'));
     assert.deepEqual(JSON.parse(readFileSync(join(dir, 'profiles', 'fixture', 'pending-inputs.json'), 'utf8')), []);
   } finally {
     if (session) {

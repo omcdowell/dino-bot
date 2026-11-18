@@ -11,9 +11,6 @@ export const PROVIDER_COMMAND_TEMPLATES: Record<
   string,
   Partial<Record<ProviderCommandId, string>>
 > = {
-  codex: {
-    resume: "codex resume {sessionId}",
-  },
   claude: {
     resume: "claude --resume {sessionId}",
   },
@@ -22,12 +19,6 @@ export const PROVIDER_COMMAND_TEMPLATES: Record<
   },
   pi: {
     resume: "pi --session {sessionId}",
-  },
-  omp: {
-    resume: "omp --session {sessionId}",
-  },
-  opencode: {
-    resume: "opencode --session {sessionId}",
   },
 };
 

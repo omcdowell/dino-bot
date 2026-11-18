@@ -74,12 +74,7 @@ const untranslatedLocalFallbacks = [
   "Unable to save desktop settings.",
 ] as const;
 
-const pullRequestPanelSources = [
-  "git/pull-request-panel/pane.tsx",
-  "git/pull-request-panel/data.ts",
-  "git/pull-request-panel/checks-section.tsx",
-  "components/sidebar/sidebar-status-list.tsx",
-] as const;
+const pullRequestPanelSources = ["git/pull-request-panel/data.ts"] as const;
 const untranslatedPullRequestPanelLabels = [
   "Activity",
   "No activity yet",
@@ -168,15 +163,6 @@ describe("translation resources", () => {
     expect(countMatchingEnglishStrings(zhCN)).toBeLessThan(maxFallbackStrings);
   });
 
-  it("localizes the pull request empty state in every supported language", () => {
-    for (const resource of [ar, es, fr, ja, ko, ptBR, ru, zhCN]) {
-      expect(resource.panels.pullRequest.emptyTitle).not.toBe(en.panels.pullRequest.emptyTitle);
-      expect(resource.panels.pullRequest.emptyDescription).not.toBe(
-        en.panels.pullRequest.emptyDescription,
-      );
-    }
-  });
-
   it("preserves interpolation placeholders in every language", () => {
     expect(findInterpolationMismatches(ar)).toEqual([]);
     expect(findInterpolationMismatches(es)).toEqual([]);
@@ -190,8 +176,6 @@ describe("translation resources", () => {
 
   it("keeps reported Spanish settings and scripts labels clean", () => {
     expect(es.workspace.scripts.title).toBe("Scripts");
-    expect(es.settings.general.terminalScrollback.label).toBe("Historial de terminal");
-    expect(es.settings.project.scripts.title).toBe("Scripts");
   });
 
   it("uses the Russian term for continuing a session in copied commands", () => {
@@ -229,7 +213,6 @@ describe("translation resources", () => {
     expect(fr.common.states.starting).toBe("Démarrage…");
     expect(fr.common.connectionStatus.connecting).toBe("Connexion…");
     expect(fr.workspace.git.pr.sections.checks).toBe("Vérifications");
-    expect(fr.sidebar.display.show.checks).toBe("Vérifications");
   });
 
   it("separates French interpolation placeholders from neighboring words", () => {
@@ -243,7 +226,7 @@ describe("translation resources", () => {
     expect(en.workspace.fileActions.addToChat).toBe("Add to chat");
   });
 
-  it("keeps pull request panel and sidebar status group labels translated", () => {
+  it("keeps pull request labels translated", () => {
     expect(findUntranslatedPullRequestPanelLabels()).toEqual([]);
     for (const resource of [ar, es, fr, ja, ko, ptBR, ru, zhCN]) {
       const pr = resource.workspace.git.pr;
@@ -263,9 +246,6 @@ describe("translation resources", () => {
       }
       expect(pr.thread.resolved).not.toBe(englishPr.thread.resolved);
       expect(pr.thread.outdated).not.toBe(englishPr.thread.outdated);
-      expect(resource.sidebar.statusGroupAccessibility).not.toBe(
-        en.sidebar.statusGroupAccessibility,
-      );
     }
   });
 
@@ -296,8 +276,6 @@ describe("translation resources", () => {
     expect(en.shell.commandCenter.workspaces).toBe("Workspaces");
     expect(en.shell.commandCenter.agents).toBe("Agents");
     expect(en.shell.commandCenter.newAgent).toBe("New agent");
-    expect(en.shell.commandCenter.addProject).toBe("Add project");
-    expect(en.shell.commandCenter.home).toBe("Home");
     expect(en.shell.commandCenter.modelGroupLabel).toBe("Model");
     expect(en.shell.commandCenter.modelSearchKeywords).toBe(
       "switch model change model set model select model",
@@ -331,7 +309,6 @@ describe("translation resources", () => {
     expect(en.agentStream.permission.proposedPlan).toBe("Proposed plan");
     expect(en.agentPanel.unavailable.selectedHost).toBe("Selected host");
     expect(en.agentPanel.states.notFound).toBe("Agent not found");
-    expect(en.panels.draft.newAgent).toBe("New Agent");
   });
 
   it("includes Settings expansion keys for the Batch 3A migration", () => {
@@ -344,7 +321,6 @@ describe("translation resources", () => {
     expect(en.settings.appearance.theme.title).toBe("Theme");
     expect(en.settings.appearance.fonts.interfaceFont).toBe("Interface font");
     expect(en.settings.shortcuts.actions.rebind).toBe("Rebind");
-    expect(en.settings.integrations.commandLine.title).toBe("Command line");
     expect(en.settings.notifications.playSound).toBe("Play sound");
     expect(en.settings.notifications.permission).toBe("Notification permission");
     expect(en.settings.notifications.sentTitle).toBe("Test notification sent");
@@ -359,10 +335,6 @@ describe("translation resources", () => {
     expect(en.settings.providers.title).toBe("Providers");
     expect(en.settings.providers.models.addModel).toBe("Add model");
     expect(en.settings.providers.diagnostic.title).toBe("Diagnostic");
-    expect(en.settings.project.worktree.title).toBe("Worktree lifecycle hooks");
-    expect(en.settings.project.scripts.actions.add).toBe("Add script");
-    expect(en.settings.project.metadata.title).toBe("Metadata generation");
-    expect(en.settings.project.actions.save).toBe("Save");
   });
 
   it("includes workspace and panel keys for the Batch 4A migration", () => {
@@ -381,9 +353,6 @@ describe("translation resources", () => {
     expect(en.workspace.browser.controls.enterUrl).toBe("Enter URL");
     expect(en.workspace.terminal.hostDisconnected).toBe("Host is not connected");
     expect(en.panels.file.directoryMissing).toBe("Workspace directory not found.");
-    expect(en.openProject.tiles.importSession.description).toBe(
-      "Open a Claude Code, Codex or other session you started in a terminal",
-    );
   });
 
   it("includes workspace Git and review keys for the Batch 4B migration", () => {
@@ -414,22 +383,9 @@ describe("translation resources", () => {
     expect(en.review.comment.placeholder).toBe("Leave a comment");
   });
 
-  it("includes sidebar and workspace creation keys for the Batch 4C migration", () => {
-    expect(en.sidebar.workspace.actions.copyPath).toBe("Copy path");
-    expect(en.sidebar.project.confirmations.removeTitle).toBe("Remove project?");
-    expect(en.sidebar.project.toasts.updateHostToRemove).toBe(
-      "Update the host to remove projects.",
-    );
-    expect(en.newWorkspace.title).toBe("New workspace");
-    expect(en.newWorkspace.refPicker.searchPlaceholder).toBe("Search branches and PRs");
-    expect(en.openProject.tiles.addProject.title).toBe("Add a project");
-  });
-
   it("includes provider selector and pairing keys for the Batch 4D migration", () => {
     expect(en.modelSelector.title).toBe("Select provider");
     expect(en.modelSelector.profiles).toBe("Profiles");
-    expect(en.providerCatalog.title).toBe("Add provider");
-    expect(en.providerCatalog.actions.installInstructions).toBe("Install instructions");
     expect(en.pairing.link.title).toBe("Paste pairing link");
     expect(en.pairing.connectionMethods.direct.title).toBe("Direct connection");
   });
@@ -448,7 +404,6 @@ describe("translation resources", () => {
     expect(en.rewind.actions.conversation).toBe("Rewind conversation");
     expect(en.rewind.warning).toBe("This action cannot be undone");
     expect(en.diffViewer.empty).toBe("No changes to display");
-    expect(en.serviceUrl.title).toBe("Open service URL");
   });
 
   it("includes keyboard shortcut help keys for the Batch 4G migration", () => {
@@ -463,9 +418,6 @@ describe("translation resources", () => {
   });
 
   it("includes sessions and agent list keys for the Batch 4H migration", () => {
-    expect(en.sessions.title).toBe("History");
-    expect(en.sessions.empty).toBe("No sessions yet");
-    expect(en.sessions.actions.loadMore).toBe("Load more");
     expect(en.agentList.fallbackTitle).toBe("New session");
     expect(en.agentList.dateSections.today).toBe("Today");
     expect(en.agentList.dateSections.older).toBe("Older");
@@ -528,28 +480,9 @@ describe("translation resources", () => {
     expect(en.sidebar.host.noHost).toBe("No host");
     expect(en.sidebar.host.switchTitle).toBe("Switch host");
     expect(en.sidebar.host.searchPlaceholder).toBe("Search hosts...");
-    expect(en.sidebar.actions.addProject).toBe("Add project");
     expect(en.sidebar.actions.hosts).toBe("Hosts");
     expect(en.sidebar.actions.settings).toBe("Settings");
     expect(en.sidebar.actions.closeSidebar).toBe("Close sidebar");
-    expect(en.sidebar.sections.sessions).toBe("History");
-    expect(en.sidebar.workspace.actions.newWorkspace).toBe("New workspace");
-    expect(en.sidebar.workspace.actions.createWorkspaceFor).toBe(
-      "Create a new workspace for {{projectName}}",
-    );
-    expect(en.sidebar.workspace.checks).toEqual({
-      passed: "Passed: {{count}}",
-      failed: "Failed: {{count}}",
-      warning: "Warnings: {{count}}",
-      actionRequired: "Action required: {{count}}",
-      manual: "Manual: {{count}}",
-      pending: "Pending: {{count}}",
-    });
-    expect(en.sidebar.project.empty.title).toBe("No projects yet");
-    expect(en.sidebar.project.empty.description).toBe("Add a project to get started");
-    expect(en.settings.projectList.hostLoadFailed).toBe(
-      "Couldn't load projects from host {{hostName}}: {{message}}",
-    );
   });
 
   it("includes picker, file pane, and tool detail keys for the Batch 4L migration", () => {
@@ -557,13 +490,6 @@ describe("translation resources", () => {
     expect(en.projectPicker.opening).toBe("Opening project...");
     expect(en.projectPicker.searching).toBe("Searching...");
     expect(en.projectPicker.empty).toBe("Start typing a path");
-    expect(en.branchSwitcher.currentBranch).toBe(
-      "Current branch: {{branchName}}. Press to switch branch.",
-    );
-    expect(en.branchSwitcher.placeholder).toBe("Switch branch...");
-    expect(en.branchSwitcher.searchPlaceholder).toBe("Filter branches...");
-    expect(en.branchSwitcher.empty).toBe("No branches found.");
-    expect(en.branchSwitcher.title).toBe("Switch branch");
     expect(en.panels.file.loading).toBe("Loading file...");
     expect(en.panels.file.noPreview).toBe("No preview available");
     expect(en.panels.file.binaryPreviewUnavailable).toBe("Binary preview unavailable");
@@ -604,14 +530,6 @@ describe("translation resources", () => {
     expect(en.workspace.tabs.explorerSidebar.files).toBe("Files");
     expect(en.workspace.tabs.actions.maximizePane).toBe("Maximize pane");
     expect(en.workspace.tabs.actions.restorePane).toBe("Restore pane");
-    expect(en.branchSwitcher.triggerTooltip).toBe("Switch workspace branch");
-    expect(en.branchSwitcher.uncommittedTitle).toBe("Uncommitted changes");
-    expect(en.branchSwitcher.uncommittedMessage).toBe(
-      "You have uncommitted changes. Stash them before switching branches?",
-    );
-    expect(en.branchSwitcher.stashAndSwitch).toBe("Stash & Switch");
-    expect(en.branchSwitcher.failedToStash).toBe("Failed to stash changes");
-    expect(en.branchSwitcher.failedToSwitch).toBe("Failed to switch branch");
     expect(en.workspaceSetup.errors.failedCreateWorktree).toBe("Failed to create worktree");
     expect(en.workspaceSetup.errors.failedOpenProject).toBe("Failed to open project");
     expect(en.workspaceSetup.errors.selectModel).toBe("Select a model");
@@ -644,11 +562,6 @@ describe("translation resources", () => {
       "All recent sessions are already imported.",
     );
     expect(en.importSession.empty.noProviderSessions).toBe("No {{provider}} sessions found.");
-    expect(en.sidebar.worktreeSetup.title).toBe("Set up worktree scripts");
-    expect(en.sidebar.worktreeSetup.description).toBe(
-      "Add setup commands so new worktrees can install dependencies and prepare themselves automatically.",
-    );
-    expect(en.sidebar.worktreeSetup.openProjectSettings).toBe("Open project settings");
   });
 
   it("includes remaining small utility chrome keys for the Batch 4O migration", () => {
@@ -717,7 +630,6 @@ describe("translation resources", () => {
     expect(en.desktop.updates.callout.failedTitle).toBe("Update failed");
     expect(en.desktop.updates.callout.availableTitle).toBe("Update available");
     expect(en.desktop.updates.callout.genericError).toBe("Something went wrong.");
-    expect(en.desktop.updates.callout.whatsNew).toBe("What's new");
     expect(en.desktop.updates.callout.installAndRestart).toBe("Install & restart");
     expect(en.desktop.updates.callout.installingDescription).toBe("Installing and restarting...");
     expect(en.desktop.updates.callout.versionReady).toBe("{{version}} is ready to install.");
@@ -776,7 +688,6 @@ describe("translation resources", () => {
       "Failed to fetch daemon status: {{message}}",
     );
     expect(en.desktop.daemon.loadFailed).toBe("Unable to load desktop daemon status.");
-    expect(en.desktop.integrations.cli.installFailed).toBe("Unable to install the Paseo CLI.");
   });
 
   it("includes remaining utility chrome keys for the Batch 4T migration", () => {
@@ -786,15 +697,12 @@ describe("translation resources", () => {
     expect(en.message.attachments.textAttachment).toBe("Text attachment");
     expect(en.composer.attachments.element).toBe("Element");
     expect(en.workspace.hoverCard.scriptsAccessibility).toBe("Workspace scripts");
-    expect(en.branchSwitcher.restoreStashTitle).toBe("Restore stashed changes?");
-    expect(en.branchSwitcher.stashRestored).toBe("Stashed changes restored");
     expect(en.agentAutocomplete.searchingWorkspace).toBe("Searching workspace...");
     expect(en.agentAutocomplete.noCommands).toBe("No commands found");
     expect(en.agentAutocomplete.failedToLoad).toBe("Failed to load");
     expect(en.loadOlderHistory.failed).toBe("Couldn't load older history");
     expect(en.agentControls.thinking.extraHigh).toBe("Extra high");
     expect(en.agentControls.model.unknown).toBe("Unknown model");
-    expect(en.panels.draft.creatingAgent).toBe("Creating agent");
   });
 
   it("includes shared default utility keys for the Batch 4U migration", () => {

@@ -54,6 +54,10 @@ more per archive with the default).
 2. `build/preflight-release.sh` runs, locally and on the exact tree to be pushed,
    the workflow's tests, a full `ci-build.sh linux-x64` under a 7 GB cap, the workflow rules and
    actionlint.
+   Then, on a computer with Claude Code installed and signed in (or a bot proxy) and herdr running, the live
+   Claude Code bot smoke test: `cd plugins/bots && npm run smoke:cc` (`scripts/cc-smoke.ts`; a throwaway bot in
+   its own herdr workspace on Haiku, about US$0.01; reply, tool, Stop, image, restart guard, compaction). Every
+   check must say PASS; it is not part of `npm test` because it spends real tokens.
 3. `build/publish-public.sh` (dry run by default) builds the one-commit public tree, checks it
    (`build/public-check.mjs`, `build/private-guard.sh`, gitleaks) and, with `--for-real`, pushes
    `main` (one commit, every folder); with `TAG=v<semver>` it also pushes the tag. The tag must be `v` plus

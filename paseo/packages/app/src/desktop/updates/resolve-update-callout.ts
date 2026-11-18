@@ -6,7 +6,7 @@ export type UpdateCalloutBody =
   | { kind: "installing" }
   | { kind: "error"; message: string };
 
-export type UpdateCalloutActionRole = "changelog" | "install" | "retry";
+export type UpdateCalloutActionRole = "install" | "retry";
 
 export interface UpdateCalloutActionDescriptor {
   role: UpdateCalloutActionRole;
@@ -71,9 +71,7 @@ export function resolveUpdateCalloutDescriptor(
     body = { kind: "available", versionLabel: formatVersionLabel(latestVersion) };
   }
 
-  const actions: UpdateCalloutActionDescriptor[] = [
-    { role: "changelog", label: i18n.t("desktop.updates.callout.whatsNew") },
-  ];
+  const actions: UpdateCalloutActionDescriptor[] = [];
   if (isError) {
     actions.push({ role: "retry", label: i18n.t("common.actions.retry"), variant: "primary" });
   } else {

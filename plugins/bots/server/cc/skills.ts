@@ -14,7 +14,7 @@
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 export interface CcSkill {
   name: string;
@@ -141,4 +141,22 @@ export function formatCcSkills(skills: readonly CcSkill[]): string {
 export function pluginSkillsDirFor(ccModsDir: string): string | undefined {
   const dir = resolve(ccModsDir, "..", "skills");
   return existsSync(dir) ? dir : undefined;
+}
+
+/**
+ * The message pi sends for `/skill:<name> [args]` (pi's AgentSession skill expansion, the same words): the SKILL.md
+ * body without its front matter in a <skill> block, then the arguments.
+ */
+export function skillPrompt(skill: CcSkill, args: string): string {
+  const body = readFileSync(skill.path, "utf8")
+    .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "")
+    .trim();
+  const block = `<skill name="${skill.name}" location="${skill.path}">\nReferences are relative to ${dirname(skill.path)}.\n\n${body}\n</skill>`;
+  return args.trim() ? `${block}\n\n${args.trim()}` : block;
+}
+
+/** The command a skill message was sent as (`/skill:<name> [args]`), for the chat; null for any other text. */
+export function skillCommandText(text: string): string | null {
+  const m = /^<skill name="([^"]+)" location="[^"]+">\n[\s\S]*?\n<\/skill>(?:\n\n([\s\S]+))?$/.exec(text.trim());
+  return m ? `/skill:${m[1]}${m[2]?.trim() ? ` ${m[2].trim()}` : ""}` : null;
 }

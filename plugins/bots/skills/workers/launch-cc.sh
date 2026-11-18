@@ -2,14 +2,14 @@
 # its own): starts the interactive Claude Code TUI in $PANE. One launch path for workers and bots.
 # In: NAME BRIEF CWD PANE TAB SESSION_ID MODEL, launch.sh's fail() and get(). Out: SESSION_FILE, MODEL, CCDIR.
 # Bots also set: CCDIR (their state folder), CC_PLUGIN_DIRS (colon-separated --plugin-dir list: the OptChat mods),
-# CC_EXTRA_ARGS (more claude flags), CC_WORKER_EFFORT, and CC_PLAN_LOGIN=1 (no ANTHROPIC_* from the pane's shell, so
+# CC_EXTRA_ARGS (more claude flags), CC_WORKER_EFFORT, CC_COMPACT_WINDOW=auto (no 200k cap), and CC_PLAN_LOGIN=1 (no ANTHROPIC_* from the pane's shell, so
 # the TUI runs on the Claude Code login and never on an API key or a gateway).
 #
 # Per worker, in <brief without .md>.cc/ (CCDIR):
 #   plugin/       a session-only plugin (--plugin-dir) whose skills/ are the worker shortlist (links to the
 #                 skill folders next to workers/) plus WORKER_SKILLS, as pi's --skill list
 #   settings.json --settings: the status line with the spend (cc-status.mjs; nothing blocks a tool call, the
-#                 bot stops the worker at its budget, as for pi), tool permissions (a worker runs unattended,
+#                 bot judges the work at its budget, as for pi), tool permissions (a worker runs unattended,
 #                 like pi), thinking summaries (showThinkingSummaries; CC_THINKING_SUMMARIES=0 off),
 #                 env: no auto-update, CLAUDE_CODE_TMPDIR=tmp/, a proxy (CC_WORKER_BASE_URL)
 #   budget        the budget in US$ (optional; shown in the status line); cost.json the spend so far
@@ -47,7 +47,7 @@ BUDGET=${WORKER_BUDGET_USD:-$(grep -oE 'US\$ ?[0-9]+(\.[0-9]+)?' "$BRIEF" | head
 printf '%s\n' "$BUDGET" >"$CCDIR/budget"
 
 node -e '
-const [dir, script, base, token] = process.argv.slice(1);
+const [dir, script, base, token, compact] = process.argv.slice(1);
 const home = require("os").homedir();
 const q = (s) => "\x27" + s.replace(/\x27/g, "\x27\\\x27\x27") + "\x27";
 const settings = {
@@ -63,6 +63,10 @@ const settings = {
   claudeMdExcludes: [home + "/CLAUDE.md", home + "/CLAUDE.local.md", home + "/.claude/**"],
   attribution: { commit: "", pr: "" },
   autoMemoryEnabled: false,
+  // Compact at 200k tokens as pi workers do (the default window for a 1M model is far larger);
+  // PI_WORKER_COMPACT_AT raises it for one launch (Claude Code accepts 100000 to 1000000). A bot
+  // (start-bot.sh: CC_COMPACT_WINDOW=auto) keeps the Claude Code default window, as a pi bot keeps the pi one.
+  ...(compact === "auto" ? {} : { autoCompactWindow: Number(compact) || 200000 }),
   // Thinking summaries from the API (Opus 5.x sends none by default: the transcript and the mods get empty
   // thinking blocks), so the DinoBot app can show what a bot thinks. CC_THINKING_SUMMARIES=0 turns it off.
   showThinkingSummaries: process.env.CC_THINKING_SUMMARIES !== "0",
@@ -89,7 +93,7 @@ const settings = {
 const fs = require("fs");
 fs.writeFileSync(dir + "/settings.json", JSON.stringify(settings, null, 2) + "\n", { mode: 0o600 });
 fs.chmodSync(dir + "/settings.json", 0o600);
-' "$CCDIR" "$HERE/cc-status.mjs" "${CC_WORKER_BASE_URL:-}" "${CC_WORKER_AUTH_TOKEN:-}" || fail "cannot write $CCDIR/settings.json"
+' "$CCDIR" "$HERE/cc-status.mjs" "${CC_WORKER_BASE_URL:-}" "${CC_WORKER_AUTH_TOKEN:-}" "${CC_COMPACT_WINDOW:-${PI_WORKER_COMPACT_AT:-}}" || fail "cannot write $CCDIR/settings.json"
 
 # Model: CC_WORKER_MODEL, else the worker model when it is a Claude one (anthropic/, claude-code/ or claude-…; :thinking).
 EFFORT=${CC_WORKER_EFFORT:-}

@@ -18,7 +18,7 @@ interface SpawnResult {
 }
 
 interface ProviderLaunchCase {
-  provider: "claude" | "codex" | "opencode" | "generic-acp" | "pi";
+  provider: "claude" | "codex" | "opencode" | "pi";
   binaryName: string;
   args: string[];
   shell?: boolean;
@@ -217,11 +217,6 @@ const providerLaunchCases: ProviderLaunchCase[] = [
     provider: "opencode",
     binaryName: "opencode",
     args: ["serve", "--port", "49271", "--config", JSON_ARG],
-  },
-  {
-    provider: "generic-acp",
-    binaryName: "generic-acp",
-    args: ["--mcp-config", JSON_ARG],
   },
   {
     provider: "pi",

@@ -4,17 +4,15 @@ import {
   normalizeWorkspaceTabTarget,
   workspaceTabTargetsEqual,
 } from "./identity";
+import type { WorkspaceTabTarget } from "./model";
 
-describe("New tab identity", () => {
-  it("stays outside deterministic target identity", () => {
-    const target = { kind: "new_tab" } as const;
-
-    expect(normalizeWorkspaceTabTarget(target)).toEqual(target);
-    expect(workspaceTabTargetsEqual(target, target)).toBe(false);
-    expect(() => buildDeterministicWorkspaceTabId(target)).toThrow(
-      "New tabs do not have deterministic target identities",
-    );
-  });
+describe("removed tab kinds", () => {
+  it.each(["draft", "terminal", "browser", "working_diff", "pull_request", "setup", "new_tab"])(
+    "drops a persisted %s tab",
+    (kind) => {
+      expect(normalizeWorkspaceTabTarget({ kind } as unknown as WorkspaceTabTarget)).toBeNull();
+    },
+  );
 });
 
 describe("provider subagent tab identity", () => {
@@ -56,44 +54,8 @@ describe("provider subagent tab identity", () => {
   });
 });
 
-describe("working diff tab identity", () => {
-  const target = {
-    kind: "working_diff" as const,
-    focusPath: "src/example.ts",
-    focusRequestId: 1,
-  };
-
-  it("normalizes file focus navigation", () => {
-    expect(
-      normalizeWorkspaceTabTarget({
-        ...target,
-        focusPath: " src\\example.ts ",
-      }),
-    ).toEqual(target);
-  });
-
-  it("treats focus as navigation state rather than tab identity", () => {
-    expect(workspaceTabTargetsEqual(target, target)).toBe(true);
-    expect(workspaceTabTargetsEqual(target, { ...target, focusPath: "src/other.ts" })).toBe(false);
-    expect(workspaceTabTargetsEqual(target, { ...target, focusRequestId: 2 })).toBe(false);
-    const workingDiffId = buildDeterministicWorkspaceTabId(target);
-    const otherFocusId = buildDeterministicWorkspaceTabId({
-      ...target,
-      focusPath: "src/other.ts",
-    });
-    const fileId = buildDeterministicWorkspaceTabId({
-      kind: "file",
-      path: target.focusPath,
-    });
-
-    expect(workingDiffId).toBe("working_diff");
-    expect(workingDiffId).toBe(otherFocusId);
-    expect(workingDiffId).not.toBe(fileId);
-  });
-});
-
 describe("workspace utility panel identity", () => {
-  it.each(["files", "pull_request"] as const)(
+  it.each(["files", "network_status"] as const)(
     "normalizes and deterministically keys %s",
     (kind) => {
       const target = { kind };
@@ -103,59 +65,6 @@ describe("workspace utility panel identity", () => {
       expect(workspaceTabTargetsEqual(target, target)).toBe(true);
     },
   );
-});
-
-describe("commit diff tab identity", () => {
-  it("keys a commit diff tab by its sha", () => {
-    expect(buildDeterministicWorkspaceTabId({ kind: "commit_diff", sha: "abc123" })).toBe(
-      "commit_diff_abc123",
-    );
-  });
-
-  it("does not collide a commit diff tab id with a file tab id", () => {
-    const diffId = buildDeterministicWorkspaceTabId({ kind: "commit_diff", sha: "abc123" });
-    const fileId = buildDeterministicWorkspaceTabId({
-      kind: "file",
-      path: "abc123",
-    });
-    expect(diffId).not.toBe(fileId);
-  });
-
-  it("treats two commit diff targets with the same sha as equal", () => {
-    expect(
-      workspaceTabTargetsEqual(
-        { kind: "commit_diff", sha: "abc123" },
-        { kind: "commit_diff", sha: "abc123" },
-      ),
-    ).toBe(true);
-  });
-
-  it("treats commit diff targets with different shas as unequal", () => {
-    expect(
-      workspaceTabTargetsEqual(
-        { kind: "commit_diff", sha: "abc123" },
-        { kind: "commit_diff", sha: "def456" },
-      ),
-    ).toBe(false);
-  });
-
-  it("normalizes a commit diff target", () => {
-    expect(
-      normalizeWorkspaceTabTarget({
-        kind: "commit_diff",
-        sha: "abc123",
-      }),
-    ).toEqual({ kind: "commit_diff", sha: "abc123" });
-  });
-
-  it("rejects a commit diff target with a blank sha", () => {
-    expect(
-      normalizeWorkspaceTabTarget({
-        kind: "commit_diff",
-        sha: "   ",
-      }),
-    ).toBeNull();
-  });
 });
 
 describe("plugin panel tab identity", () => {

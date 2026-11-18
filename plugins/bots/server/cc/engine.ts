@@ -11,28 +11,29 @@
  * (compactor-runner.ts), the host's pi answers it (pi-runner.ts: the pi CLI on the host's pi sign-in, any model pi has),
  * falling back to the TUI when pi fails. DinoBot never calls a model API itself.
  */
-import { execFile } from "node:child_process";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, chmodSync, renameSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
-import { bytes, cap, Memory, NODE, VIEW, type Compression, type Kind } from "pi-optchat/src/memory.ts";
-import { lockProfile } from "pi-optchat/src/lock.ts";
-import { task } from "pi-optchat/src/compaction-task.ts";
-import { viewBlocks } from "pi-optchat/src/cache.ts";
-import { compactorPrompt, sharedPrompt } from "pi-optchat/src/prompts.ts";
-import { readSettings } from "pi-optchat/src/settings.ts";
-import { applyRoomBlocks } from "pi-optchat/src/room/blocks.ts";
-import { botSection } from "pi-optchat/src/bot-prompt.ts";
-import { IMPORT_GUIDANCE } from "pi-optchat/src/import/guidance.ts";
-import { memoryDirectory } from "pi-optchat/src/import/active.ts";
-import { escalator } from "pi-optchat/src/escalation.ts";
-import { checkpoint } from "pi-optchat/src/checkpoint.ts";
-import { RunLog } from "pi-optchat/src/run-log.ts";
-import { escalateTo } from "pi-optchat/src/user.ts";
-import { CompactorError } from "pi-optchat/src/provider-error.ts";
-import { ccBotSkills, formatCcSkills } from "./skills";
+import { dirname, join } from "node:path";
+// The turn lifecycle pi-optchat's controller runs too (open, between turns, log, end, close): one module for both engines.
+import {
+  bytes,
+  cap,
+  compactorPrompt,
+  CompactorError,
+  NODE,
+  promptParts,
+  readSettings,
+  sendWith,
+  task,
+  Turns,
+  viewBlocks,
+  type Compression,
+  type Kind,
+  type Memory,
+} from "pi-optchat/src/turn.ts";
+import { ccBotSkills, formatCcSkills, type CcSkill } from "./skills";
 import { readSettings as readBotsSettings } from "../settings";
 import { parseRunner, resolveRunner, type CompactorRunner, type RunnerWhy } from "./compactor-runner";
 import { spawnPiRunner, type PiRunner } from "./pi-runner";
@@ -73,7 +74,7 @@ export type CcEvent =
   | { type: "step"; answer: string; partial?: boolean }
   /** A thinking block of a step, the whole of it so far (`block` names it: turn, step, block index), sent as it grows. */
   | { type: "thinking"; block: string; text: string }
-  /** images: what the tool returned as images (base64 or a data URL), for the app's chat image store. */
+  /** images: what the tool returned as images (base64 or a data URL), for the app's chat image store. While it runs, `output` is its output so far (a Bash command's, live). */
   | { type: "tool"; phase: "running" | "done"; id: string; name: string; input?: unknown; output?: string; isError?: boolean; images?: CcImage[] }
   /** reason: Claude Code's (`answer`, `aborted`, `refusal`, `error`); `detail`: the refusal's explanation or the error's text. */
   | { type: "complete"; aborted: boolean; reason: string | null; detail?: string }
@@ -250,41 +251,24 @@ export class CcEngine {
   private failures = 0;
   private blockedSince = 0;
   private lastWait = "";
-  /** The profile's git checkpoints (pi-optchat's checkpoint.ts), one after another. */
-  private checkpoints: Promise<void> = Promise.resolve();
   private readonly pumpTimer: ReturnType<typeof setInterval>;
 
   private constructor(
     readonly bot: string,
     readonly dir: string,
-    private readonly unlock: () => Promise<void>,
+    private readonly turns: Turns,
     private readonly opts: CcEngineOptions,
   ) {
     const warn = (s: string) => this.warn(s);
+    this.memory = turns.memory;
     this.pi = opts.pi ?? spawnPiRunner();
     this.loadSettings();
-    // As pi-optchat's controller opens it: the profile's active memory generation (an import's: active-memory.json), and
-    // refused lines escalated with bot-dm, sent from the bot's chat (its PASEO_AGENT_ID); none without one.
-    const env = () => this.opts.env ?? process.env;
-    const send = (file: string, args: string[]) =>
-      new Promise<void>((resolve, reject) => execFile(file, args, { env: env(), timeout: 30_000 }, (error) => (error ? reject(error) : resolve())));
-    this.memory = new Memory(
-      memoryDirectory(dir),
-      (input, signal) => this.compress(input, signal),
-      warn,
-      VIEW,
-      opts.parallel ?? 4,
-      10_000,
-      join(dir, "compactor-errors.jsonl"),
-      env().PASEO_AGENT_ID ? escalator(basename(dir), send, () => escalateTo(env())) : undefined,
-    );
     for (const e of this.memory.root) if (e.receipt) this.receipts.add(e.receipt);
     this.loadInbox();
     this.scan = setInterval(() => {
       if (!this.idle()) return;
       try {
-        this.roomBlocks();
-        this.memory.applyRequests();
+        this.received(() => this.turns.between());
       } catch (error) {
         warn(`cc ${bot}: ${(error as Error).message}`);
       }
@@ -294,14 +278,26 @@ export class CcEngine {
     (this.pumpTimer as { unref?: () => void }).unref?.();
   }
 
-  /** Takes the profile lock (a busy profile rejects with pi-optchat's ProfileBusyError) and loads its memory. */
+  /**
+   * Takes the profile lock (a busy profile rejects with pi-optchat's ProfileBusyError) and loads its memory, as
+   * pi-optchat's controller does (turn.ts): refused lines are escalated with bot-dm from the bot's chat (its
+   * PASEO_AGENT_ID), none without one.
+   */
   static async open(bot: string, dir: string, opts: CcEngineOptions = {}): Promise<CcEngine> {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const unlock = await lockProfile(dir, `DinoBot Claude Code bot ${bot} (pid ${process.pid})`);
+    let engine: CcEngine | undefined;
+    const env = () => opts.env ?? process.env;
+    const turns = await Turns.open(dir, `DinoBot Claude Code bot ${bot} (pid ${process.pid})`, () => ({
+      compress: (input, signal) => engine!.compress(input, signal),
+      warn: (s) => (engine ? engine.warn(s) : opts.warn?.(s)),
+      env,
+      send: sendWith(env),
+      parallel: opts.parallel ?? 4,
+    }));
     try {
-      return new CcEngine(bot, dir, unlock, opts);
+      return (engine = new CcEngine(bot, dir, turns, opts));
     } catch (error) {
-      await unlock();
+      await turns.close();
       throw error;
     }
   }
@@ -347,6 +343,19 @@ export class CcEngine {
 
   // ------------------------------------------------------------------ prompts
 
+  /** The bot's skills (skills.ts), as its prompt lists them; the app offers each as /skill:<name>. */
+  skills(): CcSkill[] {
+    const env = this.opts.env ?? process.env;
+    return ccBotSkills({
+      pluginSkillsDir: this.opts.skillsDir,
+      botDir: this.opts.botDir,
+      profileDir: this.dir,
+      optchatHome: dirname(dirname(this.dir)),
+      piAgentDir: env.PI_CODING_AGENT_DIR?.trim() || join(env.HOME || homedir(), ".pi", "agent"),
+      home: env.HOME || homedir(),
+    });
+  }
+
   /**
    * The turn's system prompt, as pi-optchat composes it for a bot: OptChat's rules, the skills (as pi lists them:
    * skills.ts), the host section, AGENTS.md (the profile's, last: it changes most often).
@@ -354,23 +363,8 @@ export class CcEngine {
   systemPrompt(): string {
     this.loadSettings();
     const env = this.opts.env ?? process.env;
-    let agents = "";
-    try {
-      agents = readFileSync(join(this.dir, "AGENTS.md"), "utf8").trim();
-    } catch {}
-    const skills = formatCcSkills(
-      ccBotSkills({
-        pluginSkillsDir: this.opts.skillsDir,
-        botDir: this.opts.botDir,
-        profileDir: this.dir,
-        optchatHome: dirname(dirname(this.dir)),
-        piAgentDir: env.PI_CODING_AGENT_DIR?.trim() || join(env.HOME || homedir(), ".pi", "agent"),
-        home: env.HOME || homedir(),
-      }),
-    );
-    const parts = [sharedPrompt(this.settings.previousExchange, env, false), skills, botSection(env), agents];
-    if (this.memory.hasImported()) parts.push(IMPORT_GUIDANCE);
-    return parts.filter(Boolean).join("\n\n");
+    const p = promptParts(this.dir, this.memory, this.settings.previousExchange, env, false);
+    return [p.custom, formatCcSkills(this.skills()), p.bot, p.instructions.trim()].filter(Boolean).join("\n\n");
   }
 
   // ------------------------------------------------------------------ compaction jobs
@@ -748,10 +742,12 @@ export class CcEngine {
     return this.turn.running;
   }
 
-  private roomBlocks() {
+  /** Runs `f` (room blocks going into memory) and keeps the receipts of what it appended. */
+  private received<T>(f: () => T): T {
     const before = this.memory.root.length;
-    applyRoomBlocks(this.memory, this.dir, (s) => this.warn(s));
+    const r = f();
     for (const e of this.memory.root.slice(before)) if (e.receipt) this.receipts.add(e.receipt);
+    return r;
   }
 
   // ------------------------------------------------------------------ the mods' calls
@@ -824,15 +820,20 @@ export class CcEngine {
             id: String(body.id ?? ""),
             name: String(body.name ?? ""),
             input: body.input ?? null,
-            ...(body.phase === "done" ? { output: String(body.output ?? ""), isError: body.isError === true, ...images(body.images) } : {}),
+            ...(body.phase === "done"
+              ? { output: String(body.output ?? ""), isError: body.isError === true, ...images(body.images) }
+              : typeof body.output === "string" && body.output
+                ? { output: body.output.slice(-64_000) }
+                : {}),
           });
         return ok({ ok: true });
       }
       case "POST /append": {
         const ids: number[] = [];
         this.loadSettings();
-        // The profile's Tool digest: the turn's calls, results and commentary go through pi-optchat's RunLog as one entry.
-        const digest = this.settings.toolDigest ? new RunLog(this.memory, true) : null;
+        // The profile's Tool digest: the turn's calls, results and commentary go through pi-optchat's run log as one entry.
+        const digest = this.settings.toolDigest;
+        if (digest) this.turns.start(true);
         const messages = ((body.messages ?? []) as AppendEntry[]).filter((m) => typeof m?.text === "string" && m.text.trim());
         for (let k = 0; k < messages.length; k++) {
           const m = messages[k]!;
@@ -840,8 +841,8 @@ export class CcEngine {
           const item = m.kind === "user" ? this.items.find((i) => i.state === "submitted" && i.text.trim() === m.text.trim()) : undefined;
           if (digest) {
             const before = this.memory.root.length;
-            k = digestWrite(digest, this.memory, messages, k, item?.id);
-            if (k === messages.length - 1) digest.end();
+            k = digestWrite(this.turns, messages, k, item?.id);
+            if (k === messages.length - 1) this.turns.flush();
             for (let i = before; i < this.memory.root.length; i++) ids.push(i);
           } else ids.push(this.memory.append(m.kind, m.kind === "echo" ? cap(m.text) : m.text, undefined, item?.id).i);
           if (item) {
@@ -851,8 +852,8 @@ export class CcEngine {
           }
         }
         this.turn.compactDue = false;
-        this.roomBlocks();
-        this.checkpoint();
+        // The turn is logged: room talk handed over during it goes in, and the profile is committed (turn.ts).
+        void this.received(() => this.turns.end());
         return ok({ ids, total: this.memory.root.length });
       }
       case "GET /view": {
@@ -929,11 +930,6 @@ export class CcEngine {
     return { status: 404, json: { error: "no route" } };
   }
 
-  /** A git commit of the profile after each turn's log, as pi-optchat makes after each run; not waited for. */
-  private checkpoint() {
-    this.checkpoints = this.checkpoints.then(() => checkpoint(this.dir)).catch((error) => this.warn(`cc ${this.bot}: local checkpoint failed: ${(error as Error).message}`));
-  }
-
   /** Where summaries run now: the runner, why, the model; while pi rests after a failure, until when. */
   compactorStatus() {
     const plan = this.lastPlan ?? compactorPlan(this.dir, this.hostRunner());
@@ -959,10 +955,7 @@ export class CcEngine {
     clearInterval(this.scan);
     clearInterval(this.pumpTimer);
     for (const j of [...this.jobs.values()]) j.done({ error: "engine closed", status: 503 });
-    await this.memory.close().catch(() => {});
-    this.checkpoint();
-    await this.checkpoints;
-    await this.unlock().catch(() => {});
+    await this.turns.close().catch(() => {});
   }
 }
 
@@ -1067,7 +1060,7 @@ interface AppendEntry {
  * assistant message); returns the index of the last entry taken. An echo with no call (a background task's notice) is
  * logged as it is.
  */
-function digestWrite(log: RunLog, memory: Memory, messages: AppendEntry[], k: number, receipt?: string): number {
+function digestWrite(log: Turns, messages: AppendEntry[], k: number, receipt?: string): number {
   const m = messages[k]!;
   const timestamp = Date.now();
   const assistant = (content: unknown[]) => ({ role: "assistant", content, stopReason: content.some((c: any) => c.type === "toolCall") ? "toolUse" : "stop", timestamp }) as never;
@@ -1081,8 +1074,8 @@ function digestWrite(log: RunLog, memory: Memory, messages: AppendEntry[], k: nu
   } else if (m.kind === "echo" && typeof m.call === "string")
     log.write({ role: "toolResult", toolCallId: m.call, toolName: m.name ?? "", content: [{ type: "text", text: m.result ?? m.text }], isError: m.isError === true, timestamp } as never);
   else {
-    log.end();
-    memory.append(m.kind, m.kind === "echo" ? cap(m.text) : m.text);
+    log.flush();
+    log.memory.append(m.kind, m.kind === "echo" ? cap(m.text) : m.text);
   }
   return k;
 }

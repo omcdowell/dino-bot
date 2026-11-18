@@ -29,18 +29,10 @@ import {
   Info,
   Bell,
   Shield,
-  Puzzle,
   Plus,
-  FolderGit2,
-  SquareTerminal,
-  Code2,
   Smartphone,
-  Sparkles,
   Blocks,
-  Globe,
-  PanelLeft,
   MessageSquare,
-  ChevronRight,
 } from "lucide-react-native";
 import { DropdownTrigger } from "@/components/ui/dropdown-trigger";
 import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
@@ -50,9 +42,7 @@ import { HostStatusDot } from "@/components/host-status-dot";
 import { SettingsSection } from "@/components/settings/headings/settings-section";
 import { AppearanceSection } from "@/screens/settings/appearance/appearance-section";
 import { OpenLocationSection } from "@/screens/settings/open-location/open-location-section";
-import { TerminalSection } from "@/screens/settings/terminal/terminal-section";
 import { ChatSection } from "@/screens/settings/chat/chat-section";
-import { SidebarNavSection } from "@/screens/settings/sidebar/sidebar-nav-section";
 import { SendingSection } from "@/screens/settings/general/sending-section";
 import { MeteredNetworkSection } from "@/screens/settings/general/metered-network-section";
 import {
@@ -75,10 +65,8 @@ import { BackHeader } from "@/components/headers/back-header";
 import { PageLayout } from "@/components/page-layout";
 import { AddHostMethodModal } from "@/components/add-host-method-modal";
 import { AddHostModal } from "@/components/add-host-modal";
-import { AddRemoteSshHostModal } from "@/components/add-remote-ssh-host-modal";
 import { PairLinkModal } from "@/components/pair-link-modal";
 import { KeyboardShortcutsSection } from "@/screens/settings/keyboard-shortcuts-section";
-import { EditorSection } from "@/screens/settings/editor-section";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { CommunityLinks } from "@/components/community-links";
@@ -86,8 +74,6 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { DesktopPermissionsSection } from "@/desktop/components/desktop-permissions-section";
 import { DesktopNotificationsSection } from "@/desktop/components/desktop-notifications-section";
-import { BrowserDataSection } from "@/desktop/browser/settings/browser-data-section";
-import { IntegrationsSection } from "@/desktop/components/integrations-section";
 import { isElectronRuntime } from "@/desktop/host";
 import { useDesktopAppUpdater } from "@/desktop/updates/use-desktop-app-updater";
 import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
@@ -98,7 +84,6 @@ import {
   resolveNativeBuildNumber,
 } from "@/utils/app-version";
 import { formatAppVersionLabel } from "@/utils/app-version-label";
-import { openChangelog } from "@/changelog";
 import { RELEASE_POLICY } from "@/constants/flavour";
 import { useAppDiagnosticStore } from "@/diagnostics/store";
 import { settingsStyles } from "@/styles/settings";
@@ -119,15 +104,10 @@ import {
   HostSettingsPage,
   HostProvidersPage,
   HostUsagePage,
-  HostWorkspacesPage,
-  HostTerminalsPage,
 } from "@/screens/settings/host-page";
 import { PluginSettingsContent } from "@/plugins/settings";
 import { useInstalledPlugins } from "@/plugins/registry";
 import { HostPluginsPage } from "@/screens/settings/plugins-page";
-import { MetadataGenerationPage } from "@/screens/settings/metadata-generation-page";
-import ProjectsScreen from "@/screens/projects-screen";
-import ProjectSettingsScreen from "@/screens/project-settings-screen";
 import { SETTINGS_DESKTOP_SIDEBAR_WIDTH, useIsCompactFormFactor } from "@/constants/layout";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import {
@@ -142,7 +122,7 @@ import {
 } from "@/utils/host-routes";
 import { useLastWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useReturnFromSettings, type SettingsView } from "@/navigation/settings-navigation";
-import { isNative, isWeb } from "@/constants/platform";
+import { isNative } from "@/constants/platform";
 
 // ---------------------------------------------------------------------------
 // View model
@@ -153,9 +133,6 @@ interface SidebarSectionItem {
   labelKey: string;
   icon: ComponentType<{ size: number; color: string; strokeWidth?: number }>;
   desktopOnly?: boolean;
-  webOnly?: boolean;
-  /** Hidden unless the release policy allows it (public flavour drops the `paseo` CLI installer). */
-  policyGate?: "desktopCliInstall";
   /** The page body, for pages that need nothing from the settings screen. */
   Content?: ComponentType;
 }
@@ -168,47 +145,13 @@ const SIDEBAR_SECTION_ITEMS: SidebarSectionItem[] = [
     icon: Palette,
     Content: AppearanceSection,
   },
-  {
-    id: "sidebar",
-    labelKey: "settings.sections.sidebar",
-    icon: PanelLeft,
-    Content: SidebarNavSection,
-  },
   { id: "chat", labelKey: "settings.sections.chat", icon: MessageSquare, Content: ChatSection },
-  {
-    id: "terminal",
-    labelKey: "settings.sections.terminal",
-    icon: SquareTerminal,
-    Content: TerminalSection,
-  },
-  {
-    id: "browser",
-    labelKey: "settings.sections.browser",
-    icon: Globe,
-    desktopOnly: true,
-    Content: BrowserDataSection,
-  },
-  {
-    id: "editor",
-    labelKey: "settings.sections.editor",
-    icon: Code2,
-    webOnly: true,
-    Content: EditorSection,
-  },
   {
     id: "shortcuts",
     labelKey: "settings.sections.shortcuts",
     icon: Keyboard,
     desktopOnly: true,
     Content: KeyboardShortcutsSection,
-  },
-  {
-    id: "integrations",
-    labelKey: "settings.sections.integrations",
-    icon: Puzzle,
-    desktopOnly: true,
-    policyGate: "desktopCliInstall",
-    Content: IntegrationsSection,
   },
   {
     id: "notifications",
@@ -229,11 +172,7 @@ const SIDEBAR_SECTION_ITEMS: SidebarSectionItem[] = [
 ];
 
 function isSectionAvailable(item: SidebarSectionItem, isDesktopApp: boolean): boolean {
-  return (
-    (!item.desktopOnly || isDesktopApp) &&
-    (!item.webOnly || isWeb) &&
-    (!item.policyGate || RELEASE_POLICY[item.policyGate])
-  );
+  return !item.desktopOnly || isDesktopApp;
 }
 
 interface HostSectionItem {
@@ -244,15 +183,11 @@ interface HostSectionItem {
 
 const HOST_SECTION_ITEMS: HostSectionItem[] = [
   { id: "host", labelKey: "settings.hostSections.host", icon: Server },
-  { id: "projects", labelKey: "settings.hostSections.projects", icon: FolderGit2 },
   { id: "connections", labelKey: "settings.hostSections.connections", icon: Network },
   { id: "pair-device", labelKey: "openProject.tiles.pairDevice.title", icon: Smartphone },
   { id: "agents", labelKey: "settings.hostSections.agents", icon: Bot },
-  { id: "metadata", labelKey: "settings.hostSections.metadata", icon: Sparkles },
-  { id: "workspaces", labelKey: "settings.hostSections.workspaces", icon: FolderGit2 },
   { id: "providers", labelKey: "settings.hostSections.providers", icon: Boxes },
   { id: "usage", labelKey: "settings.hostSections.usage", icon: Gauge },
-  { id: "terminals", labelKey: "settings.hostSections.terminals", icon: SquareTerminal },
   { id: "plugins", labelKey: "settings.hostSections.plugins", icon: Blocks },
 ];
 
@@ -261,24 +196,16 @@ function renderHostSettingsContent(
   onHostRemoved: () => void,
 ): ReactNode {
   switch (view.section) {
-    case "projects":
-      return <ProjectsScreen serverId={view.serverId} />;
     case "connections":
       return <HostConnectionsPage serverId={view.serverId} />;
     case "pair-device":
       return <HostPairDevicePage serverId={view.serverId} />;
     case "agents":
       return <HostAgentsPage serverId={view.serverId} />;
-    case "metadata":
-      return <MetadataGenerationPage serverId={view.serverId} />;
-    case "workspaces":
-      return <HostWorkspacesPage serverId={view.serverId} />;
     case "providers":
       return <HostProvidersPage serverId={view.serverId} />;
     case "usage":
       return <HostUsagePage serverId={view.serverId} />;
-    case "terminals":
-      return <HostTerminalsPage serverId={view.serverId} />;
     case "plugins":
       return <HostPluginsPage serverId={view.serverId} />;
     case "host":
@@ -479,7 +406,6 @@ function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSection
             </View>
             <Text style={styles.aboutValue}>{appVersionText}</Text>
           </View>
-          {RELEASE_POLICY.upstreamChangelog ? <WhatsNewRow /> : null}
           <LicencesRow />
           {isDesktopApp && RELEASE_POLICY.desktopAppUpdates ? <DesktopAppUpdateRow /> : null}
         </View>
@@ -489,33 +415,6 @@ function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSection
         <CommunityLinks />
       </View>
     </>
-  );
-}
-
-function WhatsNewRow() {
-  const { t } = useTranslation();
-  const { theme } = useUnistyles();
-
-  return (
-    <Pressable
-      style={[settingsStyles.row, settingsStyles.rowBorder]}
-      onPress={openChangelog}
-      accessibilityRole="button"
-      testID="settings-whats-new"
-    >
-      {({ hovered }: PressableStateCallbackType & { hovered?: boolean }) => (
-        <>
-          <View style={settingsStyles.rowContent}>
-            <Text style={settingsStyles.rowTitle}>{t("changelog.title")}</Text>
-            <Text style={settingsStyles.rowHint}>{t("settings.about.whatsNewHint")}</Text>
-          </View>
-          <ChevronRight
-            size={theme.iconSize.sm}
-            color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
-          />
-        </>
-      )}
-    </Pressable>
   );
 }
 
@@ -976,7 +875,6 @@ function SettingsSidebar({
   const selectedSectionId = view.kind === "section" ? view.section : null;
   let selectedHostSection: HostSectionSlug | null = null;
   if (view.kind === "host") selectedHostSection = view.section;
-  if (view.kind === "project") selectedHostSection = "projects";
   if (view.kind === "plugin") selectedHostSection = "plugins";
 
   const sidebarBody = (
@@ -1106,7 +1004,6 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   const { settings, isLoading: settingsLoading, updateSettings } = useAppSettings();
   const [isAddHostMethodVisible, setIsAddHostMethodVisible] = useState(false);
   const [isDirectHostVisible, setIsDirectHostVisible] = useState(false);
-  const [isRemoteSshVisible, setIsRemoteSshVisible] = useState(false);
   const [isPasteLinkVisible, setIsPasteLinkVisible] = useState(false);
   const [isPlaybackTestRunning, setIsPlaybackTestRunning] = useState(false);
   const [playbackTestResult, setPlaybackTestResult] = useState<string | null>(null);
@@ -1124,9 +1021,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   const sortedHosts = useSortedHosts(hosts, localServerId);
   const lastWorkspaceSelection = useLastWorkspaceSelection();
   const routedSettingsHostServerId =
-    view.kind === "host" || view.kind === "project" || view.kind === "plugin"
-      ? view.serverId
-      : null;
+    view.kind === "host" || view.kind === "plugin" ? view.serverId : null;
   const [selectedSettingsHostServerId, setSelectedSettingsHostServerId] = useState<string | null>(
     routedSettingsHostServerId ?? lastWorkspaceSelection?.serverId ?? null,
   );
@@ -1141,8 +1036,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   // The host the four sections scope to: the host on the active view, otherwise
   // the picker choice, otherwise the connected local daemon, otherwise the first host.
   const activeHostServerId = useMemo(() => {
-    if (view.kind === "host" || view.kind === "project" || view.kind === "plugin")
-      return view.serverId;
+    if (view.kind === "host" || view.kind === "plugin") return view.serverId;
     return resolveActiveHostServerId({
       selectedServerId: selectedSettingsHostServerId,
       localServerId,
@@ -1197,13 +1091,11 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   const closeAddConnectionFlow = useCallback(() => {
     setIsAddHostMethodVisible(false);
     setIsDirectHostVisible(false);
-    setIsRemoteSshVisible(false);
     setIsPasteLinkVisible(false);
   }, []);
 
   const goBackToAddConnectionMethods = useCallback(() => {
     setIsDirectHostVisible(false);
-    setIsRemoteSshVisible(false);
     setIsPasteLinkVisible(false);
     setIsAddHostMethodVisible(true);
   }, []);
@@ -1223,11 +1115,6 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   const handleSelectDirectConnection = useCallback(() => {
     setIsAddHostMethodVisible(false);
     setIsDirectHostVisible(true);
-  }, []);
-
-  const handleSelectRemoteSsh = useCallback(() => {
-    setIsAddHostMethodVisible(false);
-    setIsRemoteSshVisible(true);
   }, []);
 
   const handleSelectPasteLink = useCallback(() => {
@@ -1264,15 +1151,6 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   const handleSelectHost = useCallback(
     (serverId: string) => {
       setSelectedSettingsHostServerId(serverId);
-      if (view.kind === "project") {
-        const target = buildSettingsHostSectionRoute(serverId, "projects");
-        if (isCompactLayout) {
-          router.push(target);
-        } else {
-          router.replace(target);
-        }
-        return;
-      }
       if (view.kind !== "host") {
         return;
       }
@@ -1344,9 +1222,6 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
       const item = SIDEBAR_SECTION_ITEMS.find((s) => s.id === view.section);
       return item ? t(item.labelKey) : undefined;
     }
-    if (view.kind === "project") {
-      return t("settings.projects");
-    }
     return undefined;
   })();
 
@@ -1363,16 +1238,6 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
       );
     if (view.kind === "host") {
       return renderHostSettingsContent(view, handleHostRemoved);
-    }
-    if (view.kind === "project") {
-      return (
-        <ProjectSettingsScreen
-          serverId={view.serverId}
-          projectId={view.projectId}
-          onBackToProjects={handleBackFromDetail}
-          showBackToProjects={!isCompactLayout}
-        />
-      );
     }
     if (view.kind === "section") {
       const item = SIDEBAR_SECTION_ITEMS.find((candidate) => candidate.id === view.section);
@@ -1427,18 +1292,11 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
         visible={isAddHostMethodVisible}
         onClose={closeAddConnectionFlow}
         onDirectConnection={handleSelectDirectConnection}
-        onRemoteSsh={handleSelectRemoteSsh}
         onPasteLink={handleSelectPasteLink}
         onScanQr={handleScanQr}
       />
       <AddHostModal
         visible={isDirectHostVisible}
-        onClose={closeAddConnectionFlow}
-        onCancel={goBackToAddConnectionMethods}
-        onSaved={handleHostAdded}
-      />
-      <AddRemoteSshHostModal
-        visible={isRemoteSshVisible}
         onClose={closeAddConnectionFlow}
         onCancel={goBackToAddConnectionMethods}
         onSaved={handleHostAdded}

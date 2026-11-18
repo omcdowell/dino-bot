@@ -30,9 +30,10 @@ describe("offer", () => {
     const custom = desktopPairLines({ bin: "/opt/db/bin", home: "/home/sam" }, { product: "DinoBot", productId: "dinobot" });
     assert.equal(custom[1], "  /opt/db/bin/dinobot pair --link");
   });
-  it("offers the tailnet only: MagicDNS name, then the tailnet IP (no .local, LAN or localhost)", () => {
+  it("offers one address: the tailnet IP (no MagicDNS name, .local, LAN or localhost)", () => {
     const eps = offerEndpoints({ port: 6767, tailscale: { running: true, dnsName: "box.tail1.ts.net", ip: "100.64.0.7" }, hostname: "box", lanIp: "192.168.1.20" });
-    assert.deepEqual(eps, ["box.tail1.ts.net:6767", "100.64.0.7:6767"]);
+    assert.deepEqual(eps, ["100.64.0.7:6767"]);
+    assert.deepEqual(offerEndpoints({ port: 6767, tailscale: { running: true, dnsName: "box.tail1.ts.net", ip: null } }), []);
   });
   it("offers nothing when Tailscale is not running", () => {
     assert.deepEqual(offerEndpoints({ port: 1, tailscale: { running: false, dnsName: "x", ip: "100.64.0.1" } }), []);

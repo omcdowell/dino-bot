@@ -27,10 +27,7 @@ export function RootRouter({ context: routes }: Pick<ComponentProps<typeof ExpoR
           <RootErrorBoundary key={generation} onReload={reload}>
             <Head.Provider>
               {/* Recreate the router at a safe destination before a failed route can mount. */}
-              <ExpoRoot
-                context={routes}
-                location={generation === 0 ? undefined : "/open-project"}
-              />
+              <ExpoRoot context={routes} location={generation === 0 ? undefined : "/settings"} />
             </Head.Provider>
           </RootErrorBoundary>
         </SafeAreaProvider>

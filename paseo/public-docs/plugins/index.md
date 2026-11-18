@@ -305,7 +305,7 @@ log.
 ## Next
 
 - [Publish a plugin](/docs/plugins/publishing): share through npm, a private registry, or Git.
-- [Build a provider plugin](/docs/plugins/providers): connect an agent directly or through ACP,
+- [Build a provider plugin](/docs/plugins/providers): connect an agent directly,
   render provider-owned timeline items, test it, and publish it.
 - [Plugin reference](/docs/plugins/reference): every contribution type, its fields, the runtime
   modules, hosts, and the CLI.

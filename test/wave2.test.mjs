@@ -38,7 +38,7 @@ describe("product names (one place)", () => {
     assert.equal(PRODUCT, "DinoBot");
     assert.equal(PRODUCT_ID, p.id);
     assert.match(VERSION, /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
-    assert.equal(VERSION, "0.1.14");
+    assert.equal(VERSION, "0.1.15");
     // Self-builders sign the app with their own Apple account: the id is a build setting (5 Nov).
     assert.equal(p.bundleId, undefined);
     assert.doesNotMatch(readFileSync(join(HERE, "lib", "product.json"), "utf8"), /com\.dinobot\./);
@@ -146,10 +146,10 @@ describe("second person on one Mac: own tailscaled (R4)", () => {
   // Status of a userspace tailscaled on its own tailnet: an address that is on no local interface.
   const USERSPACE = { running: true, dnsName: "second-mac.tail9.ts.net", ip: "100.64.0.21" };
   const MAC_NETS = { lo0: [{ address: "127.0.0.1" }], en0: [{ address: "192.168.1.20" }], utun4: [{ address: "100.64.0.9" }] };
-  it("tailnet address not on this computer: listen and probe on 127.0.0.1, QR keeps the tailnet name and IP", () => {
+  it("tailnet address not on this computer: listen and probe on 127.0.0.1, QR keeps the tailnet IP only", () => {
     assert.deepEqual(listenPlan({ tailscale: USERSPACE, port: 6747, nets: MAC_NETS }), { listen: "127.0.0.1:6747", probeHost: "127.0.0.1", userspace: true });
     assert.equal(listenHost({ tailscale: USERSPACE, nets: MAC_NETS }), "127.0.0.1");
-    assert.deepEqual(offerEndpoints({ port: 6747, tailscale: USERSPACE }), ["second-mac.tail9.ts.net:6747", "100.64.0.21:6747"]);
+    assert.deepEqual(offerEndpoints({ port: 6747, tailscale: USERSPACE }), ["100.64.0.21:6747"]);
   });
   it("default install unchanged: a local tailnet address (system Tailscale) is listened on directly", () => {
     const sys = { ...USERSPACE, ip: "100.64.0.9" };

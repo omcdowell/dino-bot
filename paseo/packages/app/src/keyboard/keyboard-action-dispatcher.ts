@@ -1,6 +1,6 @@
 export type KeyboardActionScope = "global" | "message-input" | "sidebar" | "workspace";
 
-export type WorkspacePanelTarget = "changes" | "files" | "pull-request";
+export type WorkspacePanelTarget = "files";
 export type WorkspacePanelPlacement = "supporting" | "side-pane" | "focused-pane";
 
 export type KeyboardActionId =
@@ -13,11 +13,6 @@ export type KeyboardActionId =
   | "message-input.voice-toggle"
   | "message-input.voice-mute-toggle"
   | "message-input.mode-cycle"
-  | "workspace.agent.new"
-  | "workspace.tab.menu.open"
-  | "workspace.tab.target.agent"
-  | "workspace.tab.target.browser"
-  | "workspace.tab.target.changes"
   | "workspace.tab.target.files"
   | "workspace.tab.close-current"
   | "workspace.tab.navigate-index"
@@ -43,18 +38,12 @@ export type KeyboardActionId =
   | "workspace.pane.move-tab.down"
   | "workspace.pane.close"
   | "workspace.focus.toggle"
-  | "workspace.terminal.new"
-  | "workspace.browser.new"
   | "sidebar.toggle.right"
   | "sidebar.toggle.both"
-  | "workspace.new"
-  | "workspace.project.pick"
-  | "worktree.new"
   | "workspace.archive"
   | "workspace.pin"
   // Command-center only: no keybind, so these are absent from route-shortcut.ts.
-  | "workspace.rename"
-  | "workspace.setup.show";
+  | "workspace.rename";
 
 export type KeyboardActionDefinition =
   | { id: "agent.interrupt"; scope: KeyboardActionScope }
@@ -66,11 +55,6 @@ export type KeyboardActionDefinition =
   | { id: "message-input.voice-toggle"; scope: KeyboardActionScope }
   | { id: "message-input.voice-mute-toggle"; scope: KeyboardActionScope }
   | { id: "message-input.mode-cycle"; scope: KeyboardActionScope }
-  | { id: "workspace.agent.new"; scope: KeyboardActionScope }
-  | { id: "workspace.tab.menu.open"; scope: KeyboardActionScope }
-  | { id: "workspace.tab.target.agent"; scope: KeyboardActionScope }
-  | { id: "workspace.tab.target.browser"; scope: KeyboardActionScope }
-  | { id: "workspace.tab.target.changes"; scope: KeyboardActionScope }
   | { id: "workspace.tab.target.files"; scope: KeyboardActionScope }
   | { id: "workspace.tab.close-current"; scope: KeyboardActionScope }
   | { id: "workspace.tab.navigate-index"; scope: KeyboardActionScope; index: number }
@@ -101,17 +85,11 @@ export type KeyboardActionDefinition =
   | { id: "workspace.pane.move-tab.down"; scope: KeyboardActionScope }
   | { id: "workspace.pane.close"; scope: KeyboardActionScope }
   | { id: "workspace.focus.toggle"; scope: KeyboardActionScope }
-  | { id: "workspace.terminal.new"; scope: KeyboardActionScope }
-  | { id: "workspace.browser.new"; scope: KeyboardActionScope }
   | { id: "sidebar.toggle.right"; scope: KeyboardActionScope }
   | { id: "sidebar.toggle.both"; scope: KeyboardActionScope }
-  | { id: "workspace.new"; scope: KeyboardActionScope }
-  | { id: "workspace.project.pick"; scope: KeyboardActionScope }
-  | { id: "worktree.new"; scope: KeyboardActionScope }
   | { id: "workspace.archive"; scope: KeyboardActionScope }
   | { id: "workspace.pin"; scope: KeyboardActionScope }
-  | { id: "workspace.rename"; scope: KeyboardActionScope }
-  | { id: "workspace.setup.show"; scope: KeyboardActionScope };
+  | { id: "workspace.rename"; scope: KeyboardActionScope };
 
 export interface KeyboardActionHandler {
   handlerId: string;

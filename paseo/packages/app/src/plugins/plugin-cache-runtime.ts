@@ -88,7 +88,9 @@ async function fetchCatalog(
   client: DaemonClient,
   cache: Pick<PluginCache, "knownBundles" | "resolve">,
 ): Promise<{ catalog: CatalogPlugin[]; fromCache: string[] }> {
-  const answer = await client.getPluginCatalog({ knownBundles: cache.knownBundles(serverId) });
+  const answer = await client.getPluginCatalog({
+    knownBundles: cache.knownBundles(serverId),
+  });
   const resolved = cache.resolve(serverId, answer);
   if (resolved.missing.length === 0) {
     const fromCache = answer
@@ -136,6 +138,8 @@ export async function syncLiveCatalog(input: {
       replacePluginId: input.replacePluginId,
       client,
       audio: input.audio,
+      // A plugin back after missing from the catalog when the app started starts from its data.
+      queries: cache.parkedQueries(serverId),
     });
   install();
   const failed = fromCache.filter((id) => registry.getEvaluationError(serverId, id) !== undefined);

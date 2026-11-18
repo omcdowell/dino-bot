@@ -1,6 +1,6 @@
 ---
 title: Build a provider plugin
-description: Add a coding agent to Paseo directly or adapt an ACP agent.
+description: Add a coding agent to Paseo directly.
 nav: Provider plugins
 order: 46
 category: Plugins
@@ -17,13 +17,11 @@ Choose one implementation path:
 
 | Agent                                                             | Path                                                                         |
 | ----------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| It already implements ACP                                         | Register it with `runAcpProvider()` and add only narrow vendor transformers. |
 | It has a TypeScript SDK, JSON-RPC API, or custom process protocol | Implement `ProviderRegistration` directly.                                   |
 
 The examples are:
 
 - [`provider-direct`](https://github.com/getpaseo/paseo/tree/main/plugin-examples/provider-direct): sessions, settings, prompts, persistence, child sessions, and a provider-owned timeline renderer;
-- [`provider-acp-transformer`](https://github.com/getpaseo/paseo/tree/main/plugin-examples/provider-acp-transformer): an ACP command template with a Zod-validated vendor edit transformer. Replace `example-acp --stdio` with an installed ACP agent before loading it;
 - [`inline-thinking`](https://github.com/getpaseo/paseo/tree/main/plugin-examples/inline-thinking): a renderer-only plugin that does not implement a provider.
 
 ## Register a direct provider
@@ -355,61 +353,6 @@ export default function contribute(client: PluginClientContext) {
 
 The same renderer can display items emitted by a provider, a client timeline transformer, or a
 daemon timeline append. A renderer does not require a provider implementation.
-
-## Adapt an ACP agent
-
-Use the ACP shim when the agent already speaks ACP:
-
-```ts
-import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { runAcpProvider } from "@getpaseo/plugin/server/acp";
-
-export default function contribute(server: PluginServerContext) {
-  server.registerProvider(
-    runAcpProvider({
-      id: "vendor-agent",
-      label: "Vendor agent",
-      icon: "icon.svg",
-      command: ["vendor-agent", "acp"],
-    }),
-  );
-  return () => {};
-}
-```
-
-The shim owns the ACP process, capability mapping, session lifecycle, prompts, permissions, and
-timeline conversion. Do not copy that machinery into the plugin.
-
-Use `transformers` only for vendor differences ACP cannot describe. Validate vendor payloads with
-Zod and leave malformed or unrelated values unchanged:
-
-```ts
-import type { AcpTransformer } from "@getpaseo/plugin/server/acp";
-import { z } from "zod";
-
-const editSchema = z.object({
-  path: z.string(),
-  before: z.string(),
-  after: z.string(),
-});
-
-export const vendorEdits: AcpTransformer = {
-  toolCall(toolCall) {
-    if (toolCall.name !== "vendor_file_edit") return toolCall;
-    const input = editSchema.safeParse(toolCall.input);
-    if (!input.success) return toolCall;
-    return {
-      ...toolCall,
-      kind: "edit",
-      input: {
-        filePath: input.data.path,
-        oldString: input.data.before,
-        newString: input.data.after,
-      },
-    };
-  },
-};
-```
 
 ## Test and publish
 

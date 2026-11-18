@@ -1,6 +1,5 @@
 import { join } from 'node:path';
-import { atomicWrite } from './profiles.ts';
-import { type Memory } from './memory.ts';
+import { atomicWrite, type Memory } from './memory.ts';
 
 // One self-contained, read-only HTML snapshot of a profile's memory.
 export function exportBrowser(memory: Memory, profile: string, directory = memory.directory) {

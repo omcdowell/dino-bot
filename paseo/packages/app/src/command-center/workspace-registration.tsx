@@ -9,10 +9,6 @@ import {
   Files,
   Focus,
   GitBranch,
-  GitCompareArrows,
-  GitPullRequest,
-  Globe,
-  ListChecks,
   Move,
   PanelRight,
   Pencil,
@@ -20,8 +16,6 @@ import {
   PinOff,
   RotateCw,
   Rows2,
-  SquarePen,
-  SquareTerminal,
   X,
 } from "lucide-react-native";
 import { getIsElectron } from "@/constants/platform";
@@ -41,7 +35,6 @@ import {
   findPaneById,
   useWorkspaceLayoutStore,
 } from "@/stores/workspace-layout-store";
-import { shouldShowWorkspaceSetup, useWorkspaceSetupStore } from "@/stores/workspace-setup-store";
 import { clearCommandCenterFocusRestoreElement } from "@/utils/command-center-focus-restore";
 import { getShortcutOs } from "@/utils/shortcut-platform";
 import {
@@ -63,14 +56,9 @@ import {
 import { resolveWorkspaceCommandCenterShortcuts } from "./workspace-shortcuts";
 
 const WORKSPACE_COMMAND_CENTER_ICONS = {
-  newAgent: getCommandCenterIcon(SquarePen),
-  newTerminal: getCommandCenterIcon(SquareTerminal),
-  newBrowser: getCommandCenterIcon(Globe),
   splitRight: getCommandCenterIcon(Columns2),
   splitDown: getCommandCenterIcon(Rows2),
-  changes: getCommandCenterIcon(GitCompareArrows),
   files: getCommandCenterIcon(Files),
-  pullRequest: getCommandCenterIcon(GitPullRequest),
   previousTab: getCommandCenterIcon(ArrowLeft),
   nextTab: getCommandCenterIcon(ArrowRight),
   close: getCommandCenterIcon(X),
@@ -86,7 +74,6 @@ const WORKSPACE_COMMAND_CENTER_ICONS = {
   copyBranchName: getCommandCenterIcon(GitBranch),
   pin: getCommandCenterIcon(Pin),
   unpin: getCommandCenterIcon(PinOff),
-  showSetup: getCommandCenterIcon(ListChecks),
   toggleFocusMode: getCommandCenterIcon(Focus),
 };
 
@@ -195,13 +182,6 @@ export function useWorkspaceCommandCenterActions(): void {
   const isPinned = fields?.pinnedAt != null;
   const isCompact = useIsCompactFormFactor();
   const canPin = useHostFeature(serverId, "workspacePinning");
-  const persistenceKey =
-    serverId && fields
-      ? buildWorkspaceTabPersistenceKey({ serverId, workspaceId: fields.id })
-      : null;
-  const canShowSetup = useWorkspaceSetupStore((state) =>
-    shouldShowWorkspaceSetup(persistenceKey ? (state.snapshots[persistenceKey] ?? null) : null),
-  );
   const { overrides } = useKeyboardShortcutOverrides();
   const { gitActions, isGit } = useGitActions({
     serverId: serverId ?? "",
@@ -237,14 +217,9 @@ export function useWorkspaceCommandCenterActions(): void {
         gitActions,
         labels: {
           section: t("workspace.header.actions.workspaceActions"),
-          newAgent: t("workspace.tabs.actions.newAgent"),
-          newTerminal: t("workspace.tabs.actions.newTerminal"),
-          newBrowser: t("workspace.tabs.actions.newBrowser"),
           splitRight: t("workspace.tabs.actions.splitRight"),
           splitDown: t("workspace.tabs.actions.splitDown"),
-          changes: t("workspace.tabs.actions.changes"),
           files: t("workspace.tabs.actions.files"),
-          pullRequest: t("workspace.tabs.actions.pullRequest"),
           openPanel: (name, placement) => t(OPEN_PANEL_LABEL_KEYS[placement], { name }),
           previousTab: t("settings.shortcuts.help.previousTab"),
           nextTab: t("settings.shortcuts.help.nextTab"),
@@ -253,7 +228,6 @@ export function useWorkspaceCommandCenterActions(): void {
           reloadAgent: t("workspace.tabs.menu.reloadAgent"),
           copyResumeCommand: t("workspace.tabs.menu.copyResumeCommand"),
           copyAgentId: t("workspace.tabs.menu.copyAgentId"),
-          copyTerminalId: t("workspace.tabs.menu.copyTerminalId"),
           copyFilePath: t("workspace.tabs.menu.copyFilePath"),
           closeTabsLeft: t("workspace.tabs.menu.closeLeft"),
           closeTabsRight: t("workspace.tabs.menu.closeRight"),
@@ -275,7 +249,6 @@ export function useWorkspaceCommandCenterActions(): void {
           copyBranchName: t("workspace.header.actions.copyBranchName"),
           pin: t("sidebar.workspace.actions.pin"),
           unpin: t("sidebar.workspace.actions.unpin"),
-          showSetup: t("workspace.header.actions.showSetup"),
           labelsGroup: t("workspaceLabels.title"),
         },
         icons: {
@@ -285,10 +258,8 @@ export function useWorkspaceCommandCenterActions(): void {
         shortcuts: resolveWorkspaceShortcuts(overrides),
         capabilities: {
           canSplitPanes: supportsDesktopPaneSplits() && !isCompact,
-          canOpenBrowserTabs: getIsElectron(),
           isGit,
           canPin,
-          canShowSetup,
         },
         activeTabKind,
         activeTabIndex,
@@ -309,7 +280,6 @@ export function useWorkspaceCommandCenterActions(): void {
       activeTabIndex,
       activeTabKind,
       canPin,
-      canShowSetup,
       copyBranchName,
       copyPath,
       currentBranch,

@@ -166,14 +166,6 @@ export default defineConfig({
         replacement: resolvePackageEntry("react-dom"),
       },
       {
-        find: /^@xterm\/addon-ligatures\/lib\/addon-ligatures\.mjs$/,
-        replacement: path.resolve(__dirname, "test-stubs/xterm-addon-ligatures.ts"),
-      },
-      {
-        find: /^@xterm\/addon-ligatures$/,
-        replacement: path.resolve(__dirname, "test-stubs/xterm-addon-ligatures.ts"),
-      },
-      {
         find: /^react-native-unistyles$/,
         replacement: path.resolve(__dirname, "test-stubs/react-native-unistyles.ts"),
       },

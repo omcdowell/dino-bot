@@ -22,11 +22,9 @@ interface ExplorerSidebarDockProps extends Pick<
   | "setHoveredCloseTabKey"
   | "onCopyResumeCommand"
   | "onCopyAgentId"
-  | "onCopyTerminalId"
   | "onCopyFilePath"
   | "onReloadAgent"
   | "onRenameTab"
-  | "onCreateNewTab"
   | "onExitFocusMode"
 > {
   hoveredCloseTabKey: string | null;
@@ -63,12 +61,10 @@ export function ExplorerSidebarDock({
   tabDropPreview,
   onSelectTab,
   onCloseTab,
-  onCreateNewTab,
   hoveredCloseTabKey,
   setHoveredCloseTabKey,
   onCopyResumeCommand,
   onCopyAgentId,
-  onCopyTerminalId,
   onCopyFilePath,
   onReloadAgent,
   onRenameTab,
@@ -128,14 +124,11 @@ export function ExplorerSidebarDock({
             <TitlebarDragRegion />
             <View style={styles.tabRow}>
               <WorkspaceDesktopTabsRow
-                host="explorer"
-                launchPurpose="supporting"
                 isFocused={isWorkspaceFocused}
                 ownsKeyboardShortcuts={false}
                 setHoveredCloseTabKey={setHoveredCloseTabKey}
                 onCopyResumeCommand={onCopyResumeCommand}
                 onCopyAgentId={onCopyAgentId}
-                onCopyTerminalId={onCopyTerminalId}
                 onCopyFilePath={onCopyFilePath}
                 onReloadAgent={onReloadAgent}
                 onRenameTab={onRenameTab}
@@ -155,7 +148,6 @@ export function ExplorerSidebarDock({
                 }
                 onNavigateTab={handleSelectTab}
                 onCloseTab={onCloseTab}
-                onCreateNewTab={onCreateNewTab}
                 onReorderTabs={handleReorderTabs}
               />
             </View>

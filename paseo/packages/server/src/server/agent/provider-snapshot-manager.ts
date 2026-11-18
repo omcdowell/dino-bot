@@ -27,7 +27,6 @@ import {
 import type { ManagedAgent } from "./agent-manager.js";
 import type { WorkspaceGitService } from "../workspace-git-service.js";
 import type { ManagedProcessRegistry } from "../managed-processes/managed-processes.js";
-import type { OpenCodeBridge } from "./providers/opencode/bridge.js";
 import type {
   AgentProviderRuntimeSettingsMap,
   ProviderOverride,
@@ -36,8 +35,13 @@ import {
   buildProviderRegistry,
   shutdownAgentClients,
   type ProviderDefinition,
+  type RegisteredProviderDefinition,
 } from "./provider-registry.js";
-import { BUILTIN_PROVIDER_IDS } from "@getpaseo/protocol/provider-manifest";
+import {
+  AGENT_PROVIDER_DEFINITIONS,
+  BUILTIN_PROVIDER_IDS,
+  DEV_AGENT_PROVIDER_DEFINITIONS,
+} from "@getpaseo/protocol/provider-manifest";
 import { applyMutableProviderConfigToOverrides } from "../daemon-config-store.js";
 import {
   formatProviderDiagnostic,
@@ -121,7 +125,6 @@ export interface ProviderSnapshotManagerOptions {
   extraClients?: Partial<Record<AgentProvider, AgentClient>>;
   refreshTimeoutMs?: number;
   diagnosticTimeoutMs?: number;
-  openCodeBridge?: OpenCodeBridge;
 }
 
 interface ProviderSnapshotRefreshOptions {
@@ -243,9 +246,9 @@ export class ProviderSnapshotManager {
   private readonly logger: Logger;
   private readonly workspaceGitService?: Pick<WorkspaceGitService, "resolveRepoRoot">;
   private readonly managedProcesses?: ManagedProcessRegistry;
-  private readonly openCodeBridge?: OpenCodeBridge;
   private readonly isDev: boolean;
   private readonly extraClients: Partial<Record<AgentProvider, AgentClient>>;
+  private readonly injectedOnlyDefinitions: Map<string, RegisteredProviderDefinition>;
   private runtimeSettings: AgentProviderRuntimeSettingsMap | undefined;
   private providerOverrides: Record<string, ProviderOverride> | undefined;
   private baseProviderOverrides: Record<string, ProviderOverride> | undefined;
@@ -262,9 +265,9 @@ export class ProviderSnapshotManager {
     );
     this.workspaceGitService = options.workspaceGitService;
     this.managedProcesses = options.managedProcesses;
-    this.openCodeBridge = options.openCodeBridge;
     this.isDev = options.isDev === true;
     this.extraClients = options.extraClients ?? {};
+    this.injectedOnlyDefinitions = createInjectedOnlyDefinitions(this.extraClients);
     this.runtimeSettings = options.runtimeSettings;
     this.providerOverrides = options.providerOverrides;
     this.baseProviderOverrides = options.providerOverrides;
@@ -722,13 +725,13 @@ export class ProviderSnapshotManager {
     runtimeSettings: AgentProviderRuntimeSettingsMap | undefined,
     providerOverrides: Record<string, ProviderOverride> | undefined,
   ): Record<AgentProvider, ProviderDefinition> {
+    const pluginProviders = this.pluginProviders.definitions();
     const registry = buildProviderRegistry(this.logger, {
       runtimeSettings,
       providerOverrides,
-      pluginProviders: this.pluginProviders.definitions(),
+      pluginProviders: { ...this.injectedOnlyProviders(pluginProviders), ...pluginProviders },
       workspaceGitService: this.workspaceGitService,
       managedProcesses: this.managedProcesses,
-      openCodeBridge: this.openCodeBridge,
       isDev: this.isDev,
     });
 
@@ -749,6 +752,21 @@ export class ProviderSnapshotManager {
     }
 
     return registry;
+  }
+
+  /**
+   * Injected clients (tests pass these via `agentClients`) whose id this build has no
+   * manifest entry for, e.g. the fake "codex"/"opencode" clients after those providers
+   * were deleted. Give them a minimal, stable definition so they register like any provider.
+   */
+  private injectedOnlyProviders(
+    pluginProviders: Record<string, RegisteredProviderDefinition>,
+  ): Record<string, RegisteredProviderDefinition> {
+    const result: Record<string, RegisteredProviderDefinition> = {};
+    for (const [provider, definition] of this.injectedOnlyDefinitions) {
+      if (!pluginProviders[provider]) result[provider] = definition;
+    }
+    return result;
   }
 
   private resolveParent(parent: ManagedAgent): AgentCreateConfigParent {
@@ -1242,4 +1260,28 @@ export function sameSnapshotRecords(
       );
     })
   );
+}
+
+function createInjectedOnlyDefinitions(
+  extraClients: Partial<Record<AgentProvider, AgentClient>>,
+): Map<string, RegisteredProviderDefinition> {
+  const known = new Set([
+    ...AGENT_PROVIDER_DEFINITIONS.map((definition) => definition.id),
+    ...DEV_AGENT_PROVIDER_DEFINITIONS.map((definition) => definition.id),
+  ]);
+  const definitions = new Map<string, RegisteredProviderDefinition>();
+  for (const [provider, client] of Object.entries(extraClients)) {
+    if (!client || known.has(provider)) continue;
+    definitions.set(provider, {
+      id: provider,
+      label: provider,
+      description: "Injected agent client",
+      defaultModeId: null,
+      modes: [],
+      // Injected clients receive the config as given, so exact MCP grants pass through.
+      supportsExactMcpPreapproval: true,
+      createClient: () => client,
+    });
+  }
+  return definitions;
 }

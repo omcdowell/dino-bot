@@ -118,7 +118,6 @@ vi.mock("react-i18next", () => ({
           "settings.providers.statuses.notInstalled": "Not installed",
           "settings.providers.models.one": "1 model",
           "settings.providers.models.many": "{{count}} models",
-          "settings.providers.addErrorTitle": "Unable to add provider",
           "settings.providers.updateErrorTitle": "Unable to update provider",
           "settings.providers.actions.menu": "{{name}} actions",
           "settings.providers.actions.remove": "Remove provider",
@@ -271,10 +270,6 @@ vi.mock("@/screens/settings/engines-section", () => ({
   },
 }));
 
-vi.mock("@/components/provider-catalog-list", () => ({
-  ProviderCatalogList: () => null,
-}));
-
 vi.mock("@/hooks/use-providers-snapshot", () => ({
   useProvidersSnapshot: () => ({
     entries: snapshotState.entries,
@@ -408,7 +403,7 @@ describe("ProvidersSection", () => {
     return row;
   }
 
-  it("on a DinoBot host shows only Bot sign-ins: no Paseo Providers list, no Add provider", () => {
+  it("on a DinoBot host shows only Bot sign-ins: no Paseo Providers list", () => {
     snapshotState.entries = [claudeEntry, disabledCodexEntry];
     configState.config = makeConfig();
     botHost.available = true;
@@ -417,7 +412,6 @@ describe("ProvidersSection", () => {
 
     expect(container?.querySelector('[data-testid="bot-providers-section"]')).not.toBeNull();
     expect(container?.querySelector('[data-testid="host-page-providers-card"]')).toBeNull();
-    expect(container?.querySelector('[data-testid="host-page-add-provider-card"]')).toBeNull();
     expect(container?.querySelector('[aria-label="Claude provider details"]')).toBeNull();
   });
 
@@ -429,17 +423,15 @@ describe("ProvidersSection", () => {
     render();
 
     expect(container?.querySelector('[data-testid="host-page-providers-card"]')).toBeNull();
-    expect(container?.querySelector('[data-testid="host-page-add-provider-card"]')).toBeNull();
   });
 
-  it("on a host without DinoBot keeps Paseo's Providers and Add provider", () => {
+  it("on a host without DinoBot keeps Paseo's Providers list", () => {
     snapshotState.entries = [claudeEntry];
     configState.config = makeConfig();
 
     render();
 
     expect(container?.querySelector('[data-testid="host-page-providers-card"]')).not.toBeNull();
-    expect(container?.querySelector('[data-testid="host-page-add-provider-card"]')).not.toBeNull();
   });
 
   it("renders the disabled provider with its server-provided label in snapshot order", () => {

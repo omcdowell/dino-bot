@@ -13,13 +13,13 @@ describe("buildProviderCommand", () => {
     ).toBe("hermes --resume 20260813_111500_abc123");
   });
 
-  test("builds OpenCode resume commands from native session ids", () => {
+  test("builds Pi resume commands from native session ids", () => {
     expect(
       buildProviderCommand({
-        provider: "opencode",
+        provider: "pi",
         id: "resume",
         sessionId: "ses_abc123",
       }),
-    ).toBe("opencode --session ses_abc123");
+    ).toBe("pi --session ses_abc123");
   });
 });

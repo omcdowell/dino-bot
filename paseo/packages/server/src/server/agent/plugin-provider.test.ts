@@ -1241,3 +1241,40 @@ describe("plugin provider launch and status", () => {
     },
   );
 });
+
+describe("plugin provider rewind", () => {
+  test("a conversation rewind drops the rewound message and what followed from the history the timeline is rebuilt from", async () => {
+    const harness = createProviderHarness({
+      capabilities: [...CAPABILITIES, "session.revert.conversation"],
+    });
+    const registry = new PluginAgentClientRegistry(createTestLogger());
+    registry.replace([harness.registration]);
+    const session = await registry.clients()[harness.registration.id]!.createSession({
+      provider: harness.registration.id,
+      cwd: "/workspace",
+    });
+    try {
+      const sessionId = harness.inputs.find((input) => input.type === "session.open")!.sessionId;
+      const say = (item: Extract<ProviderEvent, { type: "timeline.item" }>["item"]) =>
+        harness.emit({ type: "timeline.item", sessionId, item });
+      say({ type: "user_message", id: "u-1", text: "first", revertToken: { turn: "1" } });
+      say({ type: "assistant_message", id: "a-1", text: "one" });
+      say({ type: "user_message", id: "u-2", text: "second", revertToken: { turn: "2" } });
+      say({ type: "assistant_message", id: "a-2", text: "two" });
+      expect(session.capabilities.supportsRewindConversation).toBe(true);
+      await session.revertConversation!({ messageId: "u-2" });
+
+      const revert = harness.inputs.find((input) => input.type === "session.revert");
+      expect(revert).toMatchObject({ token: { turn: "2" }, scope: "conversation" });
+      const history: AgentStreamEvent[] = [];
+      for await (const event of session.streamHistory()) history.push(event);
+      const texts = history.flatMap((event) =>
+        event.type === "timeline" && "text" in event.item ? [event.item.text] : [],
+      );
+      expect(texts).toEqual(["first", "one"]);
+    } finally {
+      await session.close();
+      registry.replace([]);
+    }
+  });
+});

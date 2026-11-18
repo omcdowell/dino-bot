@@ -37,7 +37,6 @@ export interface BuildWorkspacePaneContentModelInput {
   onRetargetCurrentTab: (target: WorkspaceTabDescriptor["target"]) => void;
   onSetCurrentTabState: (state: WorkspaceTabDescriptor["state"]) => void;
   onOpenWorkspaceFile: (request: WorkspaceFileOpenRequest) => void;
-  onOpenImportSheet: () => void;
 }
 
 export function buildWorkspacePaneContentModel({
@@ -53,7 +52,6 @@ export function buildWorkspacePaneContentModel({
   onRetargetCurrentTab,
   onSetCurrentTabState,
   onOpenWorkspaceFile,
-  onOpenImportSheet,
 }: BuildWorkspacePaneContentModelInput): WorkspacePaneContentModel {
   ensurePanelsRegistered();
   const registration = getPanelRegistration(tab.kind);
@@ -76,7 +74,6 @@ export function buildWorkspacePaneContentModel({
       retargetCurrentTab: onRetargetCurrentTab,
       setCurrentTabState: onSetCurrentTabState,
       openFileInWorkspace: onOpenWorkspaceFile,
-      openImportSheet: onOpenImportSheet,
     },
   };
 }
@@ -102,7 +99,6 @@ export function WorkspacePaneContent({
   const retargetCurrentTab = useStableEvent(paneContextValue.retargetCurrentTab);
   const setCurrentTabState = useStableEvent(paneContextValue.setCurrentTabState);
   const openFileInWorkspace = useStableEvent(paneContextValue.openFileInWorkspace);
-  const openImportSheet = useStableEvent(paneContextValue.openImportSheet);
   const stablePaneContextValue = useMemo(
     () => ({
       serverId: paneContextValue.serverId,
@@ -119,12 +115,10 @@ export function WorkspacePaneContent({
       retargetCurrentTab,
       setCurrentTabState,
       openFileInWorkspace,
-      openImportSheet,
     }),
     [
       closeCurrentTab,
       openFileInWorkspace,
-      openImportSheet,
       openTab,
       openPreferredTarget,
       openTargetToSide,

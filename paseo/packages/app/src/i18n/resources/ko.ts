@@ -95,10 +95,6 @@ export const ko: TranslationResources = {
       open: "{{name}} 열기",
       openInSidePane: "사이드 패널에서 {{name}} 열기",
       openInFocusedPane: "포커스된 창에서 {{name}} 열기",
-      addProject: "프로젝트 추가",
-      home: "홈",
-      groupByProject: "프로젝트별 그룹화",
-      groupByStatus: "상태별 그룹화",
       modelGroupLabel: "모델",
       modelSearchKeywords: "모델 전환 모델 변경 모델 설정 모델 선택",
       thinkingGroupLabel: "추론",
@@ -274,18 +270,6 @@ export const ko: TranslationResources = {
       unarchive: "보관 해제",
     },
   },
-  sessions: {
-    title: "기록",
-    empty: "아직 세션이 없습니다",
-    noMatches: "일치하는 세션이 없습니다",
-    tooManyMatches: "일치 항목이 너무 많습니다 — 검색 범위를 좁히세요",
-    hostLoadFailed: "{{host}}: 기록을 불러오지 못했습니다",
-    searchPlaceholder: "기록 검색",
-    actions: {
-      loadMore: "더 불러오기",
-      clearSearch: "검색 지우기",
-    },
-  },
   agentList: {
     fallbackTitle: "새 세션",
     dateSections: {
@@ -332,8 +316,6 @@ export const ko: TranslationResources = {
       forkInNewTab: "새 탭으로 분기",
       forkInNewWorkspace: "새 워크스페이스로 분기",
       forkUnavailable: "이를 사용하려면 호스트를 업데이트하세요.",
-      forkMissingWorkspace: "이 에이전트는 워크스페이스에 속해 있지 않습니다.",
-      forkFailed: "채팅을 분기하지 못했습니다.",
       openFile: "파일 열기",
       copied: "복사됨",
     },
@@ -1148,7 +1130,6 @@ export const ko: TranslationResources = {
     },
   },
   sidebar: {
-    statusGroupAccessibility: "{{label}} 그룹",
     statusBucket: {
       needsInput: "입력 필요",
       failed: "실패",
@@ -1157,53 +1138,9 @@ export const ko: TranslationResources = {
       done: "완료",
     },
     display: {
-      showBackground: "백그라운드 표시",
-      trigger: "표시 설정",
-      heading: "표시",
       grouping: {
-        label: "그룹화",
-        project: "프로젝트",
-        status: "상태",
         labels: "레이블",
       },
-      titleSource: {
-        label: "제목",
-        title: "제목",
-        branch: "브랜치 이름",
-      },
-      show: {
-        label: "표시 항목",
-        branch: "브랜치",
-        project: "프로젝트",
-        host: "호스트",
-        changeRequest: "풀 리퀘스트",
-        checks: "검사",
-        services: "서비스",
-        labels: "레이블",
-        diff: "Diff 통계",
-        timestamp: "마지막 활동",
-      },
-      checks: {
-        iconAndText: "아이콘 및 텍스트",
-        icon: "아이콘만",
-        none: "숨김",
-      },
-      hostFilter: {
-        label: "호스트",
-        all: "모든 호스트",
-      },
-      projectFilter: {
-        label: "프로젝트",
-        all: "모든 프로젝트",
-      },
-    },
-    filterEmpty: {
-      title: "일치하는 워크스페이스가 없습니다",
-      description: "워크스페이스를 보려면 사이드바 필터를 변경하거나 지우세요.",
-      clear: "필터 지우기",
-    },
-    pinned: {
-      title: "고정됨",
     },
     host: {
       noHost: "호스트 없음",
@@ -1211,8 +1148,6 @@ export const ko: TranslationResources = {
       searchPlaceholder: "호스트 검색...",
     },
     actions: {
-      addProject: "프로젝트 추가",
-      newWorkspace: "새 워크스페이스",
       hosts: "호스트",
       settings: "설정",
       closeSidebar: "사이드바 닫기",
@@ -1228,77 +1163,28 @@ export const ko: TranslationResources = {
       reportIssue: "문제 신고",
       discord: "Discord",
       github: "GitHub 이슈 만들기",
-      whatsNew: "새로운 소식",
       appName: "Paseo",
     },
     sections: {
-      sessions: "기록",
       search: "검색",
       schedules: "일정",
     },
-    worktreeSetup: {
-      title: "워크트리 스크립트 설정",
-      description:
-        "새 워크트리가 의존성을 설치하고 자동으로 준비될 수 있도록 설정 명령을 추가하세요.",
-      openProjectSettings: "프로젝트 설정 열기",
-    },
     project: {
       actions: {
-        menu: "프로젝트 작업",
-        openSettings: "프로젝트 설정 열기",
-        openNewWindow: "새 창에서 열기",
-        openNewWindowFailed: "새 창을 열 수 없습니다",
-        openFolder: "파일 관리자에서 열기",
         openFolderFailed: "폴더를 열 수 없습니다.",
-        remove: "프로젝트 제거",
-        removing: "제거하는 중...",
-      },
-      confirmations: {
-        removeTitle: "프로젝트를 제거할까요?",
-        removeMessage:
-          '"{{projectName}}"을(를) 사이드바에서 제거할까요?\n\n디스크의 파일은 변경되지 않습니다.',
-        removeConfirm: "제거",
-        cancel: "취소",
-      },
-      toasts: {
-        hostDisconnected: "호스트가 연결되어 있지 않습니다",
-        removeFailed: "일부 워크스페이스를 제거하지 못했습니다",
-        updateHostToRemove: "프로젝트를 제거하려면 호스트를 업데이트하세요.",
-      },
-      empty: {
-        title: "아직 프로젝트가 없습니다",
-        description: "시작하려면 프로젝트를 추가하세요",
       },
     },
     workspace: {
       status: {
         serviceRunning: "서비스 {{name}} 실행 중",
         serviceUnhealthy: "서비스 {{name}} 비정상",
-        creating: "생성하는 중...",
-      },
-      checks: {
-        passed: "통과: {{count}}개",
-        failed: "실패: {{count}}개",
-        warning: "경고: {{count}}개",
-        actionRequired: "조치 필요: {{count}}개",
-        manual: "수동: {{count}}개",
-        pending: "대기 중: {{count}}개",
       },
       actions: {
-        menu: "워크스페이스 작업",
-        newWorkspace: "새 워크스페이스",
-        showMore: "더 보기",
-        showLess: "간략히 보기",
-        createWorkspaceFor: "{{projectName}}을(를) 위한 새 워크스페이스 생성",
-        copyPath: "경로 복사",
-        copyBranchName: "브랜치 이름 복사",
         rename: "워크스페이스 이름 변경",
         pin: "상단에 고정",
         unpin: "고정 해제",
-        archive: "보관",
         archiveWorkspace: "워크스페이스 보관",
         hideFromSidebar: "사이드바에서 숨기기",
-        archiving: "보관하는 중...",
         hiding: "숨기는 중...",
       },
       confirmations: {
@@ -1309,8 +1195,6 @@ export const ko: TranslationResources = {
         cancel: "취소",
       },
       rename: {
-        title: "워크스페이스 이름 변경",
-        submit: "이름 변경",
         invalidBranchName: "잘못된 브랜치 이름",
       },
       toasts: {
@@ -1324,49 +1208,12 @@ export const ko: TranslationResources = {
     },
   },
   newWorkspace: {
-    title: "새 워크스페이스",
-    create: "생성",
-    isolation: {
-      local: "로컬",
-      worktree: "새 워크트리",
-      label: "격리",
-    },
     fields: {
       project: "프로젝트",
       base: "기준",
       baseNotApplicable: "해당 없음",
     },
     titlePlaceholder: "제목(선택 사항)",
-    errors: {
-      hostDisconnected: "호스트가 연결되어 있지 않습니다",
-      createWorktreeFailed: "워크트리를 생성하지 못했습니다",
-      composerStateRequired: "작성기 상태가 필요합니다",
-      selectModel: "모델을 선택하세요",
-    },
-    tooltips: {
-      project: "Choose the project",
-      host: "Choose the host",
-      isolation: "Choose the isolation level",
-      startingRef: "시작 위치를 선택하세요",
-      launch: "Choose what to launch",
-    },
-    refPicker: {
-      startingRef: "시작 ref",
-      intoBase: "{{baseRef}}(으)로",
-      searching: "검색 중...",
-      noMatchingRefs: "일치하는 ref가 없습니다.",
-      searchPlaceholder: "브랜치와 PR 검색",
-      title: "시작 위치",
-    },
-    launch: {
-      title: "What to launch",
-      chat: "Chat",
-      terminal: "Terminal",
-      manageProfiles: "Manage profiles",
-      submit: "Launch",
-      promptPlaceholder: "Prompt {{name}}",
-      commandPlaceholder: "Run a command, or leave empty for a blank terminal",
-    },
   },
   desktop: {
     windowControls: {
@@ -1457,7 +1304,6 @@ export const ko: TranslationResources = {
         failedTitle: "업데이트 실패",
         availableTitle: "업데이트 사용 가능",
         genericError: "문제가 발생했습니다.",
-        whatsNew: "새로운 기능",
         installingAction: "설치 중...",
         installAndRestart: "설치 후 재시작",
         installingDescription: "설치 후 재시작 중...",
@@ -1521,12 +1367,6 @@ export const ko: TranslationResources = {
         failed: "알림을 보내지 못했습니다.",
       },
     },
-    integrations: {
-      cli: {
-        statusFailed: "CLI 설치 상태를 확인할 수 없습니다.",
-        installFailed: "Paseo CLI를 설치할 수 없습니다.",
-      },
-    },
   },
   rootError: {
     title: "Paseo에 문제가 발생했습니다.",
@@ -1545,21 +1385,8 @@ export const ko: TranslationResources = {
   },
   openProject: {
     tiles: {
-      addProject: {
-        title: "프로젝트 추가",
-        description: "내 컴퓨터의 폴더를 엽니다",
-      },
-      importSession: {
-        title: "세션 가져오기",
-        description: "최근 외부 CLI 세션을 가져옵니다",
-      },
-      setupProviders: {
-        title: "프로바이더 설정",
-        description: "Claude Code, Codex 등을 구성합니다",
-      },
       pairDevice: {
         title: "기기 페어링",
-        description: "휴대폰을 이 데몬에 연결합니다",
       },
     },
   },
@@ -1574,25 +1401,6 @@ export const ko: TranslationResources = {
       open_failed: "프로젝트를 열 수 없습니다.",
     },
     openPath: "경로 열기",
-  },
-  branchSwitcher: {
-    triggerTooltip: "워크스페이스 브랜치 전환",
-    currentBranch: "현재 브랜치: {{branchName}}. 브랜치를 전환하려면 누르세요.",
-    placeholder: "브랜치 전환...",
-    searchPlaceholder: "브랜치 필터...",
-    empty: "브랜치를 찾을 수 없습니다.",
-    title: "브랜치 전환",
-    uncommittedTitle: "커밋되지 않은 변경 사항",
-    uncommittedMessage: "커밋되지 않은 변경 사항이 있습니다. 브랜치를 전환하기 전에 스태시할까요?",
-    stashAndSwitch: "스태시 후 전환",
-    failedToStash: "변경 사항을 스태시하지 못했습니다",
-    failedToSwitch: "브랜치를 전환하지 못했습니다",
-    restoreStashTitle: "스태시된 변경 사항을 복원할까요?",
-    restoreStashMessage:
-      "이 브랜치에는 이전 세션에서 스태시된 변경 사항이 있습니다. 복원하시겠습니까?",
-    restore: "복원",
-    later: "나중에",
-    stashRestored: "스태시된 변경 사항이 복원되었습니다",
   },
   agentAutocomplete: {
     searchingWorkspace: "워크스페이스 검색 중...",
@@ -1665,22 +1473,6 @@ export const ko: TranslationResources = {
     searchPlaceholder: "모델 검색...",
     openProviderSettings: "{{provider}} 설정 열기",
   },
-  providerCatalog: {
-    title: "프로바이더 추가",
-    search: "프로바이더 검색",
-    noProviders: "프로바이더를 찾을 수 없습니다",
-    actions: {
-      add: "추가",
-      adding: "추가 중",
-      installed: "설치됨",
-      cancel: "취소",
-      installInstructions: "설치 안내",
-      installInstructionsFor: "{{provider}} 설치 안내",
-    },
-    errors: {
-      unableToInstall: "프로바이더를 설치할 수 없습니다",
-    },
-  },
   providerSelection: {
     defaultModel: "기본값",
     selectModel: "모델 선택",
@@ -1718,10 +1510,6 @@ export const ko: TranslationResources = {
       direct: {
         title: "직접 연결",
         description: "로컬 네트워크 또는 VPN.",
-      },
-      remoteSsh: {
-        title: "원격 SSH",
-        description: "데스크톱 SSH 클라이언트를 통해 연결합니다.",
       },
       scanQr: {
         title: "QR 코드 스캔",
@@ -1771,29 +1559,6 @@ export const ko: TranslationResources = {
         tlsError: "TLS 오류. 직접 연결은 데몬 앞에 TLS 종단 장치가 있을 때만 SSL을 사용합니다.",
         unableToConnect: "연결할 수 없습니다. 호스트/포트와 데몬에 접근 가능한지 확인하세요.",
         details: "세부 정보: {{detail}}",
-      },
-    },
-    remoteSsh: {
-      title: "원격 SSH",
-      helper: "원격 호스트에서 실행 중인 Paseo 데몬에 연결합니다.",
-      fields: {
-        target: "SSH 호스트",
-        password: "데몬 비밀번호",
-        optional: "선택 사항",
-      },
-      passwordVisibility: {
-        show: "비밀번호 표시",
-        hide: "비밀번호 숨기기",
-      },
-      actions: {
-        cancel: "취소",
-        connect: "연결",
-        connecting: "연결 중...",
-      },
-      errors: {
-        targetRequired: "SSH 호스트가 필요합니다",
-        invalidTarget: "유효한 ssh:// 호스트를 입력하세요",
-        failedToConnect: "SSH로 연결할 수 없습니다. {{detail}}",
       },
     },
     link: {
@@ -1878,13 +1643,6 @@ export const ko: TranslationResources = {
   diffViewer: {
     empty: "표시할 변경 사항이 없습니다",
   },
-  serviceUrl: {
-    title: "서비스 URL 열기",
-    message: "{{url}}을(를) 열까요?",
-    inPaseo: "Paseo에서",
-    externalBrowser: "외부 브라우저",
-    dontAskAgain: "다시 묻지 않기",
-  },
   downloads: {
     requestTokenFailed: "다운로드 토큰을 요청하지 못했습니다.",
     hostUnavailable: "다운로드 호스트를 사용할 수 없습니다.",
@@ -1913,10 +1671,6 @@ export const ko: TranslationResources = {
     archiveFinishedRetry: "다시 시도 ({{failed}}/{{total}})",
   },
   panels: {
-    draft: {
-      newAgent: "새 에이전트",
-      creatingAgent: "에이전트 생성 중",
-    },
     file: {
       directoryMissing: "워크스페이스 디렉터리를 찾을 수 없습니다.",
       loading: "파일 불러오는 중...",
@@ -1955,23 +1709,9 @@ export const ko: TranslationResources = {
       tooltip: "워크스페이스 파일 탐색",
       chooseFile: "파일 선택",
     },
-    pullRequest: {
-      label: "풀 리퀘스트",
-      subtitle: "풀 리퀘스트 세부 정보",
-      emptyTitle: "아직 풀 리퀘스트가 없습니다",
-      emptyDescription: "이 체크아웃에 풀 리퀘스트를 만들면 세부 정보가 여기에 표시됩니다.",
-    },
     diff: {
-      changesLabel: "변경 사항",
-      diffLabel: "Diff",
-      changesSubtitle: "작업 트리 diff",
-      commitSubtitle: "커밋 diff",
       uncommittedSubtitle: "커밋되지 않은 변경 사항",
       baseSubtitle: "{{baseRef}}와 비교",
-      directoryMissing: "워크스페이스 디렉터리를 찾을 수 없습니다.",
-      empty: "변경사항 없음",
-      loadError: "Diff를 불러오지 못했습니다.",
-      capabilityMissing: "커밋 diff를 보려면 호스트를 업데이트하세요.",
     },
   },
   toolCallDetails: {
@@ -2051,33 +1791,18 @@ export const ko: TranslationResources = {
     backToWorkspace: "뒤로",
     addHost: "호스트 추가",
     enableBuiltInDaemon: "내장 데몬 활성화",
-    projects: "프로젝트",
-    projectList: {
-      hostLoadFailed: "{{hostName}} 호스트에서 프로젝트를 불러올 수 없습니다: {{message}}",
-      editProject: "{{projectName}} 편집",
-    },
     groupInfo: "{{title}} 정보",
     sections: {
       general: "일반",
       chat: "채팅",
       appearance: "모양",
-      sidebar: "사이드바",
-      terminal: "터미널",
-      browser: "브라우저",
-      editor: "편집기",
       shortcuts: "단축키",
-      integrations: "통합",
       notifications: "알림",
       permissions: "권한",
       diagnostics: "진단",
       about: "정보",
     },
     layout: en.settings.layout,
-    editor: {
-      title: "편집기",
-      vimKeybindings: "Vim 키 바인딩",
-      vimHint: "웹 및 데스크톱의 소스 파일에 적용됩니다.",
-    },
     notifications: {
       title: "알림",
       permission: "알림 권한",
@@ -2094,48 +1819,19 @@ export const ko: TranslationResources = {
       sendFailedTitle: "테스트 알림을 보낼 수 없음",
     },
     hostSections: {
-      projects: "프로젝트",
       connections: "연결",
       agents: "에이전트",
-      metadata: "메타데이터",
-      workspaces: "워크스페이스",
       providers: "프로바이더",
       usage: "사용량",
-      terminals: "터미널",
       plugins: "플러그인",
       host: "개요",
     },
     plugins: pluginSettings.ko,
-    metadataGeneration: {
-      title: "메타데이터 생성",
-      description:
-        "워크스페이스 제목, 브랜치 이름, 커밋 메시지 및 풀 리퀘스트 초안에 사용할 모델을 선택하세요",
-      selection: "모델 선택",
-      automatic: "자동",
-      preferred: "수동",
-      automaticHint: "Paseo가 사용 가능한 빠른 모델을 선택합니다",
-      preferredHint: "Paseo에서 사용할 모델을 선택하세요",
-      model: "모델",
-      fallbackHint: "사용할 수 없으면 Paseo가 다른 사용 가능한 모델을 사용합니다",
-      docs: "문서",
-      saveError: "메타데이터 생성을 업데이트할 수 없습니다",
-    },
     general: {
       title: "일반",
       sending: "전송",
       network: en.settings.general.network,
       meteredNetwork: en.settings.general.meteredNetwork,
-      browserData: {
-        title: "브라우저 데이터",
-        siteData: "쿠키 및 사이트 데이터",
-        description: "브라우저 탭은 Paseo 전체에서 로그인 및 사이트 데이터를 공유합니다.",
-        clear: "브라우저 데이터 지우기",
-        clearing: "삭제 중...",
-        confirmTitle: "브라우저 데이터를 삭제하시겠습니까?",
-        confirmMessage: "사이트가 로그아웃되고 열려 있는 브라우저 탭이 다시 로드됩니다.",
-        success: "브라우저 데이터가 삭제되었습니다.",
-        error: "브라우저 데이터를 삭제할 수 없습니다.",
-      },
       defaultSend: {
         label: "기본 전송",
         descriptions: {
@@ -2158,11 +1854,6 @@ export const ko: TranslationResources = {
           inApp: "Paseo에서",
           external: "외부 브라우저",
         },
-      },
-      terminalScrollback: {
-        label: "터미널 스크롤백",
-        description: "내장 터미널 버퍼에 보관되는 줄 수",
-        accessibilityLabel: "터미널 스크롤백 줄 수",
       },
       autoExpandReasoning: {
         label: "추론 항상 펼치기",
@@ -2224,7 +1915,6 @@ export const ko: TranslationResources = {
     about: {
       title: "정보",
       appVersion: "앱 버전",
-      whatsNewHint: "모든 버전의 릴리스 노트",
       thisDevice: "이 기기",
       connectedHosts: "연결된 호스트",
       offline: "오프라인",
@@ -2271,19 +1961,6 @@ export const ko: TranslationResources = {
       chatOutline: {
         title: "채팅 개요",
         description: "프롬프트 사이를 이동하기 위한 개요 표시",
-      },
-      sidebar: {
-        header: {
-          title: "헤더",
-          description: "사이드바 상단에 표시할 항목과 순서를 선택하세요",
-        },
-        footer: {
-          title: "푸터",
-          description:
-            "사이드바 하단에 표시할 행과 순서를 선택하세요. 프로젝트 추가와 아이콘 행은 항상 표시됩니다",
-        },
-        moveUp: "위로 이동",
-        moveDown: "아래로 이동",
       },
       fonts: {
         title: "글꼴",
@@ -2350,7 +2027,6 @@ export const ko: TranslationResources = {
         newWorkspace: "새 워크스페이스",
         newWorktree: "새 워크트리",
         archiveWorkspace: "워크스페이스 보관",
-        newTab: "새 탭",
         closeCurrentTab: "현재 탭 닫기",
         jumpToWorkspace: "워크스페이스로 이동",
         jumpToTab: "탭으로 이동",
@@ -2369,7 +2045,6 @@ export const ko: TranslationResources = {
         moveTabUp: "탭을 위로 이동",
         moveTabDown: "탭을 아래로 이동",
         closePane: "창 닫기",
-        newTerminal: "새 터미널",
         searchFiles: "파일 검색",
         toggleCommandCenter: "명령 센터 토글",
         showKeyboardShortcuts: "키보드 단축키 표시",
@@ -2391,22 +2066,6 @@ export const ko: TranslationResources = {
       },
       helpNotes: {
         showKeyboardShortcuts: "포커스가 텍스트 필드나 터미널에 있지 않을 때 사용할 수 있습니다.",
-      },
-    },
-    integrations: {
-      title: "통합",
-      docs: {
-        cli: "CLI 문서",
-        openCli: "CLI 문서 열기",
-      },
-      commandLine: {
-        title: "명령줄",
-        description: "터미널에서 에이전트를 제어하고 스크립팅합니다",
-      },
-      actions: {
-        install: "설치",
-        installing: "설치 중...",
-        installed: "설치됨",
       },
     },
     permissions: {
@@ -2548,33 +2207,6 @@ export const ko: TranslationResources = {
       agents: {
         unavailable: "에이전트를 관리하려면 이 호스트에 연결하세요",
       },
-      workspaces: {
-        unavailable: "워크스페이스를 관리하려면 이 호스트에 연결하세요",
-      },
-      terminalProfiles: {
-        unavailable: "터미널 프로필을 관리하려면 이 호스트에 연결하세요",
-        sectionTitle: "터미널 프로필",
-        editProfile: "프로필 편집",
-        addProfileTitle: "터미널 프로필 추가",
-        editProfileTitle: "터미널 프로필 편집",
-        namePlaceholder: "Claude Code",
-        commandPlaceholder: "claude",
-        argsPlaceholder: "--dangerously-skip-permissions",
-        nameLabel: "이름",
-        commandLabel: "명령",
-        argsLabel: "인수",
-        nameRequired: "이름을 입력하세요",
-        commandRequired: "명령을 입력하세요",
-        argsHint: "명령에 전달되는 공백으로 구분된 인수",
-        saving: "저장하는 중...",
-        remove: "제거",
-        removeConfirmTitle: "프로필을 제거할까요?",
-        removeConfirmMessage: '"{{name}}"을(를) 제거할까요?',
-        moveUp: "위로 이동",
-        moveDown: "아래로 이동",
-        save: "저장",
-        emptyState: "아직 프로필이 없습니다. 특정 명령으로 터미널을 실행하려면 하나 추가하세요.",
-      },
       agentProfiles: {
         sectionTitle: "에이전트 프로필",
         unavailable: "에이전트 프로필을 관리하려면 이 호스트에 연결하세요",
@@ -2686,12 +2318,10 @@ export const ko: TranslationResources = {
     },
     providers: {
       title: "프로바이더",
-      addProvider: "프로바이더 추가",
       providerDetails: "{{name}} 프로바이더 세부 정보",
       enableProvider: "{{name}} 활성화",
       unavailable: "프로바이더를 보려면 이 호스트에 연결하세요",
       loading: "불러오는 중...",
-      addErrorTitle: "프로바이더를 추가할 수 없습니다",
       updateErrorTitle: "프로바이더를 업데이트할 수 없습니다",
       actions: {
         menu: "{{name}} 작업",
@@ -2747,94 +2377,6 @@ export const ko: TranslationResources = {
         none: "사용 가능한 진단이 없습니다",
         failedToFetch: "진단을 가져오지 못했습니다",
         unknownError: "알 수 없는 오류",
-      },
-    },
-    project: {
-      noEditableTarget: "이 호스트에서는 이 프로젝트를 편집할 수 없습니다.",
-      backToProjects: "프로젝트로 돌아가기",
-      edit: {
-        title: "프로젝트 편집",
-        name: "이름",
-        nameLabel: "프로젝트 이름",
-        icon: "아이콘",
-        chooseImage: "이미지 선택",
-        useAutomatic: "자동 사용",
-        imageUrl: "이미지 또는 웹사이트 URL",
-        save: "변경사항 저장",
-        savedToast: "프로젝트가 업데이트되었습니다.",
-      },
-      readFailures: {
-        invalidTitle: "paseo.json을 파싱할 수 없습니다",
-        invalidDescription: "디스크의 파일을 수정한 후 다시 로드하세요.",
-        missingTitle: "이 호스트에는 이 프로젝트가 없습니다",
-        missingSingleHost: "선택한 호스트에 이 프로젝트의 기록이 없습니다.",
-        transportTitle: "paseo.json을 불러올 수 없습니다",
-        transportFallback: "호스트가 응답하지 않았습니다.",
-        failedTitle: "paseo.json을 불러올 수 없습니다",
-        failedDescription: "다시 로드하여 재시도하세요.",
-      },
-      worktree: {
-        title: "워크트리 수명 주기 훅",
-        info: "이 프로젝트에서 워크트리가 생성되거나 정리될 때 실행되는 명령",
-        docs: "문서",
-        docsTooltip: "자세한 내용과 이 명령에 사용할 수 있는 환경 변수는 문서를 참조하세요",
-        setup: "설정",
-        setupAccessibility: "워크트리 설정 명령",
-        uncommittedTitle: "paseo.json 변경 사항을 커밋하세요",
-        uncommittedDescription: "새 워크트리는 선택한 기본 브랜치의 설정 스크립트를 사용합니다.",
-        teardown: "정리",
-        teardownAccessibility: "워크트리 정리 명령",
-      },
-      scripts: {
-        title: "스크립트",
-        info: "이 프로젝트의 모든 에이전트에서 실행할 수 있는 장기 실행 서비스 및 일회성 명령",
-        empty: "아직 스크립트가 없습니다.",
-        untitled: "제목 없는 스크립트",
-        port: "포트 {{port}}",
-        menuAccessibility: "스크립트 메뉴 열기",
-        removeTitle: "스크립트를 제거할까요?",
-        removeMessage: "{{name}}을(를) 제거할까요?",
-        removeFallbackName: "이 스크립트",
-        name: "이름",
-        command: "명령",
-        nameAccessibility: "스크립트 이름",
-        commandAccessibility: "스크립트 명령",
-        nameRequired: "이름을 입력하세요",
-        commandRequired: "명령을 입력하세요",
-        newScript: "새 스크립트",
-        editScript: "{{name}} 편집",
-        runAsService: "서비스로 실행",
-        serviceHint: "Paseo가 프로세스를 감독하고 $PASEO_PORT를 통해 포트를 할당합니다",
-        actions: {
-          add: "스크립트 추가",
-          edit: "편집",
-          remove: "제거",
-        },
-      },
-      metadata: {
-        title: "메타데이터 생성",
-        info: "Paseo가 메타데이터를 생성하는 데 사용하는 AI 프롬프트에 주입되는 프로젝트별 지침 - 브랜치 이름, 커밋 스타일, PR 형식 같은 팀 규칙을 적용하는 데 사용하세요",
-        branchName: "브랜치 이름",
-        branchNamePlaceholder:
-          "브랜치에 feat/ 또는 fix/를 접두사로, 개인 브랜치에는 mb/를 붙이세요",
-        commitMessage: "커밋 메시지",
-        commitMessagePlaceholder: "스코프와 함께 Conventional Commits를 사용하세요",
-        pullRequest: "풀 리퀘스트",
-        pullRequestPlaceholder: "한 문단 요약으로 시작하고 테스트 계획 섹션을 포함하세요",
-      },
-      writeFailures: {
-        staleTitle: "디스크에서 구성이 변경되었습니다",
-        staleDescription: "저장하기 전에 다시 로드하여 최신 paseo.json을 가져오세요.",
-        failedTitle: "paseo.json을 저장할 수 없습니다",
-        failedDescription: "다시 시도하거나 디스크에서 최신 버전을 다시 로드하세요.",
-      },
-      actions: {
-        reload: "다시 로드",
-        tryAgain: "다시 시도",
-        save: "저장",
-        saved: "프로젝트가 저장되었습니다",
-        saving: "저장하는 중...",
-        cancel: "취소",
       },
     },
   },

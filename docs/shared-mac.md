@@ -46,8 +46,8 @@ listens there on a port of its own.
    (Or, after the safety stop: the same `export`, then `~/.dinobot/bin/dinobot setup`.)
 
 - `DINOBOT_TAILNET_ADDRESS`: the address DinoBot listens on and puts in the pairing code, instead
-  of asking a Tailscale CLI (yours would see the owner's Tailscale). Add `,<name>` for the Mac's
-  name as your tailnet shows it (`100.x.y.z,owners-mac.tailnet.ts.net`); the address alone works.
+  of asking a Tailscale CLI (yours would see the owner's Tailscale). A `,<name>` after it
+  (`100.x.y.z,owners-mac.tailnet.ts.net`) is accepted but not put in the code: the code carries the address only.
   It must be an address of this Mac: if the Mac's Tailscale is off, setup says so.
 - `DINOBOT_PORT`: the port the owner allowed. Pairing hangs on any other port, so it is saved too.
 - Do not open the Tailscale app in your macOS account: it shows and controls the owner's Tailscale.

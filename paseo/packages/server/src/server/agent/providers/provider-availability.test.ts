@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -8,9 +8,7 @@ import type { AgentProvider } from "../agent-sdk-types.js";
 import { AgentManager } from "../agent-manager.js";
 import { AgentStorage } from "../agent-storage.js";
 
-import { ClaudeAgentClient } from "./claude/agent.js";
-import { CodexAppServerAgentClient, findDefaultCodexBinary } from "./codex-app-server-agent.js";
-import { OpenCodeAgentClient } from "./opencode-agent.js";
+import { PiRpcAgentClient } from "./pi/agent.js";
 
 const originalEnv = {
   LOCALAPPDATA: process.env.LOCALAPPDATA,
@@ -32,13 +30,6 @@ function isolatePathTo(dir: string): void {
   }
 }
 
-function isolateCodexDefaultDiscoveryTo(dir: string): void {
-  isolatePathTo(dir);
-  if (process.platform === "win32") {
-    process.env.LOCALAPPDATA = dir;
-  }
-}
-
 afterEach(() => {
   if (originalEnv.LOCALAPPDATA === undefined) {
     delete process.env.LOCALAPPDATA;
@@ -53,77 +44,22 @@ afterEach(() => {
 });
 
 describe("default provider availability", () => {
-  test("Codex reports unavailable when the default command cannot be resolved", async () => {
-    const binDir = makeTempDir("provider-availability-codex-");
-    isolateCodexDefaultDiscoveryTo(binDir);
-    const client = new CodexAppServerAgentClient(createTestLogger());
-
-    await expect(client.isAvailable()).resolves.toBe(false);
-  });
-
-  test("Codex reports available from a Microsoft Store install path when PATH misses codex", async () => {
-    const originalPlatform = process.platform;
-    const originalLocalAppData = process.env.LOCALAPPDATA;
-    const root = makeTempDir("provider-availability-codex-store-");
-    const emptyPathDir = join(root, "empty-path");
-    const codexBinDir = join(
-      root,
-      "Packages",
-      "OpenAI.Codex_abc123",
-      "LocalCache",
-      "Local",
-      "OpenAI",
-      "Codex",
-      "bin",
-    );
-    const codexExe = join(codexBinDir, "codex.exe");
-    mkdirSync(emptyPathDir, { recursive: true });
-    mkdirSync(codexBinDir, { recursive: true });
-    copyFileSync(process.execPath, codexExe);
-    Object.defineProperty(process, "platform", { value: "win32", writable: true });
-    process.env.LOCALAPPDATA = root;
-    isolatePathTo(emptyPathDir);
-    process.env.PATHEXT = ".EXE";
-
-    try {
-      const client = new CodexAppServerAgentClient(createTestLogger());
-
-      await expect(findDefaultCodexBinary()).resolves.toBe(codexExe);
-      await expect(client.isAvailable()).resolves.toBe(true);
-    } finally {
-      Object.defineProperty(process, "platform", { value: originalPlatform, writable: true });
-      if (originalLocalAppData === undefined) {
-        delete process.env.LOCALAPPDATA;
-      } else {
-        process.env.LOCALAPPDATA = originalLocalAppData;
-      }
-    }
-  });
-
-  test("Claude reports unavailable when the default command cannot be resolved", async () => {
-    const binDir = makeTempDir("provider-availability-claude-");
+  test("Pi reports unavailable when the default command cannot be resolved", async () => {
+    const binDir = makeTempDir("provider-availability-pi-");
     isolatePathTo(binDir);
-    const client = new ClaudeAgentClient({ logger: createTestLogger() });
+    const client = new PiRpcAgentClient({ logger: createTestLogger() });
 
     await expect(client.isAvailable()).resolves.toBe(false);
   });
 
-  test("OpenCode reports unavailable when the default command cannot be resolved", async () => {
-    const binDir = makeTempDir("provider-availability-opencode-");
-    isolatePathTo(binDir);
-    const client = new OpenCodeAgentClient(createTestLogger());
-
-    await expect(client.isAvailable()).resolves.toBe(false);
-  });
-
-  test("AgentManager reports Codex unavailable without throwing", async () => {
+  test("AgentManager reports Pi unavailable without throwing", async () => {
     const binDir = makeTempDir("provider-availability-manager-bin-");
-    isolateCodexDefaultDiscoveryTo(binDir);
+    isolatePathTo(binDir);
     const workdir = makeTempDir("provider-availability-manager-work-");
     const storage = new AgentStorage(join(workdir, "agents"), createTestLogger());
     const manager = new AgentManager({
       clients: {
-        codex: new CodexAppServerAgentClient(createTestLogger()),
+        pi: new PiRpcAgentClient({ logger: createTestLogger() }),
       },
       registry: storage,
       logger: createTestLogger(),
@@ -131,21 +67,21 @@ describe("default provider availability", () => {
 
     await expect(manager.listProviderAvailability()).resolves.toEqual([
       {
-        provider: "codex",
+        provider: "pi",
         available: false,
         error: null,
       },
     ]);
   });
 
-  test("resumeAgentFromPersistence stops before provider spawn when Codex is unavailable", async () => {
+  test("resumeAgentFromPersistence stops before provider spawn when Pi is unavailable", async () => {
     const binDir = makeTempDir("provider-availability-resume-bin-");
-    isolateCodexDefaultDiscoveryTo(binDir);
+    isolatePathTo(binDir);
     const workdir = makeTempDir("provider-availability-resume-work-");
     const storage = new AgentStorage(join(workdir, "agents"), createTestLogger());
     const manager = new AgentManager({
       clients: {
-        codex: new CodexAppServerAgentClient(createTestLogger()),
+        pi: new PiRpcAgentClient({ logger: createTestLogger() }),
       },
       registry: storage,
       logger: createTestLogger(),
@@ -154,15 +90,15 @@ describe("default provider availability", () => {
     await expect(
       manager.resumeAgentFromPersistence(
         {
-          provider: "codex" as AgentProvider,
-          sessionId: "missing-codex-session",
+          provider: "pi" as AgentProvider,
+          sessionId: "missing-pi-session",
           metadata: {
-            provider: "codex",
+            provider: "pi",
             cwd: workdir,
           },
         },
         { cwd: workdir },
       ),
-    ).rejects.toThrow("Provider 'codex' is not available");
+    ).rejects.toThrow("Provider 'pi' is not available");
   });
 });

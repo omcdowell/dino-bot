@@ -83,7 +83,6 @@ import {
   TurnFooter,
   TURN_FOOTER_BOTTOM_SPACING,
   type AssistantTurnForkHandler,
-  type InFlightTurnForkHandler,
   type TurnContentStrategy,
 } from "./turn-footer";
 import { resolveBottomOverlayTailInset } from "./bottom-overlay-inset";
@@ -103,7 +102,6 @@ import {
 } from "@/workspace/file-open";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { useStableEvent } from "@/hooks/use-stable-event";
-import { useForkAgent } from "@/hooks/use-fork-agent";
 import { isWeb } from "@/constants/platform";
 import type { Theme } from "@/styles/theme";
 import { recordRenderProfileReasons } from "@/utils/render-profiler";
@@ -396,7 +394,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       state.sessions[resolvedServerId]?.agentStreamHead?.get(agentId),
     );
     const streamHead = providedStreamHead ?? sessionStreamHead;
-    const forkAgent = useForkAgent({ serverId: resolvedServerId, toast, readOnly });
     const supportsAgentForkContextCursor = useSessionStore(
       (state) =>
         state.sessions[resolvedServerId]?.serverInfo?.features?.agentForkContextCursor === true,
@@ -561,31 +558,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
     const handleToolCallOpenFile = useStableEvent((filePath: string) => {
       handleInlinePathPress({ raw: filePath, path: filePath }, "preferred");
-    });
-
-    const handleForkAssistantTurn: AssistantTurnForkHandler = useStableEvent(
-      async ({ target, boundary }) => {
-        await forkAgent({
-          agentId,
-          agent: context,
-          workspaceId: context.workspaceId,
-          target,
-          boundary,
-        });
-      },
-    );
-
-    // The in-flight turn forks with no boundary at all: `selectForkContextRows`
-    // projects the whole timeline when neither boundary field is given, so the
-    // fork carries everything up to now, including the response still streaming
-    // in front of the user.
-    const handleForkInFlightTurn: InFlightTurnForkHandler = useStableEvent(async (target) => {
-      await forkAgent({
-        agentId,
-        agent: context,
-        workspaceId: context.workspaceId,
-        target,
-      });
     });
 
     // Freeze stream presentation while this tab slot is hidden to prevent offscreen
@@ -999,16 +971,9 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           layoutItem,
           strategy: streamRenderStrategy,
           supportsTimelineCursor: supportsAgentForkContextCursor,
-          onForkAssistantTurn: readOnly ? undefined : handleForkAssistantTurn,
         });
       },
-      [
-        handleForkAssistantTurn,
-        readOnly,
-        renderStreamItemContent,
-        streamRenderStrategy,
-        supportsAgentForkContextCursor,
-      ],
+      [renderStreamItemContent, streamRenderStrategy, supportsAgentForkContextCursor],
     );
 
     const pendingPermissionItems = useMemo(
@@ -1033,14 +998,9 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             host={bottomTurnFooterHost}
             strategy={streamRenderStrategy}
             supportsTimelineCursor={supportsAgentForkContextCursor}
-            onForkAssistantTurn={readOnly ? undefined : handleForkAssistantTurn}
-            onForkInFlightTurn={readOnly ? undefined : handleForkInFlightTurn}
           />
         ) : null,
       [
-        handleForkAssistantTurn,
-        handleForkInFlightTurn,
-        readOnly,
         isTurnActive,
         baseRenderModel.turnTiming.runningStartedAt,
         bottomTurnFooterHost,

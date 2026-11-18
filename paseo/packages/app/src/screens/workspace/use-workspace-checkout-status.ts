@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { checkoutStatusQueryKey } from "@/git/query-keys";
 import { fetchCheckoutStatus } from "@/git/checkout-status-cache";
-import { canCreateWorkspaceTerminal } from "@/screens/workspace/terminals/state";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 
 interface UseWorkspaceCheckoutStatusInput {
@@ -19,12 +18,9 @@ export function useWorkspaceCheckoutStatus(input: UseWorkspaceCheckoutStatusInpu
   const { t } = useTranslation();
   const isCheckoutQueryEnabled = useMemo(
     () =>
-      canCreateWorkspaceTerminal({
-        isRouteFocused: input.isRouteFocused,
-        client: input.client,
-        isConnected: input.isConnected,
-        workspaceDirectory: input.workspaceDirectory,
-      }),
+      Boolean(
+        input.isRouteFocused && input.client && input.isConnected && input.workspaceDirectory,
+      ),
     [input.client, input.isConnected, input.isRouteFocused, input.workspaceDirectory],
   );
   const checkoutQuery = useQuery({

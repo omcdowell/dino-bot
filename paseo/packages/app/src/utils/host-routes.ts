@@ -121,10 +121,7 @@ function isCleanLegacyPathDecode(value: string): boolean {
 
 export type WorkspaceOpenIntent =
   | { kind: "agent"; agentId: string }
-  | { kind: "terminal"; terminalId: string }
-  | { kind: "file"; path: string }
-  | { kind: "draft"; draftId: string }
-  | { kind: "setup"; workspaceId: string };
+  | { kind: "file"; path: string };
 
 export function parseWorkspaceOpenIntent(
   value: string | null | undefined,
@@ -148,12 +145,6 @@ export function parseWorkspaceOpenIntent(
   if (kind === "agent") {
     return { kind: "agent", agentId: payload };
   }
-  if (kind === "terminal") {
-    return { kind: "terminal", terminalId: payload };
-  }
-  if (kind === "draft") {
-    return { kind: "draft", draftId: payload };
-  }
   if (kind === "file") {
     const decodedPath = decodeFilePathFromPathSegment(payload);
     if (!decodedPath) {
@@ -161,14 +152,6 @@ export function parseWorkspaceOpenIntent(
     }
     return { kind: "file", path: decodedPath };
   }
-  if (kind === "setup") {
-    const workspaceId = decodeWorkspaceIdFromPathSegment(payload);
-    if (!workspaceId) {
-      return null;
-    }
-    return { kind: "setup", workspaceId };
-  }
-
   return null;
 }
 
@@ -404,26 +387,6 @@ export function buildHostRootRoute(serverId: string) {
   return `/h/${encodeSegment(normalized)}` as const;
 }
 
-export function buildHostOpenProjectRoute(serverId: string) {
-  const base = buildHostRootRoute(serverId);
-  if (base === "/") {
-    return "/" as const;
-  }
-  return `${base}/open-project` as const;
-}
-
-export function buildHostSessionsRoute(serverId: string) {
-  const base = buildHostRootRoute(serverId);
-  if (base === "/") {
-    return "/" as const;
-  }
-  return `${base}/sessions` as const;
-}
-
-export function buildSessionsRoute() {
-  return "/sessions" as const;
-}
-
 export function buildSchedulesRoute() {
   return "/schedules" as const;
 }
@@ -432,50 +395,9 @@ export function buildNetworkRoute(serverId?: string | null) {
   return serverId ? (`/network?serverId=${encodeURIComponent(serverId)}` as const) : "/network";
 }
 
-export function buildOpenProjectRoute() {
-  return "/open-project" as const;
-}
-
-interface NewWorkspaceRouteOptions {
-  serverId?: string;
-  sourceDirectory?: string;
-  displayName?: string;
-  projectId?: string;
-  draftId?: string;
-}
-
-function buildNewWorkspaceSearch(options: NewWorkspaceRouteOptions): string {
-  const params = new URLSearchParams();
-  const serverId = trimNonEmpty(options.serverId);
-  if (serverId) {
-    params.set("serverId", serverId);
-  }
-  if (options.sourceDirectory) {
-    params.set("dir", options.sourceDirectory);
-  }
-  if (options.displayName) {
-    params.set("name", options.displayName);
-  }
-  if (options.projectId) {
-    params.set("projectId", options.projectId);
-  }
-  if (options.draftId) {
-    params.set("draftId", options.draftId);
-  }
-  return params.toString();
-}
-
-export function buildNewWorkspaceRoute(options: NewWorkspaceRouteOptions = {}) {
-  const query = buildNewWorkspaceSearch(options);
-  if (!query) {
-    return "/new" as const;
-  }
-  return `/new?${query}` as const;
-}
-
 export type KnownHostRouteResolution =
   | { kind: "render" }
-  | { kind: "redirect"; href: ReturnType<typeof buildOpenProjectRoute> | "/welcome" };
+  | { kind: "redirect"; href: "/" | "/welcome" };
 
 export function resolveKnownHostRoute(input: {
   routeServerId: string | null | undefined;
@@ -487,7 +409,7 @@ export function resolveKnownHostRoute(input: {
   }
 
   if (input.hosts.length > 0) {
-    return { kind: "redirect", href: buildOpenProjectRoute() };
+    return { kind: "redirect", href: "/" };
   }
 
   return { kind: "redirect", href: "/welcome" };
@@ -496,13 +418,8 @@ export function resolveKnownHostRoute(input: {
 export const SETTINGS_SECTION_SLUGS = [
   "general",
   "appearance",
-  "sidebar",
   "chat",
-  "terminal",
-  "browser",
-  "editor",
   "shortcuts",
-  "integrations",
   "notifications",
   "permissions",
   "diagnostics",
@@ -516,15 +433,11 @@ export function isSettingsSectionSlug(value: string): value is SettingsSectionSl
 }
 
 export const HOST_SECTION_SLUGS = [
-  "projects",
   "connections",
   "pair-device",
   "agents",
-  "metadata",
-  "workspaces",
   "providers",
   "usage",
-  "terminals",
   "plugins",
   "host",
 ] as const;
@@ -573,24 +486,4 @@ export function buildSettingsHostSectionRoute(serverId: string, section: HostSec
     throw new Error("buildSettingsHostSectionRoute requires a non-empty serverId");
   }
   return `/settings/hosts/${encodeSegment(normalized)}/${section}` as const;
-}
-
-export function buildProjectsSettingsRoute(serverId: string) {
-  const normalized = trimNonEmpty(serverId);
-  if (!normalized) {
-    throw new Error("buildProjectsSettingsRoute requires a non-empty serverId");
-  }
-  return `/settings/hosts/${encodeSegment(normalized)}/projects` as const;
-}
-
-export function buildProjectSettingsRoute(serverId: string, projectId: string) {
-  if (!serverId.trim() || !projectId.trim()) {
-    throw new Error("buildProjectSettingsRoute requires a serverId and projectId");
-  }
-  return `/settings/hosts/${encodeSegment(serverId)}/projects/${encodeSegment(projectId)}` as const;
-}
-
-export function normalizeProjectSettingsRouteId(value: string | string[] | undefined): string {
-  const id = Array.isArray(value) ? value[0] : value;
-  return typeof id === "string" ? id : "";
 }

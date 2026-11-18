@@ -94,12 +94,31 @@ test("teardown ends every subscription the plugin still holds", async () => {
   await expect.poll(() => h.open.size).toBe(0);
 });
 
-test("reloading a plugin ends the old installation's subscriptions", async () => {
+test("reloading a plugin with an unchanged bundle keeps the installation and refreshes its data", () => {
+  const h = registry();
+  h.plugins.installCatalog("host", [catalog("bots")], { client: h.client, audio });
+  const [first] = h.plugins.getSnapshot();
+  first.queryClient.setQueryData(["bots.list"], ["flint"]);
+
+  h.plugins.installCatalog("host", [catalog("bots")], {
+    client: h.client,
+    audio,
+    replacePluginId: "bots",
+  });
+
+  const [second] = h.plugins.getSnapshot();
+  expect(second).toBe(first);
+  expect(first.lifetime.signal.aborted).toBe(false);
+  expect(first.queryClient.getQueryState(["bots.list"])?.isInvalidated).toBe(true);
+  expect(h.open).toEqual(new Set(["bots"]));
+});
+
+test("reloading a plugin with a changed bundle ends the old installation's subscriptions", async () => {
   const h = registry();
   h.plugins.installCatalog("host", [catalog("reloaded")], { client: h.client, audio });
   const [first] = h.plugins.getSnapshot();
 
-  h.plugins.installCatalog("host", [catalog("reloaded")], {
+  h.plugins.installCatalog("host", [catalog("reloaded", "return function() { /* v2 */ };")], {
     client: h.client,
     audio,
     replacePluginId: "reloaded",

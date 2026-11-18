@@ -25,7 +25,7 @@
   </a>
 </p>
 
-<p align="center">One interface for Claude Code, Codex, Copilot, OpenCode, Pi, Antigravity, and Muse Code agents.</p>
+<p align="center">One interface for Pi agents, plus provider plugins.</p>
 
 <p align="center">
   <img src="https://paseo.sh/hero-mockup.png" alt="Paseo app screenshot" width="100%">
@@ -41,7 +41,7 @@ Paseo is an open source agentic development environment for desktop, mobile, web
 - **Built-in orchestration:** Agents in Paseo can create worktrees, launch other agents, and talk to them, across providers.
 - **Complete development workflow:** Edit files, review diffs, open pull requests, and run terminals, in split panes you arrange how you want.
 - **Self-hosted:** Agents run on your machine with your full dev environment. Use your tools, your configs, and your skills.
-- **Multi-provider:** Claude Code, Codex, Copilot, OpenCode, Pi, Antigravity, and Muse Code through the same interface. Pick the right model for each job.
+- **Multi-provider:** Pi (with its many model providers) and provider plugins through the same interface. Pick the right model for each job.
 - **Voice control:** Dictate tasks or talk through problems in voice mode. Hands-free when you need it.
 - **Cross-device:** iOS, Android, desktop, web, and CLI. Start work at your desk, check in from your phone, script it from the terminal.
 - **Privacy-first:** Paseo doesn't have any telemetry, tracking, or forced log-ins.
@@ -71,13 +71,7 @@ Paseo runs a local server called the daemon that manages your coding agents. Cli
 
 You need at least one agent CLI installed and configured with your credentials:
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-- [Codex](https://github.com/openai/codex)
-- [GitHub Copilot](https://github.com/features/copilot/cli/)
-- [OpenCode](https://github.com/anomalyco/opencode)
 - [Pi](https://pi.dev)
-- [Antigravity](https://paseo.sh/docs/supported-providers#antigravity)
-- [Muse Code](https://paseo.sh/docs/muse-code)
 
 ### Desktop app (recommended)
 
@@ -123,7 +117,7 @@ Everything you can do in the app, you can do from the terminal.
 
 ```bash
 paseo run --provider claude/opus-4.6 "implement user authentication"
-paseo run --provider codex/gpt-5.5 --worktree feature-x "implement feature X"
+paseo run --provider pi/openai-codex/gpt-5.5 --worktree feature-x "implement feature X"
 
 paseo ls                           # list running agents
 paseo attach abc123                # stream live output
@@ -146,7 +140,7 @@ const client = createPaseoClient({ url: "ws://127.0.0.1:6767/ws" });
 await client.connect();
 
 const agent = await client.agents.create({
-  config: { provider: "codex/gpt-5.5" },
+  config: { provider: "pi/openai-codex/gpt-5.5" },
   cwd: "/Users/me/dev/storefront",
   prompt: "Review the current diff and name the riskiest change.",
 });

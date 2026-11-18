@@ -4,7 +4,7 @@ For AI coding agents working in `packages/server`. Supplements [CLAUDE.md](../CL
 
 ## Project Overview
 
-Paseo is a mobile + CLI app for monitoring and controlling local AI coding agents (Claude Code, Codex, GitHub Copilot, OpenCode, Pi). The daemon runs on your machine, manages agent processes, and streams their output over WebSocket to clients.
+Paseo is a mobile + CLI app for monitoring and controlling local AI coding agents (Pi built in; Claude Code via the terminal). The daemon runs on your machine, manages agent processes, and streams their output over WebSocket to clients.
 
 ---
 
@@ -165,7 +165,7 @@ packages/server/src/
 │   └── agent/
 │       ├── agent-manager.ts  # Agent lifecycle state machine
 │       └── agent-storage.ts  # File-backed JSON persistence
-├── providers/                 # Claude, Codex, Copilot, OpenCode, Pi adapters
+├── providers/                 # Pi (and dev mock) adapters
 ├── relay-transport.ts        # Outbound relay connection
 ```
 

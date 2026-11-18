@@ -96,11 +96,16 @@ folder or its name starts with `<bot>-`. If herdr cannot be read, nothing is sho
 
 **Stalled workers** (2026-10-10). A registered worker that would count as finished because
 herdr says idle/done is *stalled* instead when it stopped on an error (`server/worker-errors.ts`):
-the last message in its pi session file (the path herdr reports as `agent_session`) is an assistant
-message with `stopReason` `error`/`aborted` (`Request timed out.`, `429 …`, `Connection error.`,
-`Operation aborted`, …), written after the launch (and after its last report, if it reported
-mid-job and was prompted again). Without a session file the bottom of the pane's
-output (`herdr agent read`) is matched against error lines. A stalled worker is not outstanding; the
+the last message in its session file is an error, written after the launch (and after its last
+report, if it reported mid-job and was prompted again). pi: the path herdr reports as
+`agent_session`; an assistant message with `stopReason` `error`/`aborted` (`Request timed out.`,
+`429 …`, `Connection error.`, `Operation aborted`, …). Claude Code (2026-11-18; herdr reports no
+session for it): the transcript launch.sh records in the registry (`bot-worker add --session`); an
+assistant entry with `isApiErrorMessage` (`API Error: Request rejected (429) …`, `API Error:
+Repeated 529 Overloaded errors …`, `Login expired …`) or an interrupt. herdr shows a Claude Code
+worker idle while Claude Code retries; its `<config>/sessions/<pid>.json` says `busy` then, and the
+worker stays running. Without a session file the bottom of the pane's output (`herdr agent read`)
+is matched against error lines. A stalled worker is not outstanding; the
 row shows a red dot with the number of stalled workers. A stall-watch add-on (not in this plugin;
 `extensions` setting) may send the bot one DM per stall: `bot-dm <bot> --from worker:stall-watch --kind info`, with the system
 nudge line ("not a message from the owner"), naming the worker, pane and error, claimed in
@@ -119,6 +124,32 @@ named in `skills/workers/worker-skills.txt` (`diagnose`, `tdd`, `screenshot-app`
 under `skills/`; each folder has its LICENSE and NOTICE). Not this one, not the bot's, not the
 user's global ones. `WORKER_SKILLS=<path>[:<path>]` adds more; an entry `none` drops the shortlist.
 Bots do not get the shortlist: `botSkillArgs` passes each other folder under `skills/` instead.
+
+**Restarts and reloads** (`bin/bot-restart.mjs`, logic in `bot-restart/cli.ts`). The one route for
+restarting the daemon (`bot-restart daemon`), reloading a plugin (`bot-restart plugin [bots|apns]`) or
+reloading bots' agents (`bot-restart agents all|<bot>…`). A bot starts a worker that runs it. It is
+refused in a bot's own session (`PASEO_AGENT_ID` in its env or an ancestor's, or a process in the
+daemon's service cgroup). It waits until no bot is mid-turn (Paseo status of every OptChat agent,
+plus `cc-*` TUIs in herdr; for a daemon restart any agent running; for `agents <bot>…` only those
+bots): two idle checks `--gap` seconds apart (15), giving up after `--timeout` (20 min, exit 5,
+nothing done). `agents <bot>… --now` skips the wait to repair a bot stuck mid-turn (logged
+`forced: true`; refused for `all`, `daemon` and `plugin`). For a Claude Code bot `agents` also closes its TUI's herdr tab (`cc-<bot>`) before the reload, so a fresh TUI
+with the current mods and hooks starts on the reload or the bot's next message. Then it acts once, checks
+DinoBot is back (unit active with a new MainPID and the daemon answering; plugin `running` without
+error; agents listed again), prints one JSON line and appends it to
+`~/.local/state/bot-restart/log.jsonl`. `--dry-run` says what it would do; a lock stops two runs
+overlapping. The daemon unit is whichever of `paseo.service`/`dinobot.service` is active
+(`--service` to choose); on macOS launchd `app.dinobot.daemon`; elsewhere it says it is not supported.
+OptChat's restart guard (`optchat/src/restart-guard.ts`) refuses the direct commands (`systemctl …
+restart paseo`, `paseo plugin|agent reload`, `paseo daemon restart`, `pkill paseo`, the same inside
+`systemd-run`, `at`, `nohup`, `bash -c` or a script) in a bot's own pi session and names `bot-restart`.
+It allows `paseo agent reload` of other, named agents, but not of the bot's own agent, `all`, no id or a
+variable.
+Bots on Claude Code get the same rules through a stock `PreToolUse` hook on `Bash` (`claude-code/guard/`, a
+`--plugin-dir` that only `claude-code/start-bot.sh` adds, never workers): `hooks/restart-guard.mjs` runs
+OptChat's matcher on the command and blocks with exit code 2 and the same line; it fails open (exit 0).
+Link: `ln -s ~/code/dinobot/plugins/bots/bin/bot-restart.mjs ~/.local/bin/bot-restart`; installs get a
+`~/.dinobot/bin/bot-restart` wrapper.
 
 ## DMs
 
@@ -183,6 +214,10 @@ npm test
 npm run typecheck
 paseo plugin reload bots
 ```
+
+### Engine parity (pi and Claude Code)
+
+Both engines run a turn through one module, `optchat/src/turn.ts` (open, between turns, log, end, close). `test/engines.test.ts` runs one scenario suite on both: message, stream, tool, stop, steer, crash, error, room talk, compaction, usage, images, guard. A feature merges when it passes the suite on both engines, or joins `CC_UNSUPPORTED` in that file with a one-line reason. A listed scenario must still fail on Claude Code, so the list shrinks when Claude Code gains it.
 
 ## bot-room (a main chat posts a room task's result to the group)
 

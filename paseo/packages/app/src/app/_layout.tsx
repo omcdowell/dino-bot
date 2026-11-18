@@ -30,12 +30,9 @@ import { CommandCenterRootActions } from "@/command-center/root-registration";
 import { CommandCenterProvider } from "@/command-center/provider";
 import { CommandCenterWorkspaceActions } from "@/command-center/workspace-registration";
 import { PluginCommandCenterActions } from "@/plugins/command-center/registration";
-import { AddProjectFlowHost } from "@/components/add-project-flow-host";
-import { WorktreeSetupCalloutSource } from "@/components/worktree-setup-callout-source";
 import { DownloadToast } from "@/components/download-toast";
 import { QuittingOverlay } from "@/components/quitting-overlay";
 import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog";
-import { ChangelogHost } from "@/changelog";
 import { AppDiagnosticHost } from "@/components/app-diagnostic-host";
 import { AppearanceStyleBoundary } from "@/components/appearance-style-boundary";
 import { LeftSidebar } from "@/components/left-sidebar";
@@ -43,13 +40,11 @@ import { WindowSidebarMenuToggle } from "@/components/headers/menu-header";
 import { DesktopWindowControls } from "@/components/desktop/window-controls";
 import { SidebarModelProvider } from "@/components/sidebar/sidebar-model";
 import { WorkspacePinShortcutHandler } from "@/components/workspace-pin-shortcut-handler";
-import { WorkspaceRenameHost } from "@/components/workspace-rename-host";
 import { CompactExplorerSidebarHost } from "@/components/compact-explorer-sidebar-host";
 import { ProviderSettingsHost } from "@/components/provider-settings-host";
-import { WorkspaceSetupDialog } from "@/components/workspace-setup-dialog";
 import { WorkspaceShortcutTargetsSubscriber } from "@/components/workspace-shortcut-targets-subscriber";
 import { FloatingPanelPortalHost } from "@/components/ui/floating-panel-portal";
-import { HostChooserModal, useHostChooser } from "@/hosts/host-chooser";
+import { HostChooserModal } from "@/hosts/host-chooser";
 import { HostConfirmationSheet } from "@/hosts/host-confirmation-sheet";
 import {
   getIsElectronRuntime,
@@ -86,21 +81,17 @@ import { AgentNavigationListener } from "@/desktop/agent-navigation";
 import { AppLinkNavigationListener } from "@/desktop/app-link-navigation";
 import { LegacyAgentSkillsMigration } from "@/agent-skills/legacy-migration";
 import { legacyFavoriteProfileMigration } from "@/agent-profiles/migration";
-import { listenToDesktopEvent } from "@/desktop/electron/events";
 import { updateDesktopWindowChrome } from "@/desktop/electron/window";
 import { getDesktopHost } from "@/desktop/host";
 import { loadDesktopSettings } from "@/desktop/settings/desktop-settings";
 import { RosettaCalloutSource } from "@/desktop/updates/rosetta-callout-source";
 import { UpdateCalloutSource } from "@/desktop/updates/update-callout-source";
-import { useActiveWorktreeNewAction } from "@/hooks/use-active-worktree-new-action";
-import { useGlobalNewWorkspaceAction } from "@/hooks/use-global-new-workspace-action";
 import { useLatchedBoolean } from "@/hooks/use-latched-boolean";
 import { useFaviconStatus } from "@/hooks/use-favicon-status";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { resolveExplorerSidebarPresentation } from "@/workspace-tabs/explorer-sidebar";
 import { KeyboardShiftProvider } from "@/keyboard/shift";
 import { useCompactWebViewportZoomLock } from "@/hooks/use-compact-web-viewport-zoom-lock";
-import { useOpenProject } from "@/hooks/use-open-project";
 import { useAppSettings } from "@/hooks/use-settings";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { useOpenAgentListGesture } from "@/mobile-panels/gestures";
@@ -114,7 +105,6 @@ import { polyfillNavigator } from "@/polyfills/navigator";
 import {
   getHostRuntimeStore,
   hasConfiguredLocalDaemonOverride,
-  useHostRegistryLoaded,
   useHostRuntimeClient,
   useHostRuntimeIsConnected,
   useHosts,
@@ -133,7 +123,6 @@ import {
   WindowChromeSafeArea,
 } from "@/utils/desktop-window";
 import {
-  buildOpenProjectRoute,
   parseHostWorkspaceRouteFromPathname,
   parseServerIdFromPathname,
 } from "@/utils/host-routes";
@@ -575,9 +564,6 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
     cycleTheme,
   });
 
-  useActiveWorktreeNewAction();
-  useGlobalNewWorkspaceAction();
-
   const appContentMinimumWidth = resolveDesktopAppContentMinimum({
     isSettingsRoute: pathname.includes("/settings"),
   });
@@ -661,21 +647,16 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
         <RosettaCalloutSource />
         <UpdateCalloutSource />
         <LegacyAgentSkillsMigration />
-        <WorktreeSetupCalloutSource />
         <CommandCenterRootActions />
         <CommandCenterWorkspaceActions />
         <PluginCommandCenterActions />
         <WorkspacePinShortcutHandler />
-        <WorkspaceRenameHost />
         <CommandCenter />
-        <AddProjectFlowHost />
         <HostChooserModal />
         <HostConfirmationSheet />
         <ProviderSettingsHost />
-        <WorkspaceSetupDialog />
         <KeyboardShortcutsDialog />
         <AppDiagnosticHost />
-        <ChangelogHost />
         <QuittingOverlay />
       </AppearanceStyleBoundary>
     </View>
@@ -777,7 +758,7 @@ function OfferLinkListener() {
       if (pairLinkFromIncoming(url, APP_LINK_SCHEME)) return;
       try {
         const result = await getHostRuntimeStore().importConnectionLink(url, "openProject");
-        if (!cancelled && result.status === "connected") router.replace(buildOpenProjectRoute());
+        if (!cancelled && result.status === "connected") router.replace("/");
       } catch (error) {
         console.warn("[OfferLinkListener] Pairing link failed", error);
       }
@@ -800,123 +781,6 @@ function OfferLinkListener() {
   return null;
 }
 
-interface OpenProjectEventPayload {
-  path?: unknown;
-}
-
-interface PendingOpenProjectRequest {
-  id: number;
-  serverId: string;
-  path: string;
-}
-
-let nextOpenProjectRequestId = 1;
-
-function OpenProjectListener() {
-  const chooseHost = useHostChooser();
-  const hostRegistryLoaded = useHostRegistryLoaded();
-  const [request, setRequest] = useState<PendingOpenProjectRequest | null>(null);
-  const [pendingPath, setPendingPath] = useState<string | null>(null);
-  const openProject = useOpenProject(request?.serverId ?? null);
-
-  const openPathOnChosenHost = useCallback(
-    (path: string) => {
-      const nextPath = path.trim();
-      if (!nextPath) {
-        return;
-      }
-
-      if (!hostRegistryLoaded) {
-        setPendingPath(nextPath);
-        return;
-      }
-
-      chooseHost({
-        title: "Choose host",
-        onChooseHost: (serverId) => {
-          setRequest({
-            id: nextOpenProjectRequestId++,
-            serverId,
-            path: nextPath,
-          });
-        },
-      });
-    },
-    [chooseHost, hostRegistryLoaded],
-  );
-
-  useEffect(() => {
-    if (!hostRegistryLoaded || !pendingPath) {
-      return;
-    }
-    const nextPath = pendingPath;
-    setPendingPath(null);
-    openPathOnChosenHost(nextPath);
-  }, [hostRegistryLoaded, openPathOnChosenHost, pendingPath]);
-
-  useEffect(() => {
-    if (!request) {
-      return;
-    }
-    let cancelled = false;
-    void openProject(request.path).then((result) => {
-      if (cancelled) {
-        return null;
-      }
-
-      if (!result.ok) {
-        setRequest((current) => (current?.id === request.id ? null : current));
-        return null;
-      }
-
-      setRequest((current) => (current?.id === request.id ? null : current));
-      return null;
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [openProject, request]);
-
-  useEffect(() => {
-    let disposed = false;
-    let unlisten: (() => void) | null = null;
-    void getDesktopHost()
-      ?.getPendingOpenProject?.()
-      ?.then((pending) => {
-        if (!disposed && pending) {
-          openPathOnChosenHost(pending);
-        }
-        return;
-      })
-      .catch(() => undefined);
-
-    // Listen for hot-start paths relayed via the second-instance event.
-    void listenToDesktopEvent<OpenProjectEventPayload>("open-project", (payload) => {
-      if (disposed) {
-        return;
-      }
-      const nextPath = typeof payload?.path === "string" ? payload.path.trim() : "";
-      openPathOnChosenHost(nextPath);
-    })
-      .then((dispose) => {
-        if (disposed) {
-          dispose();
-          return;
-        }
-        unlisten = dispose;
-        return;
-      })
-      .catch(() => undefined);
-
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, [openPathOnChosenHost]);
-
-  return null;
-}
-
 function AppWithSidebar({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const hosts = useHosts();
@@ -925,13 +789,7 @@ function AppWithSidebar({ children }: { children: ReactNode }) {
   const routeHasKnownHost =
     routeServerId !== null && hosts.some((host) => host.serverId === routeServerId);
   const shouldShowAppChrome =
-    storeReady &&
-    (pathname === "/open-project" ||
-      pathname === "/new" ||
-      pathname === "/sessions" ||
-      pathname === "/schedules" ||
-      pathname === "/network" ||
-      routeHasKnownHost);
+    storeReady && (pathname === "/schedules" || pathname === "/network" || routeHasKnownHost);
 
   return <AppContainer chromeEnabled={shouldShowAppChrome}>{children}</AppContainer>;
 }
@@ -959,9 +817,6 @@ function RootStack() {
         <Stack.Screen name="welcome" />
         <Stack.Screen name="settings/index" />
         <Stack.Screen name="settings/[section]" />
-        <Stack.Screen name="new" />
-        <Stack.Screen name="open-project" />
-        <Stack.Screen name="sessions" />
         <Stack.Screen name="schedules" />
         <Stack.Screen name="pair-scan" />
         <Stack.Screen name="network" />
@@ -976,8 +831,6 @@ function RootStack() {
       <Stack.Screen name="settings/hosts/[serverId]/index" />
       <Stack.Screen name="settings/hosts/[serverId]/[hostSection]" />
       <Stack.Screen name="settings/hosts/[serverId]/plugins/[pluginId]/[screenId]" />
-      <Stack.Screen name="settings/hosts/[serverId]/projects/index" />
-      <Stack.Screen name="settings/hosts/[serverId]/projects/[projectId]" />
     </ThemedStack>
   );
 }
@@ -996,7 +849,6 @@ function AppShell() {
   return (
     <MobilePanelsProvider>
       <HorizontalScrollProvider>
-        <OpenProjectListener />
         <AgentNavigationListener />
         <AppLinkNavigationListener />
         <AppWithSidebar>

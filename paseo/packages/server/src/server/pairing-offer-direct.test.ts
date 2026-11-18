@@ -95,6 +95,44 @@ describe("direct pairing offer (relay off)", () => {
     });
   });
 
+  it("offers one route: a MagicDNS name is dropped when the tailnet IP is offered too", async () => {
+    const pairing = await generateLocalPairingOffer({
+      paseoHome: tempHome(),
+      relayEnabled: false,
+      includeQr: false,
+      direct: {
+        listen: "100.64.0.7:6767",
+        password: "pw",
+        extraEndpoints: ["box.tail1.ts.net:6767"],
+      },
+    });
+    const parsed = parsePairingOfferFromUrl(pairing.url!);
+    expect(parsed?.kind).toBe("direct");
+    if (parsed?.kind !== "direct") return;
+    expect(parsed.offer.endpoints).toEqual(["100.64.0.7:6767"]);
+  });
+
+  it("dropShadowedMagicDnsEndpoints keeps a lone name and names on other ports", async () => {
+    const { dropShadowedMagicDnsEndpoints } = await import("./connection-offer.js");
+    expect(dropShadowedMagicDnsEndpoints(["box.tail1.ts.net:6767", "100.64.0.7:6767"])).toEqual([
+      "100.64.0.7:6767",
+    ]);
+    expect(dropShadowedMagicDnsEndpoints(["BOX.tail1.TS.NET:6767", "100.64.0.7:6767"])).toEqual([
+      "100.64.0.7:6767",
+    ]);
+    expect(dropShadowedMagicDnsEndpoints(["box.tail1.ts.net:6767"])).toEqual([
+      "box.tail1.ts.net:6767",
+    ]);
+    expect(dropShadowedMagicDnsEndpoints(["box.tail1.ts.net:6768", "100.64.0.7:6767"])).toEqual([
+      "box.tail1.ts.net:6768",
+      "100.64.0.7:6767",
+    ]);
+    expect(dropShadowedMagicDnsEndpoints(["box.tail1.ts.net:6767", "192.168.1.2:6767"])).toEqual([
+      "box.tail1.ts.net:6767",
+      "192.168.1.2:6767",
+    ]);
+  });
+
   it("recognises tailnet endpoints", async () => {
     const { isTailnetEndpoint } = await import("./connection-offer.js");
     expect(isTailnetEndpoint("box.tail1234.ts.net:6767")).toBe(true);

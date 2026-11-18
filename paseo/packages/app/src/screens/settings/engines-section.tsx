@@ -23,7 +23,6 @@ import {
   type PiCard as PiData,
   type PiSignIn,
 } from "@/onboarding/engines-model";
-import { buildNewWorkspaceRoute } from "@/utils/host-routes";
 import { botModelsRoute } from "@/onboarding/onboarding-model";
 import { BotProvidersSection } from "@/screens/settings/bot-providers-section";
 
@@ -31,7 +30,7 @@ import { BotProvidersSection } from "@/screens/settings/bot-providers-section";
  * Settings → host → Providers on a DinoBot computer, "Two engines" (providers redesign, option A):
  * what the bots run on. The pi card first (the default: each sign-in, ready or not, API keys shown
  * only as a hint; sign in, sign in again, sign out; added packages), then the Claude Code card
- * (login, plan, version, the bots on it; log in, log out), then "Add" and "Other tools".
+ * (login, plan, version, the bots on it; log in, log out), then "Add".
  * A daemon from before engines.* gets the older Bot sign-ins list; a host without DinoBot, nothing.
  */
 export function EnginesSection({
@@ -78,10 +77,6 @@ export function EnginesSection({
   const claudeLogin = useCallback(() => go(claudeCodeSignInRoute(serverId)), [go, serverId]);
   const claudeInstall = useCallback(() => go(claudeCodeInstallRoute(serverId)), [go, serverId]);
   const botModels = useCallback(() => go(botModelsRoute(serverId)), [go, serverId]);
-  const openTerminal = useCallback(
-    () => go(buildNewWorkspaceRoute({ serverId })),
-    [go, serverId],
-  );
 
   /** Runs one change on the computer, then reloads; errors show on the screen. */
   const act = useCallback(
@@ -144,9 +139,7 @@ export function EnginesSection({
 
   if (mode === "hidden") return null;
   if (mode === "legacy") {
-    return (
-      <BotProvidersSection serverId={serverId} onAvailabilityChange={onAvailabilityChange} />
-    );
+    return <BotProvidersSection serverId={serverId} onAvailabilityChange={onAvailabilityChange} />;
   }
   return (
     <View testID="engines-section">
@@ -221,31 +214,10 @@ export function EnginesSection({
               />
             </View>
           </SettingsSection>
-          <SettingsSection title="Other tools" style={styles.section}>
-            <View style={settingsStyles.card}>
-              <View style={[settingsStyles.row, styles.row]}>
-                <View style={styles.icon}>
-                  <Text style={styles.iconText}>›_</Text>
-                </View>
-                <View style={styles.text}>
-                  <Text style={settingsStyles.rowTitle}>Codex, OpenCode, …</Text>
-                  <Text style={styles.muted}>Open one in a terminal on your computer</Text>
-                </View>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onPress={openTerminal}
-                  testID="engines-terminal"
-                >
-                  Terminal
-                </Button>
-              </View>
-            </View>
-            <Text style={styles.note}>
-              Keys stay on your computer, in pi&apos;s sign-in file that only your user can read.
-              This app shows only a key&apos;s last 4 characters and never puts a key in a chat.
-            </Text>
-          </SettingsSection>
+          <Text style={styles.note}>
+            Keys stay on your computer, in pi&apos;s sign-in file that only your user can read. This
+            app shows only a key&apos;s last 4 characters and never puts a key in a chat.
+          </Text>
         </>
       ) : null}
     </View>
@@ -329,8 +301,8 @@ function PiCardView({
         testID="engine-pi-status"
       />
       <Text style={styles.blurb}>
-        Runs your bots and workers in the pi terminal app (pi TUI), on any model, with your own
-        keys or logins.
+        Runs your bots and workers in the pi terminal app (pi TUI), on any model, with your own keys
+        or logins.
       </Text>
       {card.signins.length === 0 ? (
         <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
@@ -487,7 +459,10 @@ function ClaudeCodeCardView({
 }) {
   const state = claudeCodeState(card);
   return (
-    <View style={[settingsStyles.card, styles.hero, styles.recommendedCard]} testID="engine-claude-code">
+    <View
+      style={[settingsStyles.card, styles.hero, styles.recommendedCard]}
+      testID="engine-claude-code"
+    >
       <CardHeader
         glyph={"\u2733\uFE0E"}
         glyphStyle="claude"
@@ -558,12 +533,7 @@ function ClaudeCodeCardView({
                 Log out
               </Button>
             ) : (
-              <Button
-                variant="default"
-                size="sm"
-                onPress={onLogin}
-                testID="engine-claude-login"
-              >
+              <Button variant="default" size="sm" onPress={onLogin} testID="engine-claude-login">
                 Log in with Claude
               </Button>
             )}

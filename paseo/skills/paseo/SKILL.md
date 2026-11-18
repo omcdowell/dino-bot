@@ -53,9 +53,9 @@ paseo script stop <name> [--cwd <path> | --workspace <workspace-id>]
 
 ## Agents
 
-**`create_agent`** — required: `title`, `provider` (`claude/opus`, `codex/gpt-5.4`, …), `initialPrompt`. Optional: `workspaceId`, `notifyOnFinish`, `settings`, `labels`. Returns `{ agentId, workspaceId, … }`.
+**`create_agent`** — required: `title`, `provider` (`pi/openai-codex/gpt-5.4`, …), `initialPrompt`. Optional: `workspaceId`, `notifyOnFinish`, `settings`, `labels`. Returns `{ agentId, workspaceId, … }`.
 
-Initial runtime settings live under `settings`: `modeId`, `thinkingOptionId`, and provider-specific `features`. Agent profiles are the preferred source for these values. For Codex fast mode, pass `settings: { features: { "fast_mode": true } }` when creating the agent.
+Initial runtime settings live under `settings`: `modeId`, `thinkingOptionId`, and provider-specific `features`. Agent profiles are the preferred source for these values.
 
 Agent-scoped creation always creates your subagent. Omit `workspaceId` to use your current workspace; pass a workspace returned by `create_workspace` for isolated delegation. Placement never changes parentage.
 
@@ -65,7 +65,7 @@ Agent-scoped `create_agent` defaults `notifyOnFinish` to true. Set it to `false`
 
 **`send_agent_prompt`** — `{ agentId, prompt }`. Use for follow-ups to an existing agent. Returns after dispatch acknowledgement. Agent-scoped calls default `notifyOnFinish` to true; top-level calls have no parent callback.
 
-**`update_agent`** — `{ agentId, name?, labels?, settings? }`. Use `settings` for runtime changes on an existing agent: `modeId`, `model`, `thinkingOptionId`, and provider-specific `features`. For Codex fast mode, pass `settings: { features: { "fast_mode": true } }`.
+**`update_agent`** — `{ agentId, name?, labels?, settings? }`. Use `settings` for runtime changes on an existing agent: `modeId`, `model`, `thinkingOptionId`, and provider-specific `features`.
 
 **`list_agents`** — filter by `cwd`, `statuses`, `sinceHours`, `includeArchived`; set `includeBackground: true` to include agents in background workspaces.
 
@@ -92,7 +92,7 @@ If no profile fits, or no profiles are configured, use the provider discovery to
 
 **`inspect_provider`** — compact provider capability and feature inspection. Required: `provider`; pass `cwd` when you are not in an agent-scoped session. Optional: `settings` with draft `model`, `modeId`, `thinkingOptionId`, and `features`.
 
-Only set feature IDs returned by `inspect_provider`. For Codex fast mode, look for `fast_mode` and pass `settings: { features: { "fast_mode": true } }` to `create_agent` or `update_agent`.
+Only set feature IDs returned by `inspect_provider`.
 
 ## Schedules and heartbeats
 
@@ -122,8 +122,8 @@ The CLI and tools use the same ownership semantics even where their syntax diffe
 paseo workspace create --isolation worktree --mode branch-off --new-branch fix-x --base origin/main
 paseo workspace create --isolation worktree --mode checkout-branch --branch existing-work
 paseo workspace create --isolation worktree --mode checkout-pr --pr-number 42
-paseo run --provider codex/gpt-5.4 --mode full-access --workspace <workspace-id> "<prompt>"
-paseo run --provider codex/gpt-5.4 --mode full-access --new-workspace worktree --worktree-mode branch-off --new-branch fix-x --base origin/main "<prompt>"
+paseo run --provider pi/openai-codex/gpt-5.4 --mode full-access --workspace <workspace-id> "<prompt>"
+paseo run --provider pi/openai-codex/gpt-5.4 --mode full-access --new-workspace worktree --worktree-mode branch-off --new-branch fix-x --base origin/main "<prompt>"
 paseo send <agent-id> "<follow-up>"
 paseo ls
 paseo schedule create --cron "*/15 * * * *" "ping main build"

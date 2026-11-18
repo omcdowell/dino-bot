@@ -124,7 +124,7 @@ describe("workspace navigation", () => {
       {
         serverId: "server-1",
         workspaceId: "workspace-a",
-        target: { kind: "draft", draftId: "draft-1" },
+        target: { kind: "file", path: "/repo/a.ts" },
       },
       deps,
     );
@@ -132,7 +132,7 @@ describe("workspace navigation", () => {
     expect(openedTabs).toEqual([
       {
         workspaceKey: "server-1:workspace-a",
-        target: { kind: "draft", draftId: "draft-1" },
+        target: { kind: "file", path: "/repo/a.ts" },
         pin: false,
       },
     ]);

@@ -8,8 +8,8 @@ import type {
 import type { Href } from "expo-router";
 import {
   buildHostRootRoute,
+  buildSettingsHostSectionRoute,
   buildHostWorkspaceRoute,
-  buildOpenProjectRoute,
 } from "@/utils/host-routes";
 
 export interface HostRuntimeBootstrapStore {
@@ -176,7 +176,9 @@ export function resolveHostIndexRoute(input: {
   ) {
     return buildHostWorkspaceRoute(input.serverId, input.workspaceSelection.workspaceId);
   }
-  return buildOpenProjectRoute();
+  // No workspace to restore and no phone home: land on the host's plugins (where the Bots plugin
+  // lives) instead of Paseo's deleted /open-project home.
+  return buildSettingsHostSectionRoute(input.serverId, "plugins");
 }
 
 function isIndexPathname(pathname: string) {
@@ -239,7 +241,7 @@ function resolveReadyHostStartupRoute(input: ResolveHostStartupRouteInput): Star
 
   const fallbackServerId = input.hosts[0]?.serverId ?? null;
   if (fallbackServerId) {
-    return { kind: "redirect", href: buildOpenProjectRoute() };
+    return { kind: "redirect", href: "/" };
   }
 
   return { kind: "redirect", href: WELCOME_ROUTE };

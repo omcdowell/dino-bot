@@ -1,0 +1,11 @@
+{
+  "description": "Restart guard for a DinoBot bot on Claude Code: the same rules as OptChat's pi hook (optchat/src/restart-guard.ts). Fails open.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/restart-guard.mjs\"", "timeout": 5 }]
+      }
+    ]
+  }
+}

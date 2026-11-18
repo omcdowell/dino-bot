@@ -117,9 +117,6 @@ jobs:
       - name: Build server stack
         run: npm run build:server
 
-      - name: Verify built-in plugins from built output
-        run: node --test scripts/builtin-plugins-dist.test.mjs
-
       - name: Typecheck all packages
         run: npm run typecheck
 
@@ -153,7 +150,7 @@ jobs:
 
       - name: Install agent CLIs for provider tests
         if: ${{ needs.changes.outputs.full != 'false' || needs.changes.outputs.server != 'false' }}
-        run: node scripts/npm-retry.mjs install -g @anthropic-ai/claude-code opencode-ai
+        run: node scripts/npm-retry.mjs install -g @anthropic-ai/claude-code
 
       - name: Build server dependencies
         run: npm run build:server-deps
@@ -165,10 +162,6 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-
-      - name: Run built-in plugin tests
-        if: ${{ needs.changes.outputs.full != 'false' || needs.changes.outputs.server != 'false' }}
-        run: npm run test --workspace=@getpaseo/builtin-plugins
 
       - name: Run Hub CLI/daemon contract
         if: ${{ needs.changes.outputs.full == 'false' && needs.changes.outputs.server == 'false' && needs.changes.outputs.hub != 'false' }}
@@ -390,7 +383,7 @@ jobs:
         run: npm run build --workspace=@getpaseo/expo-two-way-audio
 
       - name: Install agent CLIs for provider tests
-        run: node scripts/npm-retry.mjs install -g @anthropic-ai/claude-code @openai/codex@0.105.0 opencode-ai
+        run: node scripts/npm-retry.mjs install -g @anthropic-ai/claude-code
 
       - name: Run Playwright E2E tests
         run: npm run test:e2e --workspace=@getpaseo/app -- --shard=${{ env.PLAYWRIGHT_SHARD }}
@@ -485,7 +478,7 @@ jobs:
         run: node scripts/npm-retry.mjs ci
 
       - name: Install agent CLIs for provider tests
-        run: node scripts/npm-retry.mjs install -g @anthropic-ai/claude-code @openai/codex@0.105.0 opencode-ai
+        run: node scripts/npm-retry.mjs install -g @anthropic-ai/claude-code
 
       # The local runner builds its dependencies and shards its own E2E files.
       - name: Run CLI E2E tests

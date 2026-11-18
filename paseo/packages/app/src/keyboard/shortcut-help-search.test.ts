@@ -8,7 +8,7 @@ import {
 import { filterShortcutHelpSections, shortcutSearchText } from "./shortcut-help-search";
 
 const MAC_DESKTOP = { isMac: true, isDesktop: true };
-const NEW_WORKSPACE_BINDING = "workspace-new-cmd-n-mac";
+const COMMAND_CENTER_BINDING = "command-center-toggle-cmd-k-mac";
 
 /**
  * The i18n port, filled with the real English strings the rows use. Translation
@@ -16,9 +16,8 @@ const NEW_WORKSPACE_BINDING = "workspace-new-cmd-n-mac";
  * than mocked.
  */
 const EN: Record<string, string> = {
-  "settings.shortcuts.sections.projects": "Projects",
-  "settings.shortcuts.help.newWorkspace": "New workspace",
-  "settings.shortcuts.help.openProject": "Open project",
+  "settings.shortcuts.sections.general": "General",
+  "settings.shortcuts.help.toggleCommandCenter": "Toggle command center",
 };
 
 function translate(key: string): string {
@@ -71,31 +70,31 @@ describe("filterShortcutHelpSections", () => {
   });
 
   it("matches a row by its label", () => {
-    expect(matchedRowIds("new workspace")).toContain("new-workspace");
+    expect(matchedRowIds("command center")).toContain("toggle-command-center");
   });
 
   it("matches a row by the rendered badge", () => {
-    expect(matchedRowIds("⌘n")).toContain("new-workspace");
+    expect(matchedRowIds("⌘k")).toContain("toggle-command-center");
   });
 
   it("matches a row by a spelled-out modifier", () => {
-    expect(matchedRowIds("command+n")).toContain("new-workspace");
+    expect(matchedRowIds("command+k")).toContain("toggle-command-center");
   });
 
   // The reported bug, from the search side: the cheat sheet has to stop finding
   // a row by keys the user has rebound away from.
   it("finds a rebound row by its new keys and not by the superseded default", () => {
-    const overrides = { [NEW_WORKSPACE_BINDING]: "Cmd+Shift+K" };
+    const overrides = { [COMMAND_CENTER_BINDING]: "Cmd+Shift+J" };
 
-    expect(matchedRowIds("cmd+shift+k", overrides)).toContain("new-workspace");
-    expect(matchedRowIds("cmd+n", overrides)).not.toContain("new-workspace");
+    expect(matchedRowIds("cmd+shift+j", overrides)).toContain("toggle-command-center");
+    expect(matchedRowIds("cmd+k", overrides)).not.toContain("toggle-command-center");
   });
 
   it("still finds an unassigned row by its label", () => {
-    const overrides = { [NEW_WORKSPACE_BINDING]: UNASSIGNED_COMBO };
+    const overrides = { [COMMAND_CENTER_BINDING]: UNASSIGNED_COMBO };
 
-    expect(matchedRowIds("new workspace", overrides)).toContain("new-workspace");
-    expect(matchedRowIds("cmd+n", overrides)).not.toContain("new-workspace");
+    expect(matchedRowIds("command center", overrides)).toContain("toggle-command-center");
+    expect(matchedRowIds("cmd+k", overrides)).not.toContain("toggle-command-center");
   });
 
   it("keeps every row of a section whose own title matches", () => {

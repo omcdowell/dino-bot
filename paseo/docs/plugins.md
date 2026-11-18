@@ -107,13 +107,9 @@ absent from the installed plugin list and source configuration; their client bun
 appear in the plugin catalog. Editing one in development requires a daemon restart.
 Directory, Git, and npm installs cannot use a built-in ID.
 
-Provider plugins use separate installation and provider IDs. `muse-provider` registers the
-selectable `muse` provider (Muse Code) and a usage source. Its `status({ launch })` reports
-availability and a diagnostic after the daemon resolves the executable. Configure command,
-environment, or enablement overrides under `agents.providers.muse`. Omit `extends` to keep
-the bundled integration; an entry with `extends` shadows it with a custom provider. See
-[provider contributions](#contribute-a-provider) for the contract and
-[Muse Code](../public-docs/muse-code.md) for setup, per-agent options, and version limitations.
+Provider plugins use separate installation and provider IDs: configure overrides under
+`agents.providers.<provider-id>`. Omit `extends` to keep the plugin's integration; an entry with
+`extends` shadows it with a custom provider. See [provider contributions](#contribute-a-provider).
 
 ## Install from a registry
 
@@ -254,7 +250,7 @@ dependency; shared types must not refer to React components, hooks, Node APIs, o
 | ---------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------- |
 | `@getpaseo/plugin`                                   | Shared data, schemas, RPC/settings definitions, runtime-neutral helpers    | Shared code only       |
 | `@getpaseo/plugin/server`                            | Server contexts, lifecycle contracts, and CLI process launch               | Shared and server code |
-| `@getpaseo/plugin/server/provider`, `/server/acp`    | Server provider contracts and adapters                                     | Shared and server code |
+| `@getpaseo/plugin/server/provider`                   | Server provider contracts and adapters                                     | Shared and server code |
 | `@getpaseo/plugin/client`                            | Client contribution contexts, hooks, navigation, and UI contribution types | Shared and client code |
 | `@getpaseo/plugin/client/react-native`, `/client/ui` | Host-provided UI components                                                | Shared and client code |
 | `@getpaseo/plugin/client/host`                       | App-owned rendering integration; not a plugin-author entry                 | Shared and client code |
@@ -479,12 +475,8 @@ persistence. Re-read credentials and provider-owned configuration on `session.op
 daemon launch from `connect` and the per-session env and MCP servers from `session.open`. There is
 no provider reload input.
 
-For an ACP command, register `runAcpProvider({ id, label, command })` from
-`@getpaseo/plugin/server/acp`. Its transformer hooks cover narrow vendor differences; do not translate the
-whole provider event stream. The shim uses the resolved launch for every probe and session, overlaying
-only the supplied per-session env for sessions. The direct and ACP examples live in
-`plugin-examples/provider-direct`
-and `plugin-examples/provider-acp-transformer`.
+The direct provider example lives in `plugin-examples/provider-direct`. (DinoBot removed the ACP
+shim `@getpaseo/plugin/server/acp` and its example.)
 
 Provider-emitted plugin timeline items use the same renderer registration as transformed and
 daemon-appended plugin items. The direct example includes both sides. The renderer-only

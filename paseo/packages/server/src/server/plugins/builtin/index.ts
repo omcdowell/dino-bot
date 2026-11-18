@@ -2,19 +2,9 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const builtinPlugins = [
-  "antigravity-provider",
-  "claude-usage-source",
-  "codex-usage-source",
-  "copilot-usage-source",
-  "cursor-usage-source",
-  "grok-usage-source",
-  "kimi-usage-source",
-  "minimax-usage-source",
-  "muse-provider",
-  "opencode-go-usage-source",
-  "zai-usage-source",
-] as const;
+// DinoBot ships no built-in plugins: the usage sources and the Antigravity/Muse providers
+// were deleted with the non-pi providers. The loader stays for tests and future built-ins.
+export const builtinPlugins: readonly string[] = [];
 
 export function resolveBuiltinPluginsRoot(moduleUrl: string | URL = import.meta.url): string {
   const moduleDir = path.dirname(fileURLToPath(moduleUrl));

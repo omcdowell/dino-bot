@@ -52,16 +52,7 @@ function getOpenIntentTarget(openIntent: WorkspaceOpenIntent): WorkspaceTabTarge
   if (openIntent.kind === "agent") {
     return { kind: "agent", agentId: openIntent.agentId };
   }
-  if (openIntent.kind === "terminal") {
-    return { kind: "terminal", terminalId: openIntent.terminalId };
-  }
-  if (openIntent.kind === "file") {
-    return { kind: "file", path: openIntent.path };
-  }
-  if (openIntent.kind === "setup") {
-    return { kind: "setup", workspaceId: openIntent.workspaceId };
-  }
-  return { kind: "draft", draftId: openIntent.draftId };
+  return { kind: "file", path: openIntent.path };
 }
 
 function stripOpenSearchParamFromBrowserUrl() {

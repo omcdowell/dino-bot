@@ -9,25 +9,19 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import { join } from 'node:path';
-import { COMPACTOR_ERRORS, Memory } from './memory.ts';
+import type { Memory } from './memory.ts';
 import { withoutGlobalContext } from './context-files.ts';
 import { createCompressor, type ModelChoice } from './compactor.ts';
-import { instructions, liveCompactor, loadConfig, lockProfile, profilePath, rememberProfile, type ProfileConfig } from './profiles.ts';
-import { sharedPrompt } from './prompts.ts';
-import { botSection } from './bot-prompt.ts';
+import { liveCompactor, loadConfig, profilePath, rememberProfile, type ProfileConfig } from './profiles.ts';
 import { allowedSkills, skillPolicy } from './skills.ts';
 import { TurnPrefix } from './cache.ts';
 import { parseFailure } from './provider-error.ts';
-import { asUser, boundedMessage, buildContext, previousExchange, RUN_BOUNDARY, RunLog, textContent, typedText } from './transcript.ts';
+import { asUser, boundedMessage, buildContext, previousExchange, RUN_BOUNDARY, textContent, typedText } from './transcript.ts';
 import { Inbox } from './inbox.ts';
-import { checkpoint } from './checkpoint.ts';
-import { escalator } from './escalation.ts';
-import { memoryDirectory, pendingImport } from './import/job.ts';
-import { IMPORT_GUIDANCE } from './import/guidance.ts';
+import { pendingImport } from './import/job.ts';
 import { UsageLedger } from './usage.ts';
 import { mainTitle, TabTitle } from './title.ts';
-import { applyRoomBlocks } from './room/blocks.ts';
+import { promptParts, Turns } from './turn.ts';
 
 /**
  * The run log's end entry. A run that ended on a provider error also records it: the status and, when the error
@@ -51,7 +45,7 @@ export function runEnd(run: readonly AgentMessage[], now = Date.now()) {
 }
 export const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-/** An open profile: its memory, input journal, usage ledger and the lock that makes this process its only writer. */
+/** An open profile: its memory and runs (turn.ts, which holds the lock), input journal and usage ledger. */
 export interface OpenProfile {
   name: string;
   dir: string;
@@ -59,9 +53,9 @@ export interface OpenProfile {
   /** The compactor model as config.json has it now. */
   compactor: () => ModelChoice;
   memory: Memory;
+  turns: Turns;
   inbox: Inbox;
   usage: UsageLedger;
-  unlock: () => Promise<void>;
 }
 
 /**
@@ -77,13 +71,11 @@ export class SessionController {
   private run: AgentMessage[] = [];
   private previous: AgentMessage[] = [];
   private logged = 0;
-  private log: RunLog | undefined;
   private view: string | undefined;
   private prompt = '';
   private runStarted = false;
   private working = false;
   private readonly receipts = new Map<AgentMessage, string>();
-  private checkpoints = Promise.resolve();
   private readonly title = new TabTitle();
 
   constructor(
@@ -125,11 +117,10 @@ export class SessionController {
   flush() {
     const a = this.active;
     if (!a) return;
-    this.log ??= new RunLog(a.memory, a.config.toolDigest);
     while (this.logged < this.run.length) {
       const message = this.run[this.logged];
       const receipt = this.receipts.get(message);
-      this.log.write(message, receipt);
+      a.turns.write(message, receipt);
       this.logged++;
       if (receipt) a.inbox.acknowledge(receipt);
       this.receipts.delete(message);
@@ -138,20 +129,19 @@ export class SessionController {
   /** Flushes the run, including its pending tool digest. */
   private finishLog() {
     this.flush();
-    this.log?.end();
+    this.active?.turns.flush();
   }
 
   async open(name: string, ctx: ExtensionContext) {
     const dir = profilePath(name);
     if (!existsSync(dir)) throw new Error(`Profile ${name} does not exist. Use /optchat profile to create it.`);
-    const unlock = await lockProfile(dir, `${name} · PID ${process.pid} · ${hostname()} · ${ctx.cwd}`);
-    let memory: Memory | undefined;
-    try {
-      const config = loadConfig(dir);
+    let config: ProfileConfig, usage: UsageLedger, liveChoice: () => ModelChoice;
+    const turns = await Turns.open(dir, `${name} · PID ${process.pid} · ${hostname()} · ${ctx.cwd}`, () => {
+      config = loadConfig(dir);
       const sessionId = ctx.sessionManager.getSessionId();
-      const usage = new UsageLedger(dir);
+      usage = new UsageLedger(dir);
       usage.backfill(ctx.sessionManager.getEntries(), sessionId);
-      const liveChoice = liveCompactor(dir, config);
+      liveChoice = liveCompactor(dir, config);
       const compress = createCompressor(
         ctx.modelRegistry,
         liveChoice,
@@ -162,35 +152,27 @@ export class SessionController {
         () => config.summaryAcceptBytes,
         this.turnPrefix,
       );
-      memory = new Memory(
-        memoryDirectory(dir),
-        compress,
-        warning => ctx.ui.notify(warning, 'error'),
-        undefined,
-        undefined,
-        undefined,
-        join(dir, COMPACTOR_ERRORS),
-        // Only a bot (a Paseo agent) can send bot-dm; a terminal session leaves its fallback lines for the bot's next start.
-        process.env.PASEO_AGENT_ID ? escalator(name) : undefined,
-      );
+      return { compress, warn: warning => ctx.ui.notify(warning, 'error') };
+    });
+    const memory = turns.memory;
+    try {
       const inbox = new Inbox(dir);
       const recovered = pendingImport(dir) ? 0 : inbox.recover(memory);
       if (recovered)
         ctx.ui.notify(`Recovered ${recovered} unanswered inputs into ${name}'s memory. Ask to continue them when ready.`, 'info');
       rememberProfile(name);
-      this.active = { name, dir, config, compactor: liveChoice, memory, inbox, usage, unlock };
+      this.active = { name, dir, config: config!, compactor: liveChoice!, memory, turns, inbox, usage: usage! };
       this.fault = undefined;
       this.showTitle(ctx);
       this.status(ctx);
-      const { compactor } = config;
+      const { compactor } = config!;
       ctx.ui.notify(
         `OptChat · ${name} · ${memory.root.length} messages\nCompactor: ${compactor.provider}/${compactor.model} (${compactor.thinking})`,
         'info',
       );
     } catch (error) {
       if (this.active?.memory === memory) this.active = undefined;
-      await memory?.close();
-      await unlock();
+      await turns.close();
       throw error;
     }
   }
@@ -201,17 +183,12 @@ export class SessionController {
     try {
       this.finishLog();
       if (!pendingImport(a.dir)) a.inbox.recover(a.memory);
-      await a.memory.close();
-      await this.checkpoints;
-      await checkpoint(a.dir);
     } finally {
-      await a.memory.close();
-      await a.unlock();
+      await a.turns.close();
       this.active = undefined;
       this.run = [];
       this.previous = [];
       this.logged = 0;
-      this.log = undefined;
       this.view = undefined;
       this.runStarted = false;
       this.receipts.clear();
@@ -243,10 +220,10 @@ export class SessionController {
   }
 
   private startRun(ctx: ExtensionContext) {
-    this.finishLog();
+    this.flush();
+    this.active?.turns.start(!!this.active.config.toolDigest);
     this.run = [];
     this.logged = 0;
-    this.log = undefined;
     this.view = undefined;
     this.runStarted = true;
     const config = this.active?.config;
@@ -265,13 +242,13 @@ export class SessionController {
     // The compaction rules only serve compactions that send this prompt: those on the turn's own provider and model.
     const c = a.compactor();
     const compactions = !ctx.model || (c.provider === ctx.model.provider && c.model === ctx.model.id);
-    event.systemPromptOptions.customPrompt = sharedPrompt(a.config.previousExchange, process.env, compactions);
-    // A bot's host rules (bots plugin), before its own AGENTS.md, which changes more often and so stays last.
-    const host = botSection();
+    // A bot's host rules (bots plugin), before its own AGENTS.md, which changes more often and so stays last; the import
+    // guidance only once the memory holds imported history (turn.ts).
+    const parts = promptParts(a.dir, a.memory, a.config.previousExchange, process.env, compactions);
+    event.systemPromptOptions.customPrompt = parts.custom;
     delete event.systemPromptOptions.sections.instructions;
-    if (host) event.systemPromptOptions.sections.bot = host;
-    // The import guidance only matters once the memory holds imported history.
-    event.systemPromptOptions.sections.instructions = a.memory.hasImported() ? `${instructions(a.dir)}\n\n${IMPORT_GUIDANCE}` : instructions(a.dir);
+    if (parts.bot) event.systemPromptOptions.sections.bot = parts.bot;
+    event.systemPromptOptions.sections.instructions = parts.instructions;
     this.prompt = event.systemPrompt;
   }
 
@@ -321,9 +298,8 @@ export class SessionController {
       if (this.importing || pendingImport(a.dir)) throw new Error('Profile is unavailable while importing.');
       if (this.fault) throw new Error(this.fault);
       if (this.view === undefined) {
-        // Group chat talk handed over while the bot was idle goes in before the new input, never mid-run.
-        this.applyRoomBlocks(a, ctx);
-        a.memory.applyRequests(); // Lines replaced with the resummarise CLI while this bot ran.
+        // Group chat talk handed over while the bot was idle, and lines resummarised meanwhile: before the new input.
+        if (a.turns.between()) this.status(ctx);
         ctx.ui.setWorkingMessage('Waiting for OptChat summaries…');
         try {
           await a.memory.settle(ctx.signal);
@@ -357,29 +333,21 @@ export class SessionController {
     }
     if (this.runStarted) this.pi.appendEntry(RUN_BOUNDARY, runEnd(this.run));
     this.runStarted = false;
-    // Group chat talk handed over during the run: into the log now that it has settled (it never starts a turn).
-    const a = this.active;
-    if (a && !this.fault && !this.importing && !pendingImport(a.dir))
-      try {
-        this.applyRoomBlocks(a, ctx);
-      } catch (error) {
-        ctx.ui.notify(`Could not apply room blocks: ${errorText(error)}`, 'error');
-      }
-    this.status(ctx);
     this.working = false;
-    this.showTitle(ctx);
-    if (this.active) {
-      const dir = this.active.dir;
-      this.checkpoints = this.checkpoints
-        .then(() => checkpoint(dir))
-        .catch(error => ctx.ui.notify(`Local checkpoint failed: ${errorText(error)}`, 'error'));
-      await this.checkpoints;
+    const a = this.active;
+    if (!a) return void this.showTitle(ctx);
+    // Group chat talk handed over during the run goes into the log now that it has settled (it never starts a turn);
+    // the profile is committed (turn.ts).
+    let ended: Promise<void>;
+    try {
+      ended = !this.fault && !this.importing && !pendingImport(a.dir) ? a.turns.end() : a.turns.checkpoint();
+    } catch (error) {
+      ctx.ui.notify(`Could not apply room blocks: ${errorText(error)}`, 'error');
+      ended = a.turns.checkpoint();
     }
-  }
-
-  /** Appends the room blocks waiting in the profile (see `applyRoomBlocks`). Only between runs. */
-  private applyRoomBlocks(a: OpenProfile, ctx: ExtensionContext) {
-    if (applyRoomBlocks(a.memory, a.dir, warning => ctx.ui.notify(warning, 'error'))) this.status(ctx);
+    this.status(ctx);
+    this.showTitle(ctx);
+    await ended;
   }
 
   /** Writes what is pending and waits for checkpoints, so memory can be closed for an import. */
@@ -387,7 +355,7 @@ export class SessionController {
     const a = this.required();
     this.finishLog();
     a.inbox.recover(a.memory);
-    await this.checkpoints;
+    await a.turns.settled();
   }
 
   private fail(error: unknown, ctx: ExtensionContext) {

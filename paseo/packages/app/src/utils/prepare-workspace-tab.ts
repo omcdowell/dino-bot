@@ -1,4 +1,3 @@
-import { generateDraftId } from "@/stores/draft-keys";
 import { buildWorkspaceTabPersistenceKey, type WorkspaceTabTarget } from "@/workspace-tabs/model";
 import type { WorkspaceTabPlacement } from "@/stores/workspace-layout-actions";
 
@@ -20,18 +19,11 @@ export interface PrepareWorkspaceTabDeps {
   }) => string | null;
 }
 
-function getPreparedTarget(target: WorkspaceTabTarget): WorkspaceTabTarget {
-  if (target.kind !== "draft" || target.draftId.trim() !== "new") {
-    return target;
-  }
-  return { kind: "draft", draftId: generateDraftId() };
-}
-
 export function prepareWorkspaceTab(
   input: PrepareWorkspaceTabInput,
   deps: PrepareWorkspaceTabDeps,
 ): void {
-  const target = getPreparedTarget(input.target);
+  const target = input.target;
   const key =
     buildWorkspaceTabPersistenceKey({
       serverId: input.serverId,

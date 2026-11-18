@@ -96,10 +96,6 @@ export const fr: TranslationResources = {
       open: "Ouvrir {{name}}",
       openInSidePane: "Ouvrir {{name}} dans le panneau latéral",
       openInFocusedPane: "Ouvrir {{name}} dans le panneau actif",
-      addProject: "Ajouter un projet",
-      home: "Accueil",
-      groupByProject: "Grouper par projet",
-      groupByStatus: "Grouper par statut",
       modelGroupLabel: "Modèle",
       modelSearchKeywords:
         "changer de modèle modifier le modèle définir le modèle sélectionner le modèle model",
@@ -278,18 +274,6 @@ export const fr: TranslationResources = {
       unarchive: "Désarchiver",
     },
   },
-  sessions: {
-    title: "Historique",
-    empty: "Aucune session pour l’instant",
-    noMatches: "Aucune session correspondante",
-    tooManyMatches: "Trop de résultats — affinez la recherche",
-    hostLoadFailed: "{{host}} : impossible de charger l’historique",
-    searchPlaceholder: "Rechercher dans l’historique",
-    actions: {
-      loadMore: "Charger plus",
-      clearSearch: "Effacer la recherche",
-    },
-  },
   agentList: {
     fallbackTitle: "Nouvelle session",
     dateSections: {
@@ -336,8 +320,6 @@ export const fr: TranslationResources = {
       forkInNewTab: "Forker dans un nouvel onglet",
       forkInNewWorkspace: "Forker dans un nouvel espace de travail",
       forkUnavailable: "Mettez à jour l’hôte pour utiliser cette fonction.",
-      forkMissingWorkspace: "Cet agent n’est dans aucun espace de travail.",
-      forkFailed: "Impossible de forker la conversation",
       openFile: "Ouvrir le fichier",
       copied: "Copié",
     },
@@ -1168,7 +1150,6 @@ export const fr: TranslationResources = {
     },
   },
   sidebar: {
-    statusGroupAccessibility: "Groupe {{label}}",
     statusBucket: {
       needsInput: "Attend une réponse",
       failed: "Échec",
@@ -1177,54 +1158,9 @@ export const fr: TranslationResources = {
       done: "Terminé",
     },
     display: {
-      showBackground: "Afficher les espaces en arrière-plan",
-      trigger: "Préférences d’affichage",
-      heading: "Affichage",
       grouping: {
-        label: "Regroupement",
-        project: "Projet",
-        status: "Statut",
         labels: "Libellés",
       },
-      titleSource: {
-        label: "Titre",
-        title: "Titre",
-        branch: "Nom de branche",
-      },
-      show: {
-        label: "Afficher",
-        branch: "Branche",
-        project: "Projet",
-        host: "Hôte",
-        changeRequest: "Pull request",
-        checks: "Vérifications",
-        services: "Services",
-        labels: "Libellés",
-        diff: "Statistiques du diff",
-        timestamp: "Dernière activité",
-      },
-      checks: {
-        iconAndText: "Icône et texte",
-        icon: "Icône seule",
-        none: "Masqué",
-      },
-      hostFilter: {
-        label: "Hôte",
-        all: "Tous les hôtes",
-      },
-      projectFilter: {
-        label: "Projet",
-        all: "Tous les projets",
-      },
-    },
-    filterEmpty: {
-      title: "Aucun espace de travail ne correspond",
-      description:
-        "Modifiez ou effacez les filtres de la barre latérale pour afficher les espaces de travail.",
-      clear: "Effacer les filtres",
-    },
-    pinned: {
-      title: "Épinglés",
     },
     host: {
       noHost: "Aucun hôte",
@@ -1232,8 +1168,6 @@ export const fr: TranslationResources = {
       searchPlaceholder: "Rechercher des hôtes…",
     },
     actions: {
-      addProject: "Ajouter un projet",
-      newWorkspace: "Nouvel espace de travail",
       hosts: "Hôtes",
       settings: "Paramètres",
       closeSidebar: "Fermer la barre latérale",
@@ -1249,77 +1183,28 @@ export const fr: TranslationResources = {
       reportIssue: "Signaler un problème",
       discord: "Discord",
       github: "Créer un ticket GitHub",
-      whatsNew: "Nouveautés",
       appName: "Paseo",
     },
     sections: {
-      sessions: "Historique",
       search: "Recherche",
       schedules: "Planifications",
     },
-    worktreeSetup: {
-      title: "Configurer les scripts de worktree",
-      description:
-        "Ajoutez des commandes de configuration pour que les nouveaux worktrees installent leurs dépendances et se préparent automatiquement.",
-      openProjectSettings: "Ouvrir les paramètres du projet",
-    },
     project: {
       actions: {
-        menu: "Actions du projet",
-        openSettings: "Ouvrir les paramètres du projet",
-        openNewWindow: "Ouvrir dans une nouvelle fenêtre",
-        openNewWindowFailed: "Impossible d’ouvrir une nouvelle fenêtre",
-        openFolder: "Ouvrir dans le gestionnaire de fichiers",
         openFolderFailed: "Impossible d’ouvrir le dossier",
-        remove: "Retirer le projet",
-        removing: "Retrait…",
-      },
-      confirmations: {
-        removeTitle: "Retirer le projet ?",
-        removeMessage:
-          "Retirer « {{projectName}} » de la barre latérale ?\n\nLes fichiers sur le disque ne seront pas modifiés.",
-        removeConfirm: "Retirer",
-        cancel: "Annuler",
-      },
-      toasts: {
-        hostDisconnected: "L’hôte n’est pas connecté",
-        removeFailed: "Impossible de retirer certains espaces de travail",
-        updateHostToRemove: "Mettez à jour l’hôte pour retirer des projets.",
-      },
-      empty: {
-        title: "Aucun projet pour l’instant",
-        description: "Ajoutez un projet pour commencer",
       },
     },
     workspace: {
       status: {
         serviceRunning: "Service {{name}} en cours d’exécution",
         serviceUnhealthy: "Service {{name}} en échec",
-        creating: "Création…",
-      },
-      checks: {
-        passed: "Réussies : {{count}}",
-        failed: "Échouées : {{count}}",
-        warning: "Avertissements : {{count}}",
-        actionRequired: "Action requise : {{count}}",
-        manual: "Manuelles : {{count}}",
-        pending: "En attente : {{count}}",
       },
       actions: {
-        menu: "Actions de l’espace de travail",
-        newWorkspace: "Nouvel espace de travail",
-        showMore: "Afficher plus",
-        showLess: "Afficher moins",
-        createWorkspaceFor: "Créer un espace de travail pour {{projectName}}",
-        copyPath: "Copier le chemin",
-        copyBranchName: "Copier le nom de la branche",
         rename: "Renommer l’espace de travail",
         pin: "Épingler en haut",
         unpin: "Désépingler",
-        archive: "Archiver",
         archiveWorkspace: "Archiver l’espace de travail",
         hideFromSidebar: "Masquer de la barre latérale",
-        archiving: "Archivage…",
         hiding: "Masquage…",
       },
       confirmations: {
@@ -1330,8 +1215,6 @@ export const fr: TranslationResources = {
         cancel: "Annuler",
       },
       rename: {
-        title: "Renommer l’espace de travail",
-        submit: "Renommer",
         invalidBranchName: "Nom de branche invalide",
       },
       toasts: {
@@ -1345,49 +1228,12 @@ export const fr: TranslationResources = {
     },
   },
   newWorkspace: {
-    title: "Nouvel espace de travail",
-    create: "Créer",
-    isolation: {
-      local: "Local",
-      worktree: "Nouveau worktree",
-      label: "Isolation",
-    },
     fields: {
       project: "Projet",
       base: "Base",
       baseNotApplicable: "Non applicable",
     },
     titlePlaceholder: "Titre (facultatif)",
-    errors: {
-      hostDisconnected: "L’hôte n’est pas connecté",
-      createWorktreeFailed: "Impossible de créer le worktree",
-      composerStateRequired: "L’état de la zone de saisie est requis",
-      selectModel: "Sélectionnez un modèle",
-    },
-    tooltips: {
-      project: "Choisir le projet",
-      host: "Choisir l’hôte",
-      isolation: "Choisir le niveau d’isolation",
-      startingRef: "Choisir le point de départ",
-      launch: "Choisir quoi lancer",
-    },
-    refPicker: {
-      startingRef: "Réf. de départ",
-      intoBase: "vers {{baseRef}}",
-      searching: "Recherche…",
-      noMatchingRefs: "Aucune référence correspondante.",
-      searchPlaceholder: "Rechercher des branches et des PR",
-      title: "Partir de",
-    },
-    launch: {
-      title: "Que lancer ?",
-      chat: "Chat",
-      terminal: "Terminal",
-      manageProfiles: "Gérer les profils",
-      submit: "Lancer",
-      promptPlaceholder: "Prompt pour {{name}}",
-      commandPlaceholder: "Saisissez une commande, ou laissez vide pour un terminal vierge",
-    },
   },
   desktop: {
     windowControls: {
@@ -1479,7 +1325,6 @@ export const fr: TranslationResources = {
         failedTitle: "Échec de la mise à jour",
         availableTitle: "Mise à jour disponible",
         genericError: "Une erreur s’est produite.",
-        whatsNew: "Nouveautés",
         installingAction: "Installation…",
         installAndRestart: "Installer et redémarrer",
         installingDescription: "Installation et redémarrage…",
@@ -1551,12 +1396,6 @@ export const fr: TranslationResources = {
         failed: "Échec de l’envoi de la notification.",
       },
     },
-    integrations: {
-      cli: {
-        statusFailed: "Impossible de vérifier l’installation de la CLI.",
-        installFailed: "Impossible d’installer la CLI Paseo.",
-      },
-    },
   },
   rootError: {
     title: "Paseo a rencontré un problème.",
@@ -1575,21 +1414,8 @@ export const fr: TranslationResources = {
   },
   openProject: {
     tiles: {
-      addProject: {
-        title: "Ajouter un projet",
-        description: "Ouvrez un dossier sur votre machine",
-      },
-      importSession: {
-        title: "Importer une session",
-        description: "Ouvrez une session Claude Code, Codex ou autre lancée dans un terminal",
-      },
-      setupProviders: {
-        title: "Configurer les fournisseurs",
-        description: "Configurez Claude Code, Codex et plus encore",
-      },
       pairDevice: {
         title: "Associer un appareil",
-        description: "Connectez votre téléphone à ce daemon",
       },
     },
   },
@@ -1604,26 +1430,6 @@ export const fr: TranslationResources = {
       open_failed: "Impossible d’ouvrir le projet.",
     },
     openPath: "Ouvrir le chemin",
-  },
-  branchSwitcher: {
-    triggerTooltip: "Changer la branche de l’espace de travail",
-    currentBranch: "Branche actuelle : {{branchName}}. Appuyez pour changer de branche.",
-    placeholder: "Changer de branche…",
-    searchPlaceholder: "Filtrer les branches…",
-    empty: "Aucune branche trouvée.",
-    title: "Changer de branche",
-    uncommittedTitle: "Modifications non commitées",
-    uncommittedMessage:
-      "Vous avez des modifications non commitées. Les remiser avant de changer de branche ?",
-    stashAndSwitch: "Remiser et changer",
-    failedToStash: "Impossible de remiser les modifications",
-    failedToSwitch: "Impossible de changer de branche",
-    restoreStashTitle: "Restaurer les modifications remisées ?",
-    restoreStashMessage:
-      "Cette branche contient des modifications remisées lors d’une session précédente. Voulez-vous les restaurer ?",
-    restore: "Restaurer",
-    later: "Plus tard",
-    stashRestored: "Modifications remisées restaurées",
   },
   agentAutocomplete: {
     searchingWorkspace: "Recherche dans l’espace de travail…",
@@ -1697,22 +1503,6 @@ export const fr: TranslationResources = {
     searchPlaceholder: "Rechercher des modèles…",
     openProviderSettings: "Ouvrir les paramètres de {{provider}}",
   },
-  providerCatalog: {
-    title: "Ajouter un fournisseur",
-    search: "Rechercher des fournisseurs",
-    noProviders: "Aucun fournisseur trouvé",
-    actions: {
-      add: "Ajouter",
-      adding: "Ajout…",
-      installed: "Installé",
-      cancel: "Annuler",
-      installInstructions: "Instructions d’installation",
-      installInstructionsFor: "Instructions d’installation de {{provider}}",
-    },
-    errors: {
-      unableToInstall: "Impossible d’installer le fournisseur",
-    },
-  },
   providerSelection: {
     defaultModel: "Par défaut",
     selectModel: "Sélectionner le modèle",
@@ -1750,10 +1540,6 @@ export const fr: TranslationResources = {
       direct: {
         title: "Connexion directe",
         description: "Réseau local ou VPN.",
-      },
-      remoteSsh: {
-        title: "SSH distant",
-        description: "Connexion via le client SSH de bureau.",
       },
       scanQr: {
         title: "Scanner le code QR",
@@ -1805,29 +1591,6 @@ export const fr: TranslationResources = {
         unableToConnect:
           "Impossible de se connecter. Vérifiez l’hôte, le port et que le daemon est joignable.",
         details: "Détails : {{detail}}",
-      },
-    },
-    remoteSsh: {
-      title: "SSH distant",
-      helper: "Connectez-vous à un daemon Paseo qui tourne sur l’hôte distant.",
-      fields: {
-        target: "Hôte SSH",
-        password: "Mot de passe du daemon",
-        optional: "Facultatif",
-      },
-      passwordVisibility: {
-        show: "Afficher le mot de passe",
-        hide: "Masquer le mot de passe",
-      },
-      actions: {
-        cancel: "Annuler",
-        connect: "Se connecter",
-        connecting: "Connexion…",
-      },
-      errors: {
-        targetRequired: "L’hôte SSH est requis",
-        invalidTarget: "Saisissez un hôte ssh:// valide",
-        failedToConnect: "Impossible de se connecter en SSH. {{detail}}",
       },
     },
     link: {
@@ -1912,13 +1675,6 @@ export const fr: TranslationResources = {
   diffViewer: {
     empty: "Aucune modification à afficher",
   },
-  serviceUrl: {
-    title: "Ouvrir l’URL du service",
-    message: "Ouvrir {{url}} ?",
-    inPaseo: "Dans Paseo",
-    externalBrowser: "Navigateur externe",
-    dontAskAgain: "Ne plus demander",
-  },
   downloads: {
     requestTokenFailed: "Impossible d’obtenir le token de téléchargement.",
     hostUnavailable: "L’hôte de téléchargement est indisponible.",
@@ -1947,10 +1703,6 @@ export const fr: TranslationResources = {
     archiveFinishedRetry: "Réessayer ({{failed}}/{{total}})",
   },
   panels: {
-    draft: {
-      newAgent: "Nouvel agent",
-      creatingAgent: "Création de l’agent",
-    },
     file: {
       directoryMissing: "Répertoire de l’espace de travail introuvable.",
       loading: "Chargement du fichier…",
@@ -1989,24 +1741,9 @@ export const fr: TranslationResources = {
       tooltip: "Parcourir les fichiers de l’espace de travail",
       chooseFile: "Choisissez un fichier",
     },
-    pullRequest: {
-      label: "Pull request",
-      subtitle: "Détails de la pull request",
-      emptyTitle: "Aucune pull request pour l’instant",
-      emptyDescription:
-        "Créez une pull request pour cette copie de travail afin d’en voir les détails ici.",
-    },
     diff: {
-      changesLabel: "Modifications",
-      diffLabel: "Diff",
-      changesSubtitle: "Diff de l’arbre de travail",
-      commitSubtitle: "Diff du commit",
       uncommittedSubtitle: "Modifications non commitées",
       baseSubtitle: "Comparé à {{baseRef}}",
-      directoryMissing: "Répertoire de l’espace de travail introuvable.",
-      empty: "Aucune modification",
-      loadError: "Impossible de charger le diff",
-      capabilityMissing: "Mettez à jour l’hôte pour afficher le diff des commits.",
     },
   },
   toolCallDetails: {
@@ -2086,33 +1823,18 @@ export const fr: TranslationResources = {
     backToWorkspace: "Retour",
     addHost: "Ajouter un hôte",
     enableBuiltInDaemon: "Activer le daemon intégré",
-    projects: "Projets",
-    projectList: {
-      hostLoadFailed: "Impossible de charger les projets depuis l’hôte {{hostName}} : {{message}}",
-      editProject: "Modifier {{projectName}}",
-    },
     groupInfo: "À propos de {{title}}",
     sections: {
       general: "Général",
       chat: "Discussion",
       appearance: "Apparence",
-      sidebar: "Barre latérale",
-      terminal: "Terminal",
-      browser: "Navigateur",
-      editor: "Éditeur",
       shortcuts: "Raccourcis",
-      integrations: "Intégrations",
       notifications: "Notifications",
       permissions: "Autorisations",
       diagnostics: "Diagnostic",
       about: "À propos",
     },
     layout: en.settings.layout,
-    editor: {
-      title: "Éditeur",
-      vimKeybindings: "Raccourcis Vim",
-      vimHint: "S’applique aux fichiers source dans l’app web et l’app de bureau.",
-    },
     notifications: {
       title: "Notifications",
       permission: "Autorisation des notifications",
@@ -2129,49 +1851,19 @@ export const fr: TranslationResources = {
       sendFailedTitle: "Impossible d’envoyer la notification de test",
     },
     hostSections: {
-      projects: "Projets",
       connections: "Connexions",
       agents: "Agents",
-      metadata: "Métadonnées",
-      workspaces: "Espaces de travail",
       providers: "Fournisseurs",
       usage: "Utilisation",
-      terminals: "Terminaux",
       plugins: "Plugins",
       host: "Aperçu",
     },
     plugins: pluginSettings.fr,
-    metadataGeneration: {
-      title: "Génération de métadonnées",
-      description:
-        "Choisissez le modèle utilisé par Paseo pour les titres d’espaces de travail, les noms de branches, les messages de commit et les brouillons de pull request",
-      selection: "Sélection du modèle",
-      automatic: "Automatique",
-      preferred: "Manuel",
-      automaticHint: "Paseo choisit un modèle rapide disponible",
-      preferredHint: "Choisissez le modèle utilisé par Paseo",
-      model: "Modèle",
-      fallbackHint: "S’il est indisponible, Paseo utilise un autre modèle disponible",
-      docs: "Documentation",
-      saveError: "Impossible de mettre à jour la génération de métadonnées",
-    },
     general: {
       title: "Général",
       sending: "Envoi",
       network: en.settings.general.network,
       meteredNetwork: en.settings.general.meteredNetwork,
-      browserData: {
-        title: "Données du navigateur",
-        siteData: "Cookies et données des sites",
-        description:
-          "Les onglets du navigateur partagent les connexions et les données des sites dans Paseo.",
-        clear: "Effacer les données du navigateur",
-        clearing: "Effacement…",
-        confirmTitle: "Effacer les données du navigateur ?",
-        confirmMessage: "Vous serez déconnecté des sites et les onglets ouverts seront rechargés.",
-        success: "Données du navigateur effacées.",
-        error: "Impossible d’effacer les données du navigateur.",
-      },
       defaultSend: {
         label: "Envoi par défaut",
         descriptions: {
@@ -2194,11 +1886,6 @@ export const fr: TranslationResources = {
           inApp: "Dans Paseo",
           external: "Navigateur externe",
         },
-      },
-      terminalScrollback: {
-        label: "Historique du terminal",
-        description: "Lignes conservées dans le tampon du terminal intégré",
-        accessibilityLabel: "Lignes d’historique du terminal",
       },
       autoExpandReasoning: {
         label: "Toujours afficher le raisonnement",
@@ -2261,7 +1948,6 @@ export const fr: TranslationResources = {
     about: {
       title: "À propos",
       appVersion: "Version de l’application",
-      whatsNewHint: "Les nouveautés de chaque version",
       thisDevice: "Cet appareil",
       connectedHosts: "Hôtes connectés",
       offline: "Hors ligne",
@@ -2309,20 +1995,6 @@ export const fr: TranslationResources = {
       chatOutline: {
         title: "Plan de la discussion",
         description: "Afficher un plan pour naviguer entre les prompts",
-      },
-      sidebar: {
-        header: {
-          title: "En-tête",
-          description:
-            "Choisissez les éléments affichés en haut de la barre latérale et leur ordre",
-        },
-        footer: {
-          title: "Pied de page",
-          description:
-            "Choisissez les lignes affichées en bas de la barre latérale et leur ordre. « Ajouter un projet » et la rangée d’icônes restent toujours visibles",
-        },
-        moveUp: "Monter",
-        moveDown: "Descendre",
       },
       fonts: {
         title: "Polices",
@@ -2392,7 +2064,6 @@ export const fr: TranslationResources = {
         newWorkspace: "Nouvel espace de travail",
         newWorktree: "Nouveau worktree",
         archiveWorkspace: "Archiver l’espace de travail",
-        newTab: "Nouvel onglet",
         closeCurrentTab: "Fermer l’onglet actuel",
         jumpToWorkspace: "Aller à l’espace de travail",
         jumpToTab: "Aller à l’onglet",
@@ -2411,7 +2082,6 @@ export const fr: TranslationResources = {
         moveTabUp: "Déplacer l’onglet vers le haut",
         moveTabDown: "Déplacer l’onglet vers le bas",
         closePane: "Fermer le panneau",
-        newTerminal: "Nouveau terminal",
         searchFiles: "Rechercher des fichiers",
         toggleCommandCenter: "Afficher/masquer la palette de commandes",
         showKeyboardShortcuts: "Afficher les raccourcis clavier",
@@ -2434,22 +2104,6 @@ export const fr: TranslationResources = {
       helpNotes: {
         showKeyboardShortcuts:
           "Disponible quand le focus n’est ni dans un champ de texte ni dans un terminal.",
-      },
-    },
-    integrations: {
-      title: "Intégrations",
-      docs: {
-        cli: "Documentation CLI",
-        openCli: "Ouvrir la documentation CLI",
-      },
-      commandLine: {
-        title: "Ligne de commande",
-        description: "Pilotez et scriptez vos agents depuis votre terminal",
-      },
-      actions: {
-        install: "Installer",
-        installing: "Installation…",
-        installed: "Installé",
       },
     },
     permissions: {
@@ -2594,34 +2248,6 @@ export const fr: TranslationResources = {
       agents: {
         unavailable: "Connectez-vous à cet hôte pour gérer les agents",
       },
-      workspaces: {
-        unavailable: "Connectez-vous à cet hôte pour gérer les espaces de travail",
-      },
-      terminalProfiles: {
-        unavailable: "Connectez-vous à cet hôte pour gérer les profils de terminal",
-        sectionTitle: "Profils de terminal",
-        editProfile: "Modifier le profil",
-        addProfileTitle: "Ajouter un profil de terminal",
-        editProfileTitle: "Modifier le profil de terminal",
-        namePlaceholder: "Claude Code",
-        commandPlaceholder: "claude",
-        argsPlaceholder: "--dangerously-skip-permissions",
-        nameLabel: "Nom",
-        commandLabel: "Commande",
-        argsLabel: "Arguments",
-        nameRequired: "Le nom est obligatoire",
-        commandRequired: "La commande est obligatoire",
-        argsHint: "Arguments séparés par des espaces, transmis à la commande",
-        saving: "Enregistrement…",
-        remove: "Supprimer",
-        removeConfirmTitle: "Supprimer le profil ?",
-        removeConfirmMessage: "Supprimer « {{name}} » ?",
-        moveUp: "Monter",
-        moveDown: "Descendre",
-        save: "Enregistrer",
-        emptyState:
-          "Aucun profil pour le moment. Ajoutez-en un pour lancer des terminaux avec une commande précise.",
-      },
       agentProfiles: {
         sectionTitle: "Profils d’agent",
         unavailable: "Connectez-vous à cet hôte pour gérer les profils d’agent",
@@ -2736,12 +2362,10 @@ export const fr: TranslationResources = {
     },
     providers: {
       title: "Fournisseurs",
-      addProvider: "Ajouter un fournisseur",
       providerDetails: "Détails du fournisseur {{name}}",
       enableProvider: "Activer {{name}}",
       unavailable: "Connectez-vous à cet hôte pour voir les fournisseurs",
       loading: "Chargement…",
-      addErrorTitle: "Impossible d’ajouter le fournisseur",
       updateErrorTitle: "Impossible de mettre à jour le fournisseur",
       actions: {
         menu: "Actions de {{name}}",
@@ -2797,98 +2421,6 @@ export const fr: TranslationResources = {
         none: "Aucun diagnostic disponible",
         failedToFetch: "Impossible de récupérer le diagnostic",
         unknownError: "Erreur inconnue",
-      },
-    },
-    project: {
-      noEditableTarget: "Ce projet n’est pas modifiable sur cet hôte.",
-      backToProjects: "Retour aux projets",
-      edit: {
-        title: "Modifier le projet",
-        name: "Nom",
-        nameLabel: "Nom du projet",
-        icon: "Icône",
-        chooseImage: "Choisir une image",
-        useAutomatic: "Icône automatique",
-        imageUrl: "URL d’une image ou d’un site",
-        save: "Enregistrer les modifications",
-        savedToast: "Projet mis à jour",
-      },
-      readFailures: {
-        invalidTitle: "Impossible d’analyser paseo.json",
-        invalidDescription: "Corrigez le fichier sur le disque, puis rechargez.",
-        missingTitle: "Ce projet n’existe pas sur cet hôte",
-        missingSingleHost: "L’hôte sélectionné n’a aucune trace de ce projet.",
-        transportTitle: "Impossible de charger paseo.json",
-        transportFallback: "L’hôte n’a pas répondu.",
-        failedTitle: "Impossible de charger paseo.json",
-        failedDescription: "Rechargez pour réessayer.",
-      },
-      worktree: {
-        title: "Hooks de cycle de vie des worktrees",
-        info: "Commandes exécutées à la création ou à la suppression d’un worktree de ce projet",
-        docs: "Documentation",
-        docsTooltip:
-          "Consultez la documentation pour plus de détails et la liste des variables d’environnement disponibles pour ces commandes",
-        setup: "Configuration",
-        setupAccessibility: "Commandes de configuration du worktree",
-        uncommittedTitle: "Commitez les modifications de paseo.json",
-        uncommittedDescription:
-          "Les nouveaux worktrees utilisent le script de configuration de la branche de base sélectionnée.",
-        teardown: "Démontage",
-        teardownAccessibility: "Commandes de démontage du worktree",
-      },
-      scripts: {
-        title: "Scripts",
-        info: "Services de longue durée et commandes ponctuelles que vous pouvez lancer depuis n’importe quel agent de ce projet",
-        empty: "Aucun script pour le moment.",
-        untitled: "Script sans titre",
-        port: "port {{port}}",
-        menuAccessibility: "Ouvrir le menu du script",
-        removeTitle: "Supprimer le script ?",
-        removeMessage: "Supprimer {{name}} ?",
-        removeFallbackName: "ce script",
-        name: "Nom",
-        command: "Commande",
-        nameAccessibility: "Nom du script",
-        commandAccessibility: "Commande du script",
-        nameRequired: "Le nom est obligatoire",
-        commandRequired: "La commande est obligatoire",
-        newScript: "Nouveau script",
-        editScript: "Modifier {{name}}",
-        runAsService: "Exécuter comme service",
-        serviceHint: "Paseo supervise le processus et lui attribue un port via $PASEO_PORT",
-        actions: {
-          add: "Ajouter un script",
-          edit: "Modifier",
-          remove: "Supprimer",
-        },
-      },
-      metadata: {
-        title: "Génération des métadonnées",
-        info: "Instructions propres au projet, injectées dans les prompts IA que Paseo utilise pour générer les métadonnées : servez-vous-en pour imposer les conventions de votre équipe (nommage des branches, style de commit, format des PR).",
-        branchName: "Noms de branches",
-        branchNamePlaceholder:
-          "Préfixez les branches par feat/ ou fix/, et par mb/ pour les branches personnelles",
-        commitMessage: "Messages de commit",
-        commitMessagePlaceholder: "Utilisez les Conventional Commits avec un scope",
-        pullRequest: "Pull requests",
-        pullRequestPlaceholder:
-          "Commencez par un résumé d’un paragraphe et incluez une section « Test plan »",
-      },
-      writeFailures: {
-        staleTitle: "Configuration modifiée sur le disque",
-        staleDescription:
-          "Rechargez pour récupérer la dernière version de paseo.json avant d’enregistrer.",
-        failedTitle: "Impossible d’enregistrer paseo.json",
-        failedDescription: "Réessayez ou rechargez la dernière version depuis le disque.",
-      },
-      actions: {
-        reload: "Recharger",
-        tryAgain: "Réessayer",
-        save: "Enregistrer",
-        saved: "Projet enregistré",
-        saving: "Enregistrement…",
-        cancel: "Annuler",
       },
     },
   },

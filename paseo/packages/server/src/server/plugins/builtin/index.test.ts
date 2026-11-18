@@ -1,11 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, expect, test } from "vitest";
-import { compilePlugin } from "../compiler.js";
-import { readPluginManifest } from "../manifest.js";
 import { DaemonClient } from "../../test-utils/daemon-client.js";
 import { createTestPaseoDaemon } from "../../test-utils/paseo-daemon.js";
 import { BuiltinPluginLoader, builtinPlugins, resolveBuiltinPluginsRoot } from "./index.js";
@@ -35,24 +33,9 @@ async function fixture(root: string, id: string, client = false): Promise<string
   return directory;
 }
 
-test("listed built-ins resolve to matching manifests and compile", async () => {
-  const root = resolveBuiltinPluginsRoot();
-  for (const id of builtinPlugins) {
-    const directory = path.join(root, id);
-    expect((await readPluginManifest(directory)).id).toBe(id);
-    const findEntry = async (names: string[]) => {
-      for (const name of names) {
-        const entry = path.join(directory, name);
-        if ((await stat(entry).catch(() => null))?.isFile()) return entry;
-      }
-      return null;
-    };
-    const bundles = await compilePlugin({
-      server: await findEntry(["index.server.ts", "index.server.tsx"]),
-      client: await findEntry(["index.client.ts", "index.client.tsx"]),
-    });
-    expect(bundles.serverBundle).toBeTruthy();
-  }
+test("this build ships no built-in plugins", () => {
+  expect(builtinPlugins).toEqual([]);
+  expect(typeof resolveBuiltinPluginsRoot()).toBe("string");
 });
 
 test("listed client bundle is published while plugins are disabled; unlisted directory is inert", async () => {

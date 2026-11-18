@@ -29,11 +29,6 @@
       "source": "./src/server/usage.ts",
       "default": "./dist/server/usage.js"
     },
-    "./server/acp": {
-      "types": "./dist/server/acp.d.ts",
-      "source": "./src/server/acp.ts",
-      "default": "./dist/server/acp.js"
-    },
     "./client/react-native": {
       "types": "./dist/client/react-native.d.ts",
       "source": "./src/client/react-native.ts",
@@ -67,7 +62,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^1.4.0",
     "use-sync-external-store": "^1.6.0"
   },
   "devDependencies": {

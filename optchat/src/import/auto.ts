@@ -24,8 +24,8 @@ import {
   discardImport,
   type ImportJob,
   type ImportProgress,
+  type ImportedEntry,
 } from './job.ts';
-import type { ImportedEntry } from './sources.ts';
 
 export const backgroundDir = (dir: string) => join(dir, 'imports', 'background');
 const stateFile = (dir: string) => join(backgroundDir(dir), 'state.json');

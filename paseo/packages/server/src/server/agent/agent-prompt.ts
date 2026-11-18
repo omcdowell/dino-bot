@@ -255,9 +255,8 @@ export interface StartCreatedAgentInitialPromptParams {
  *
  * This wraps provider startup, so it MUST stay larger than the slowest provider's own
  * startup budget — otherwise it aborts a start the provider was still allowed to be
- * working on, and the provider's budget can never apply. OpenCode is the slowest today:
- * up to 30s for the server to boot (OPENCODE_SERVER_STARTUP_TIMEOUT_MS) and then a
- * session.create on the same budget, so this is deliberately set well above 30s.
+ * working on, and the provider's budget can never apply. It was sized for the deleted
+ * OpenCode provider (up to 30s server boot plus session.create) and kept as a generous bound.
  *
  * Not derived from the provider constant on purpose: this module is provider-agnostic
  * and must not depend on a specific provider's internals.

@@ -55,7 +55,7 @@ describe("Explorer sidebar", () => {
       isCompact: true,
       workspaceKey: WORKSPACE_KEY,
       checkout: CHECKOUT,
-      view: "changes",
+      view: "files",
     });
 
     expect(usePanelStore.getState().mobilePanel.target).toBe("file-explorer");

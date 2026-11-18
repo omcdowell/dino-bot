@@ -1,6 +1,6 @@
+import { z } from "zod";
 import type { AgentClient } from "../agent/agent-sdk-types.js";
 import { validateProviderOptions } from "../agent/provider-options.js";
-import { CodexProviderOptionsSchema } from "../agent/providers/codex/options.js";
 import { createTestAgentClients } from "../test-utils/fake-agent-client.js";
 import { afterEach, expect, test } from "vitest";
 import { HubRelationshipHarness } from "./test-utils/relationship-harness.js";
@@ -135,6 +135,13 @@ test("Hub can preapprove only tools on MCP servers injected in the same request"
   expect(hub.providerCreations()).toBe(0);
 });
 
+// Stand-in for a provider-owned options schema (the Codex one this test used was deleted).
+const FakeProviderOptionsSchema = z
+  .object({
+    sandbox_workspace_write: z.object({ writable_roots: z.array(z.string()) }).optional(),
+  })
+  .strict();
+
 test("Hub returns path-specific feedback thrown by the provider", async () => {
   const clients = createTestAgentClients();
   const inner = clients.codex;
@@ -144,7 +151,7 @@ test("Hub returns path-specific feedback thrown by the provider", async () => {
     isAvailable: (signal, options) => inner.isAvailable(signal, options),
     fetchCatalog: (options, context) => inner.fetchCatalog(options, context),
     async createSession(config, launch, options) {
-      validateProviderOptions("codex", CodexProviderOptionsSchema, config.providerOptions);
+      validateProviderOptions("codex", FakeProviderOptionsSchema, config.providerOptions);
       return inner.createSession(config, launch, options);
     },
     resumeSession: (handle, overrides, launch, options) =>

@@ -1,6 +1,6 @@
-// The pairing QR offers the MagicDNS name first (offerEndpoints); the daemon refuses a Host it does not allow
-// ("disallowed host"). Every setup path writes daemon.hostnames with ".ts.net" (writeDaemonConfig), so the name in
-// the QR is accepted. (A hand-made daemon config without it refuses the name: "disallowed host".)
+// The pairing QR offers the tailnet IP only (offerEndpoints, IO1). Phones paired earlier still hold the MagicDNS
+// name, and the daemon refuses a Host it does not allow ("disallowed host"), so every setup path keeps ".ts.net"
+// in daemon.hostnames (writeDaemonConfig): those phones still connect by name.
 //   node --test test/offer-hostnames.test.mjs
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -16,7 +16,7 @@ const allowed = (host, patterns) =>
   patterns.some((p) => (p.startsWith(".") ? host === p.slice(1) || host.endsWith(p) : host === p));
 
 describe("pairing offer vs daemon.hostnames", () => {
-  it("setup writes .ts.net and every name the QR offers matches it", () => {
+  it("setup keeps .ts.net (already-paired phones) and the QR offers no name, only the tailnet IP", () => {
     const home = mkdtempSync(join(tmpdir(), "hosts-"));
     try {
       const L = layout({ HOME: home });
@@ -24,7 +24,8 @@ describe("pairing offer vs daemon.hostnames", () => {
       const cfg = JSON.parse(readFileSync(join(L.paseoHome, "config.json"), "utf8"));
       assert.ok(cfg.daemon.hostnames.includes(".ts.net"));
       const endpoints = offerEndpoints({ port: 6767, tailscale: { running: true, dnsName: "sams-laptop.tail0000.ts.net", ip: "100.64.0.5" } });
-      for (const e of endpoints.filter((x) => !/^\d/.test(x))) assert.ok(allowed(e.split(":")[0], cfg.daemon.hostnames), e);
+      assert.deepEqual(endpoints, ["100.64.0.5:6767"]);
+      assert.ok(allowed("sams-laptop.tail0000.ts.net", cfg.daemon.hostnames));
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

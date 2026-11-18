@@ -6,7 +6,7 @@ server integrations.
 ## Plugin providers
 
 Keep a bundled provider in `plugins/<id>/` and register it through
-`@getpaseo/plugin/server/provider`. Antigravity and Muse Code follow this pattern. Built-in loading and SDK
+`@getpaseo/plugin/server/provider`. DinoBot ships no bundled provider plugins (Stage 1 deleted Antigravity and Muse Code). Built-in loading and SDK
 import rules belong to [plugins.md](plugins.md#built-in-plugins); the
 [public provider guide](../public-docs/plugins/providers.md) covers the provider contract.
 
@@ -16,11 +16,6 @@ which share Windows launcher handling with core providers. The daemon owns
 executable resolution and applies `agents.providers.<provider-id>.command` and `env` before
 connecting. Register the provider's icon with the plugin rather than adding it to the app's
 provider icon map. You do not need a core manifest entry or provider factory.
-
-| Provider    | Transport                                  | Setup and limitations                                            |
-| ----------- | ------------------------------------------ | ---------------------------------------------------------------- |
-| Antigravity | Installed `agy` CLI                        | [Antigravity](../public-docs/supported-providers.md#antigravity) |
-| Muse Code   | MSP over one `muse serve` host per session | [Muse Code](../public-docs/muse-code.md)                         |
 
 ## Provider-native session options
 
@@ -57,9 +52,7 @@ model; it does not override the model list returned by a resolver.
 
 Implement the `AgentClient` and `AgentSession` interfaces from `agent-sdk-types.ts` yourself. This gives full control but requires you to handle process management, streaming, permissions, and session persistence from scratch.
 
-Core direct providers: `claude` (in `providers/claude/agent.ts`), `codex` (`codex-app-server-agent.ts`), `opencode` (`opencode/runtime-client.ts`), `pi` (`providers/pi/agent.ts`), and `omp` (`providers/omp/agent.ts`). The dev-only `mock` provider (`mock-load-test-agent.ts`) is also direct.
-
-Claude first-party model metadata lives in `packages/server/src/server/agent/providers/claude/model-manifest.ts`. When adding or updating a Claude model, update that manifest only; the model picker thinking options and Claude-specific feature gates are derived from the manifest. Do not add model-specific Claude capability lists in feature code.
+The only core direct provider is `pi` (`providers/pi/agent.ts`). DinoBot deleted the ACP, Codex, OpenCode, OMP and Claude Agent SDK providers; Claude Code runs as a terminal agent (and as the bots CC engine). The dev-only `mock` provider (`mock-load-test-agent.ts`) is also direct.
 
 Paseo tools are not implemented as MCP tools internally. They live in a shared tool catalog under `packages/server/src/server/agent/tools/`; MCP is only the fallback adapter. The daemon resolves `agents.providers.<provider>.paseoTools` by the exact provider ID. The catalog policy belongs to the caller: it filters the tools exposed to the current agent. When that agent calls `create_agent`, the child receives the policy for the child provider ID; the caller's policy is not inherited.
 
@@ -71,39 +64,19 @@ Pi extension adapters live under `packages/server/src/server/agent/providers/pi/
 
 Paseo's per-agent and daemon-wide system prompts are appended by its generated Pi integration extension. Paseo deliberately does not pass `--append-system-prompt`, because that flag replaces Pi's automatic `APPEND_SYSTEM.md` discovery instead of composing with it.
 
-Pi model records expose input capabilities through `model.input`. Only send raw RPC `images` when the current model explicitly includes `"image"` in that list. Text-only Pi/OMP models reject image content and persist the rejected image in JSONL history, so image prompts for those models must be materialized to a local file and passed as a text path hint instead.
+Pi model records expose input capabilities through `model.input`. Only send raw RPC `images` when the current model explicitly includes `"image"` in that list. Text-only Pi models reject image content and persist the rejected image in JSONL history, so image prompts for those models must be materialized to a local file and passed as a text path hint instead.
 
 Probe Pi MCP support with Pi RPC `get_commands` for the agent cwd. Pi 0.99 and later ship MCP as a built-in extension, which registers an extension command named `mcp` with `sourceInfo.path` `builtin:mcp`. Register injected servers through `pi.registerMcpServer` in Paseo's generated extension; the built-in extension rejects SSE servers and names with characters other than letters, digits, `_`, and `-`, and a server of the same name in Pi's `mcp.json` takes precedence.
 
 The open-source `pi-mcp-adapter` extension replaces the built-in one and registers its own `mcp` command (often with `sourceInfo.source` containing `pi-mcp-adapter`). When it is loaded, write a per-agent MCP config and pass it with `--mcp-config` instead of modifying user or project MCP files. Because that flag replaces the Pi global config layer, preserve the existing `<Pi agent dir>/mcp.json` in the generated file before overlaying injected servers. For local HTTP servers such as Paseo's own `/mcp/agents` endpoint, explicitly disable adapter OAuth (`auth: false`, `oauth: false`) in the generated config.
 
-Pi control-plane RPCs wait 60 seconds by default. Override `params.rpcTimeoutMs` when extension or MCP startup on a slow host needs more time. Timeout errors name the pending RPC phase and report both elapsed time and the configured deadline. This setting does not govern long-running Pi compaction or Pi extension UI results. See [OMP profiles and Pi-compatible forks](custom-providers.md#omp-profiles-and-pi-compatible-forks) for OMP startup and RPC deadlines.
+Pi control-plane RPCs wait 60 seconds by default. Override `params.rpcTimeoutMs` when extension or MCP startup on a slow host needs more time. Timeout errors name the pending RPC phase and report both elapsed time and the configured deadline. This setting does not govern long-running Pi compaction or Pi extension UI results.
 
 Pi import discovery reads Pi's persisted JSONL session files because Pi RPC does not expose a recent-session listing command. Resume and full history hydration still go through `pi --mode rpc` using the session file as `nativeHandle`.
 
-OMP is a first-class built-in provider, disabled by default. Its launch contract, typed runtime, agent/session behavior, history, permissions, imports, and test fake live under `providers/omp/`; only the provider-neutral JSONL child-process transport is shared with Pi. It launches `omp --mode rpc-ui`, uses OMP's `get_available_commands` RPC for slash-command discovery, bridges OMP `rpc-ui` approval dialogs into Paseo permissions, and imports terminal-started sessions from `~/.omp/agent/sessions` when enabled.
+Active-turn steering is an optional `AgentSession.steerActiveTurn` operation. The manager owns admission against its exact foreground turn, canonical user-message creation, echo reconciliation, and falls back to the normal interrupt-and-replace path only when the adapter reports `unavailable`. An adapter error leaves the steer's fate ambiguous and must surface without an interrupt or retry. Claude pushes an admitted steer into the exact active SDK query input; isolated control commands remain unavailable. Pi sends its native `steer` RPC, which queues the message for delivery after the in-flight assistant turn's tool calls. Slash-command inputs report `unavailable` because pi rejects extension commands on the steer path, and echo identity is correlated by message text because pi's steer RPC takes no message ID. A missing session reports `unavailable` and uses the normal interrupt fallback.
 
-OMP supports native Paseo host tools. The adapter registers the full caller-scoped Paseo tool catalog directly with OMP, matching providers such as Claude that expose the full catalog through MCP. Serialize every OMP host definition with `loadMode: "essential"` so `create_agent`, `send_agent_prompt`, `wait_for_agent`, and related tools remain direct calls; omitting the field makes OMP mount non-built-in names under `xd://` instead. OMP's provider-managed task subagents are surfaced as Paseo subagents through `child_session` imports; the parent keeps the subagents track while the child runtime stays owned by OMP. Custom OMP profiles should extend `omp`; other Pi-compatible forks can still extend `pi`, override `command`, and set `params.sessionDir` to their JSONL session directory.
-
-Pi RPC extension UI dialog requests (`select`, `input`, `editor`, `confirm`) are bridged into Paseo question permissions and answered with `extension_ui_response`. Pi extensions such as `ask_user` may chain dialogs: for example, a `select` can be followed by an optional-comment `input`. When an `ask_user` tool call declares `allowComment: true`, Paseo presents the selection and optional comment as one question permission, answers Pi's initial `select` immediately, then auto-answers the follow-up optional `input` with the comment the user already supplied (or an empty string). Preserve placeholders and optional/skip semantics for standalone optional inputs so the app can still distinguish "skip this optional input" from "cancel the whole dialog." Fire-and-forget extension UI requests such as notifications are intentionally ignored by the provider adapter unless Paseo grows first-class UI for them.
-
-OpenCode adapters target v1.14.46 and v2.0.10. V2 rejects binaries older than the tested 2.0.10 SDK at runtime selection. Runtime selection uses the configured command and environment. A recognized version is cached until provider configuration reload; a failed, timed-out, or unrecognized probe retains the v1 path and retries detection on the next operation. Load v2 code and materialize its plugin only after positive v2 selection; v1 sessions remain undecorated. Keep upstream SDK types inside the version-specific adapter. OpenCode owns storage migration; a missing native session must fail resume rather than create a replacement. V2 has no native archive/unarchive operation: archiving affects Paseo only. V1 retains native archiving.
-
-Use OpenCode v2 execution events to trigger turn completion, with active-state and durable-log reconciliation after admission, reconnect, and while a turn remains active. Do not use `session.wait`: a healthy turn exceeding Node's HTTP headers deadline produces a transport error while OpenCode keeps working. The live event feed has no replay, and shutdown interruption preserves the previous idle outcome, so the session snapshot alone cannot recover missed execution events. Quiet streams are healthy: v2 heartbeats are SSE comments, not application events.
-
-V2.0.4 also removed the activation endpoint that gated a cold location, and a cold location registers its config-derived commands, skills, and providers asynchronously. Wait until `plugin.list` returns a populated inventory before reading the catalog or commands; an empty inventory means the location is still warming. Fail when the readiness deadline expires, including when an inventory request stalls.
-
-Paseo installs its OpenCode tool bridge through `OPENCODE_CONFIG_CONTENT`. V1 accepts a plugin file; v2 silently skips configured files and requires a package directory with a server entry point. Both versions use the daemon's private loopback bridge for caller-scoped tools. Bridge context lives only in daemon memory and is removed when the Paseo session closes. The content-addressed plugin artifacts contain no session data or secrets. V2 also needs this plugin when native Paseo tools are disabled: its prompt API has no structured-output format, so the plugin supplies a schema-validated final-answer tool.
-
-An agent with custom environment variables or user-configured MCP servers gets a dedicated OpenCode server. V2 supports session environment, but its MCP configuration remains location-scoped, so separate servers still prevent one agent from changing another agent's MCP setup. Configure custom MCP with `mcp.add`; do not follow it with `mcp.connect`, which only toggles config-backed servers.
-
-OpenCode owns user message IDs. Do not pass Paseo-generated IDs to OpenCode prompt APIs; let OpenCode create `msg*` IDs and record the user timeline item from the `message.updated` event.
-
-`AgentManager` owns the one canonical timeline row for a foreground prompt carrying a Paseo `clientMessageId`. It records that row when `startTurn` accepts, with the wire `messageId` set to the same value. Provider adapters still emit their native user-message echo with the same `clientMessageId` when available; the manager records its provider identity on the internal row without changing or redispatching the wire item. If an adapter emits the echo before `startTurn` resolves, the manager records the provider identity with the row at acceptance. Provider adapters continue to own externally initiated user rows that have no Paseo client identity. Do not perform global transcript text dedupe.
-
-Active-turn steering is an optional `AgentSession.steerActiveTurn` operation. The manager owns admission against its exact foreground turn, canonical user-message creation, echo reconciliation, and falls back to the normal interrupt-and-replace path only when the adapter reports `unavailable`. An adapter error leaves the steer's fate ambiguous and must surface without an interrupt or retry. Codex calls `turn/steer` with the native expected turn and Paseo client user-message ID. Claude pushes an admitted steer into the exact active SDK query input; isolated control commands remain unavailable. OpenCode calls `session/prompt_async` with an OpenCode-generated message ID; the server queues the prompt while busy and the next LLM call in the same Paseo turn includes it. Pi sends its native `steer` RPC, which queues the message for delivery after the in-flight assistant turn's tool calls. Slash-command inputs report `unavailable` because pi rejects extension commands on the steer path, and echo identity is correlated by message text because pi's steer RPC takes no message ID. A missing session reports `unavailable` and uses the normal interrupt fallback.
-
-A steering adapter also owes its interrupt: stopping a turn must discard the steers the provider has not read yet, or one of them resumes the turn the user just stopped. Codex clears pending input when it aborts a turn; Claude does not, so its adapter cancels the SDK messages it queued before calling `query.interrupt()`. It calls `query.interrupt()` only while a main-session turn is in flight (between `system/init` and that turn's `result`): with the main session idle, an interrupt reaches only background subagents and no result follows it, so the adapter withdraws its unstarted messages and stops there. The adapter also declares `perTaskStopAffordance`, because without it the CLI kills every background subagent on interrupt. Pi requires `clear_queue` before `abort`; older binaries without that RPC retain their native queue behavior until the pi compatibility floor reaches 0.84.4.
+A steering adapter also owes its interrupt: stopping a turn must discard the steers the provider has not read yet, or one of them resumes the turn the user just stopped. Claude does not, so its adapter cancels the SDK messages it queued before calling `query.interrupt()`. It calls `query.interrupt()` only while a main-session turn is in flight (between `system/init` and that turn's `result`): with the main session idle, an interrupt reaches only background subagents and no result follows it, so the adapter withdraws its unstarted messages and stops there. The adapter also declares `perTaskStopAffordance`, because without it the CLI kills every background subagent on interrupt. Pi requires `clear_queue` before `abort`; older binaries without that RPC retain their native queue behavior until the pi compatibility floor reaches 0.84.4.
 
 `SteerActiveTurnOptions.clearPendingPermissions` makes permission release part of the provider contract. A provider that accepts such a steer queues it first, denies permissions blocking its delivery, and stops once the steer is read. Steers without the flag leave permissions open. A denied plan remains in the timeline because the pending card was the only other copy of its text.
 
@@ -111,7 +84,7 @@ Rewind accepts the canonical wire `messageId` and resolves it to the provider id
 
 Submitted user-message wire items carry the same Paseo ID in `messageId` and `clientMessageId`. Provider adapters attach `clientMessageId` only to the echo for that foreground submission; provider history and externally initiated user rows do not have a Paseo client ID.
 
-Provider adapters must terminalize every transient timeline row before emitting the turn's terminal event. Codex may omit the completed `contextCompaction` item when a turn ends during compaction, so its adapter closes any pending root compaction before forwarding `turn_completed`, `turn_failed`, or `turn_canceled`. A terminal turn must never leave the client showing an operation as still loading.
+Provider adapters must terminalize every transient timeline row before emitting the turn's terminal event. A terminal turn must never leave the client showing an operation as still loading.
 
 Draft metadata lookups should avoid creating provider sessions when the upstream provider has top-level APIs for that metadata. Prefer `AgentClient.fetchCatalog`, `listCommands`, or `listFeatures` over creating a scratch `AgentSession`; scratch sessions can show up as empty native sessions in provider import/history UIs. `fetchCatalog` is the single discovery API for models and modes — provider implementations may use one process, separate upstream calls, or static data internally, but callers outside the provider do not get separate runtime model/mode probes. Draft command listing and scratch-session feature listing require an explicit draft model. Do not resolve a default model through catalog discovery. A client-level `listFeatures` implementation may return features from an incomplete, model-less draft and owns which features are valid in that state.
 
@@ -344,7 +317,7 @@ const PROVIDER_CLIENT_FACTORIES: Record<string, ProviderClientFactory> = {
 };
 ```
 
-The factory is invoked with `(logger, runtimeSettings, options)`; `options.workspaceGitService` is also available if you need it (see the `codex` factory for an example). The registry already passes the per-provider runtime settings slice through, so you don't index into the map yourself.
+The factory is invoked with `(logger, runtimeSettings, options)`; `options.workspaceGitService` is also available if you need it (see the `pi` factory for an example). The registry already passes the per-provider runtime settings slice through, so you don't index into the map yourself.
 
 ### 4. Add a provider icon (app)
 
@@ -408,17 +381,10 @@ case "my-provider":
   );
 ```
 
-Add to the `allProviders` array (current built-ins are `claude`, `codex`, `copilot`, `opencode`, `pi`, `omp`):
+Add to the `allProviders` array (the current built-in is `pi`):
 
 ```ts
-export const allProviders: AgentProvider[] = [
-  "claude",
-  "codex",
-  "copilot",
-  "opencode",
-  "pi",
-  "my-provider",
-];
+export const allProviders: AgentProvider[] = ["claude", "pi", "my-provider"];
 ```
 
 ### 6. Run typecheck
@@ -557,7 +523,7 @@ Tests use `isProviderAvailable(provider)` to skip when the binary or credentials
 
 **`AgentProvider` is always `string`.** The type alias is `type AgentProvider = string`. Provider IDs are validated against the manifest at runtime, not at the type level.
 
-**Auth patterns vary.** Some providers need API keys in env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`), some use OAuth tokens (`CLAUDE_CODE_OAUTH_TOKEN`), some use auth files (`~/.codex/auth.json`), and some handle auth entirely in their CLI binary (Copilot). Your `isAvailable()` method should check whatever is needed.
+**Auth patterns vary.** Some providers need API keys in env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`), some use OAuth tokens (`CLAUDE_CODE_OAUTH_TOKEN`), some use auth files (`~/.pi/agent/auth.json`), and some handle auth entirely in their CLI binary (Copilot). Your `isAvailable()` method should check whatever is needed.
 
 **The manifest mode list and the agent class mode list are separate.** The manifest in `provider-manifest.ts` includes UI metadata (`icon`, `colorTier`). The agent class defines modes without UI metadata (just `id`, `label`, `description`). Keep them in sync.
 
@@ -565,7 +531,7 @@ Tests use `isProviderAvailable(provider)` to skip when the binary or credentials
 
 **Runtime settings can override the command.** Users can configure custom binary paths or environment variables per provider via `ProviderRuntimeSettings`. Your factory in the registry should pass `runtimeSettings?.["your-provider"]` through to the constructor.
 
-**Session-scoped cancellation needs a stop boundary inside the provider.** Some agents cancel the whole session rather than one turn — OpenCode's `session.abort` is the example. A cancel that is still in flight when the next run starts will kill that replacement run, which is what makes "stop, then immediately prompt again" (`replaceRunning`, `notifyOnFinish` wakes, schedules) flaky. Own this in the provider session, not in `AgentManager`:
+**Session-scoped cancellation needs a stop boundary inside the provider.** Some agents cancel the whole session rather than one turn — (an agent whose abort is session-wide is the example). A cancel that is still in flight when the next run starts will kill that replacement run, which is what makes "stop, then immediately prompt again" (`replaceRunning`, `notifyOnFinish` wakes, schedules) flaky. Own this in the provider session, not in `AgentManager`:
 
 - Model the stop as an explicit `stopping` turn-state variant carrying the canceled run's terminal and the cancellation the caller is still owed. Pressing Stop again retries the stop already in progress rather than opening a second one; never fire a detached retry, it will outlive its boundary.
 - **Scope the cancel settlement the way the provider scopes the cancel.** If cancellation is session-scoped, so is its settlement: track it on the session, accumulating every request issued, and let it outlive the stop that issued it. A request still in flight lands on the runner whenever the server gets to it — however many stops have come and gone since. Scoping it to the current stop looks right and quietly drops older requests from the gate. Only the newest may hold the gate closed, since recovering from a failed cancel is what pressing Stop again is for.

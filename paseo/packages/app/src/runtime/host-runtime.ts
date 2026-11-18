@@ -57,11 +57,8 @@ import {
   buildDesktopDaemonTransportUrl,
   createDesktopDaemonTransportFactory,
 } from "@/desktop/daemon/desktop-daemon-transport";
-import { getDesktopHost } from "@/desktop/host";
 import { readDesktopManagedLocalCredential } from "@/desktop/daemon/local-credential";
-import { CLIENT_CAPS } from "@getpaseo/protocol/client-capabilities";
 import { DurableBodyCache, setDurableBodyCache } from "@/runtime/replica-cache/body-cache";
-import { BROWSER_AUTOMATION_COMMAND_NAMES } from "@getpaseo/protocol/browser-automation/rpc-schemas";
 import {
   selectAgentTimelineState,
   useSessionStore,
@@ -78,7 +75,6 @@ import {
   invalidateServerDataQueriesAfterReconnect,
   mountServerDataPushRouter,
 } from "@/data/push-router";
-import { mountBrowserAutomationDaemonClientHandler } from "@/desktop/browser/automation/handler";
 import { schedulesQueryBaseKey } from "@/schedules/aggregated-schedules";
 import { dispatchComposerAgentMessage, sendQueuedComposerMessageNow } from "@/composer/actions";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
@@ -588,19 +584,7 @@ function sessionTokensFor(host: HostProfile, connection: HostConnection) {
 }
 
 function createDefaultDeps(): HostRuntimeControllerDeps {
-  const browserHostAvailable =
-    typeof getDesktopHost()?.browser?.executeAutomationCommand === "function";
-  const browserAutomationCapabilities = browserHostAvailable
-    ? {
-        [CLIENT_CAPS.browserHost]: {
-          supportedCommands: [...BROWSER_AUTOMATION_COMMAND_NAMES],
-          hostKind: "desktop app",
-        },
-      }
-    : undefined;
-  const appCapabilities = {
-    ...browserAutomationCapabilities,
-  };
+  const appCapabilities = {};
 
   return {
     createClient: ({ host, connection, clientId, runtimeGeneration }) => {
@@ -696,16 +680,7 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
         queryClient,
         serverId: host.serverId,
       });
-      if (!browserAutomationCapabilities) {
-        return unmountServerData;
-      }
-      const unmountBrowserAutomation = mountBrowserAutomationDaemonClientHandler(client, {
-        serverId: host.serverId,
-      });
-      return () => {
-        unmountBrowserAutomation();
-        unmountServerData();
-      };
+      return unmountServerData;
     },
   };
 }
@@ -1778,6 +1753,8 @@ export class HostRuntimeStore {
           ) {
             shouldPersistHosts = true;
           }
+          // A dropped MagicDNS route (one route per host, IO1) is saved without it.
+          if (profile.connections.length < entry.connections.length) shouldPersistHosts = true;
           normalizedProfiles.push(profile);
         }
         profiles = normalizedProfiles.filter((entry) => !isPlaceholderServerId(entry.serverId));

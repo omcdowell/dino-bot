@@ -321,14 +321,14 @@ Use `openSettings`, `openScreen`, and `openPanel` for your own registered contri
 ### Server runtime
 
 Paseo provides `@getpaseo/plugin`, `@getpaseo/plugin/server`,
-`@getpaseo/plugin/server/provider`, `@getpaseo/plugin/server/acp`, and `zod` to server code. Backend
+`@getpaseo/plugin/server/provider` and `zod` to server code. Backend
 contributions run in a daemon subprocess with Node access to the host machine. Keep filesystem,
 process, credential, and other machine-local work under `server/`. A plugin without
 `index.server.ts` starts no subprocess.
 
 ### Providers
 
-Follow [Build a provider plugin](/docs/plugins/providers) for direct and ACP implementations,
+Follow [Build a provider plugin](/docs/plugins/providers) for direct implementations,
 session lifecycle, composer settings, timeline renderers, testing, and distribution.
 
 Call `server.registerProvider()` with a `ProviderRegistration` from
@@ -349,9 +349,6 @@ session config.
 
 Paseo refreshes an agent by closing its current provider session and opening it with current
 configuration and persistence. Providers re-read external state during `session.open`.
-
-Use `runAcpProvider()` from `@getpaseo/plugin/server/acp` to adapt a command-backed ACP. Add transformer
-hooks only for a vendor's discovery, configuration, notification, or tool-call differences.
 
 `ProviderRegistration.icon` is a file path relative to the plugin directory, such as `icon.svg`.
 It must resolve inside that directory to a regular SVG file no larger than 64 KiB. The SVG must be

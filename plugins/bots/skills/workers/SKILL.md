@@ -23,12 +23,14 @@ One task per worker. The brief says:
 - **Where**: repo, branch to start from, the worktree or folder to work in. Never your own
   checkout or another worker's.
 - **Rules**: what it must not do (push, merge, deploy, edit files outside its folder, commit
-  trailers such as Co-Authored-By if the project forbids them). It restarts DinoBot or other
-  services only when that restart is its task: then it waits until no bot is mid-turn,
-  restarts once and checks the service is back.
-- **Budget**: a spend budget in US$ ("Budget: US$5") and a time estimate in minutes (section 5).
+  trailers such as Co-Authored-By if the project forbids them). It restarts or reloads DinoBot
+  only when that is its task, and only with `bot-restart` (it waits until no bot is mid-turn,
+  acts once and checks DinoBot is back).
+- **Budget**: one advisory spend figure in US$ ("Budget: US$5") and a time estimate in minutes;
+  one figure, no separate stop figure (section 5).
 - **Report**: the report file path (`<task>.report.md` next to the brief) and what goes in it:
-  files changed, commits, test commands with pass/fail counts, open questions.
+  files changed, commits, test commands with pass/fail counts, open questions. For a bug the
+  user reported: how the bug was reproduced, and the same screen (or command output) after the fix.
 - **How to report**: `bot-dm <your bot> --from worker:<name> --kind report --text "<one-line status; report path>"`.
 
 Layout: one herdr **workspace per project**, one **tab per task**. `launch.sh` does this.
@@ -64,6 +66,10 @@ sh <this skill dir>/launch.sh [--engine pi|cc] <name> <brief-file> <minutes> [cw
   folder). It does not see your skills, the user's global skills or this one (workers do not
   start workers). `WORKER_SKILLS=<skill folder>[:<another>]` adds more (each becomes
   `--skill <path>`); an entry `none` drops the shortlist (`WORKER_SKILLS=none`: no skills).
+- Context cap (pi): when `~/.agents/pi-extensions/worker-compact-cap.ts` exists (or the file in
+  `WORKER_COMPACT_EXT`), the worker's pi loads it and compacts its context past the cap
+  (200k tokens). For one large task, put `PI_WORKER_COMPACT_AT=300000` in front of the launch
+  command; launch.sh sets it in the worker's pane.
 
 ### 2a. Default engine and model
 
@@ -132,7 +138,7 @@ herdr agent get <name>                                           # state; .resul
 
 ## 5. Budgets
 
-Put a budget in every brief ("Budget: US$5"). It is the same for pi and Claude Code workers:
+Put a budget in every brief ("Budget: US$5"). It is advisory. It is the same for pi and Claude Code workers:
 the worker shows its session's spend in its status line, the last lines of the pane, and you
 watch it; nothing in the worker blocks its tools.
 
@@ -142,9 +148,11 @@ herdr agent read <name> --source visible --lines 4 | grep -o '\$[0-9][0-9.]*'
 
 pi shows `$<spent>`; a Claude Code worker shows `$<spent>`, or `$<spent> / budget $<n>` when
 the brief has a `US$<n>` figure (section 9). `(sub)` after the figure means a subscription: the
-figure is what the same tokens would cost at API prices; still hold the budget. Check the
-spend when you check progress. At the budget, stop the worker (`herdr agent send-keys <name>
-esc`, then ask it to write its report so far) and decide with the user whether it is worth more.
+figure is what the same tokens would cost at API prices; still count it against the budget. Check the
+spend when you check progress. At the budget, look at the work: let a worker that is close to
+done finish; stop one that is stuck (`herdr agent send-keys <name> esc`, then ask it to write its
+report so far). Judge the work, not the figure. Tell the user only when a task goes far over
+(about three times its budget, or US$30).
 
 ## 6. Check the work (never trust a report)
 
@@ -157,6 +165,9 @@ A report is a claim. Before you tell anyone a task is done:
   with the report.
 - **Claims**: re-check each factual claim the report makes (a file exists, a flag works, a bug
   no longer reproduces) with your own command.
+- **Reported bugs**: a bug the user reported counts as fixed only when the worker reproduced it
+  first and the report shows the same screen or command after the fix (the `screenshot-app`
+  skill for UI). A bug reported twice also gets a regression test.
 - **Trailers**, if the project forbids them:
   `git log --format=%B <base>..<branch> | grep -iE '^(co-authored-by|signed-off-by):'` must print nothing.
 - **Rules**: nothing pushed, merged or deployed that the brief did not allow.
@@ -176,9 +187,13 @@ quietly; then check again.
   ```
 
   The session id is project-scoped: run it in the same folder, or pi starts a new, empty session.
-- **Rate limit, overload (429/503/529) or network errors**: pi retries by itself. If the worker
+- **Rate limit, overload (429/503/529) or network errors**: pi and Claude Code retry by themselves. If the worker
   went idle on an error without reporting (`bot-worker list` shows it as stalled; a stall-watch
   add-on, if the host has one, also DMs you), wait a few minutes, then prompt it to continue. Do not start a second worker on the same task.
+  Both engines are checked through their session file: pi's (herdr reports it) and Claude Code's transcript
+  (launch.sh records it with `bot-worker add --session`). A Claude Code worker still retrying shows as running.
+  Only a worker added without a session file (an older launch, or `bot-worker add` by hand) is checked from the
+  last lines of its pane, which can show a retry line ("429 … Retrying in 11s") as stalled: read its pane.
 - **Blocked** for a long time: read the pane, then answer or press `esc` (`herdr agent send-keys`).
 
 ## 8. Close
@@ -210,7 +225,8 @@ Differences:
   (no MCP servers), `--exclude-dynamic-system-prompt-sections`; in `settings.json` no CLAUDE.md
   from the home folder (`claudeMdExcludes`; the project's own CLAUDE.md still loads), no
   attribution note, no auto memory; env: no prompt suggestion, session title or other
-  non-essential traffic, no built-in skills, Artifact or Workflow. Auto-compact stays on.
+  non-essential traffic, no built-in skills, Artifact or Workflow. Auto-compact stays on, at
+  200k tokens (`autoCompactWindow`; `PI_WORKER_COMPACT_AT` raises it, as for pi).
 - **Login**: `CC_WORKER_CONFIG_DIR=<dir>` gives the worker its own `CLAUDE_CONFIG_DIR` (its own
   login, or none when it goes through a proxy). Empty: the user's own Claude Code login.
   `DINOBOT_CLAUDE_CONFIG_DIR`, when set, comes first: the login the app's Claude Code card shows.
@@ -219,9 +235,10 @@ Differences:
 - **Model**: `CC_WORKER_MODEL` (`--model`), else the worker model (section 2a) when it is `anthropic/...`
   (its `:thinking` becomes `--effort`), else Claude Code's default.
 - **Session**: `session_id` in the launch JSON is a UUID; `session_file` is Claude Code's
-  transcript (`<config dir>/projects/<cwd with / as ->/<uuid>.jsonl`).
-- **Budget**: as for pi (section 5): the bot watches the spend and stops the worker at its
-  budget; no hook blocks a tool call, and a budget is optional. The status line
+  transcript (`<config dir>/projects/<cwd with / as ->/<uuid>.jsonl`). launch.sh also records it in the
+  launch registry (`bot-worker add --session`), so `bot-worker list` reads it for a stall, as pi's session.
+- **Budget**: as for pi (section 5): the bot watches the spend and, at the budget, judges the
+  work; no hook blocks a tool call, and a budget is optional. The status line
   (`cc-status.mjs`) shows Claude Code's own session cost (API prices, subagents included; it
   keeps counting across a restart, saved in `cost.json`) and, when there is one, the budget:
   `$WORKER_BUDGET_USD`, else the first `US$<n>` in the brief, written to `.cc/budget` (write

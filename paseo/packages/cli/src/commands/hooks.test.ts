@@ -44,8 +44,6 @@ interface RecordingFetch {
 }
 
 const claudeProvider = AGENT_HOOK_PROVIDERS.claude;
-const codexProvider = AGENT_HOOK_PROVIDERS.codex;
-const opencodeProvider = AGENT_HOOK_PROVIDERS.opencode;
 
 function createFetch(): RecordingFetch {
   const calls: FetchCall[] = [];
@@ -100,30 +98,6 @@ describe("runHooksCommand", () => {
     [claudeProvider.events[3].event, "idle"],
   ])("maps Claude %s to %s", async (event, state) => {
     const send = await runHook(claudeProvider.id, event);
-
-    expectPostedState(send, state);
-  });
-
-  it.each([
-    ["UserPromptSubmit", "running"],
-    ["PreToolUse", "running"],
-    ["PostToolUse", "running"],
-    ["PermissionRequest", "needs-input"],
-    ["Stop", "idle"],
-  ])("maps Codex %s to %s", async (event, state) => {
-    const send = await runHook(codexProvider.id, event);
-
-    expectPostedState(send, state);
-  });
-
-  it.each([
-    ["session.status.busy", "running"],
-    ["session.status.retry", "running"],
-    ["session.status.idle", "idle"],
-    ["permission.asked", "needs-input"],
-    ["permission.replied", "running"],
-  ])("maps OpenCode %s to %s", async (event, state) => {
-    const send = await runHook(opencodeProvider.id, event);
 
     expectPostedState(send, state);
   });

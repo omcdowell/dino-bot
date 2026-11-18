@@ -24,10 +24,11 @@ Record herdr workers a bot launches, so its sidebar row shows "waiting for worke
 worker is busy in herdr and until it reports (bot-dm --kind report) and goes idle, goes idle
 without reporting, or its pane closes. A worker that reported mid-job and works again counts again.
 
-  bot-worker add <name> [--pane <id>] [--bot <bot>]
+  bot-worker add <name> [--pane <id>] [--bot <bot>] [--session <file>]
       Run by the bot right after \`herdr agent start <name> …\` and the first prompt. The launcher
       is the caller's PASEO_AGENT_ID; outside a Paseo agent, give --bot. --pane defaults to the
-      pane herdr reports for <name>.
+      pane herdr reports for <name>. --session: the worker's session file (absolute path; launch.sh
+      gives the Claude Code transcript, which herdr does not report), read to tell a stall.
   bot-worker done <name>      stop counting <name> (e.g. the bot no longer waits on it); also
                               clears a "stalled" worker (stopped on an error without reporting)
   bot-worker list [--all]     workers in the registry and their state: running, blocked, stalled
@@ -44,7 +45,7 @@ export type Deps = {
   /** Pane of a live herdr agent, or null. */
   paneOf: (name: string) => string | null;
   listHerdr: () => Promise<HerdrAgent[]>;
-  /** The error an idle worker stopped on (default: its pi session only; main() adds the pane). */
+  /** The error an idle worker stopped on (default: its session file only; main() adds the pane). */
   readError?: ErrorReader;
 };
 
@@ -73,6 +74,7 @@ async function runInner(argv: string[], deps: Deps): Promise<number> {
     options: {
       pane: { type: "string" },
       bot: { type: "string" },
+      session: { type: "string" },
       all: { type: "boolean" },
       help: { type: "boolean", short: "h" },
     },
@@ -97,7 +99,9 @@ async function runInner(argv: string[], deps: Deps): Promise<number> {
     if (!agent && !bot) throw new UsageError("not inside a Paseo agent: say which bot launched the worker with --bot <bot>");
     const pane = opt.pane ?? deps.paneOf(name);
     if (pane !== null && !PANE_RE.test(pane)) throw new UsageError(`bad pane id: ${pane}`);
-    const record = { v: 1 as const, type: "launch" as const, ts, worker: name, pane, agent, bot };
+    const session = opt.session || null;
+    if (session !== null && !session.startsWith("/")) throw new UsageError(`--session must be an absolute path: ${session}`);
+    const record = { v: 1 as const, type: "launch" as const, ts, worker: name, pane, agent, bot, ...(session ? { session } : {}) };
     appendRegistry(registry, record);
     deps.out(JSON.stringify({ ok: true, ...record, ...(pane ? {} : { warning: "no herdr pane found; matched by name only" }) }));
     return 0;

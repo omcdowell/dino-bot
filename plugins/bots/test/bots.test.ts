@@ -248,6 +248,46 @@ test("new chat prefers the running model and effective thinking over the configu
   assert.deepEqual(created[0]!.options.config, { provider: "optchat/openai-codex/gpt-5.6-luna", thinkingOptionId: "medium" });
 });
 
+// Bug: New chat carried the old chat's config over .bot.json `chat`, so a bot switched to Claude Code in Bot models stayed on pi.
+test("new chat follows an engine switch in .bot.json: a pi chat's model is not carried onto a Claude Code bot", async () => {
+  const root = botsRoot({ wallace: { profile: "wallace", meta: { chat: { provider: "optchat-cc/claude-opus-5-5", thinkingOptionId: "medium" } } } });
+  const cwd = join(root, "wallace");
+  const { paseo, created } = fakePaseo({
+    agents: [{ id: "pi", cwd, provider: "optchat", model: "anthropic/claude-opus-5-5", thinkingOptionId: "high", labels: { bot: "wallace" } }],
+  });
+  await new BotsService(root).newChat("wallace", paseo);
+  assert.deepEqual(created[0]!.options.config, { provider: "optchat-cc/claude-opus-5-5", thinkingOptionId: "medium" });
+});
+
+test("new chat follows a switch back to pi, and still carries a model picked on the same engine", async () => {
+  const root = botsRoot({
+    back: { profile: "back", meta: { chat: { provider: "optchat/anthropic/claude-opus-5-5" } } },
+    same: { profile: "same", meta: { chat: { provider: "optchat-cc/claude-opus-5-5", thinkingOptionId: "medium" } } },
+  });
+  const { paseo, created } = fakePaseo({
+    agents: [
+      { id: "cc", cwd: join(root, "back"), provider: "optchat-cc", model: "claude-fable-5-2", labels: { bot: "back" } },
+      { id: "cc2", cwd: join(root, "same"), provider: "optchat-cc", model: "claude-fable-5-2", thinkingOptionId: "high", labels: { bot: "same" } },
+    ],
+  });
+  const service = new BotsService(root);
+  await service.newChat("back", paseo);
+  await service.newChat("same", paseo);
+  assert.deepEqual(created[0]!.options.config, { provider: "optchat/anthropic/claude-opus-5-5" });
+  assert.deepEqual(created[1]!.options.config, { provider: "optchat-cc/claude-fable-5-2", thinkingOptionId: "high" });
+});
+
+test("new chat follows the host's bot model (setup) when the bot names none", async () => {
+  const root = botsRoot({ hostcc: { profile: "hostcc" } });
+  const cwd = join(root, "hostcc");
+  const { paseo, created } = fakePaseo({
+    agents: [{ id: "pi", cwd, provider: "optchat", model: "anthropic/claude-opus-5-5", labels: { bot: "hostcc" } }],
+    config: { daemon: { agentProfiles: [{ id: "bot", provider: "optchat-cc", model: "claude-opus-5-5", thinkingOptionId: "medium" }] } },
+  });
+  await new BotsService(root).newChat("hostcc", paseo);
+  assert.equal(created[0]!.options.config.provider.split("/")[0], "optchat-cc");
+});
+
 test("new chat falls back to the bot profile when the old chat has no model", async () => {
   const root = botsRoot({ bitzer: { profile: "bitzer" } });
   const cwd = join(root, "bitzer");

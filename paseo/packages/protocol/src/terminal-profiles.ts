@@ -11,21 +11,10 @@ import { KNOWN_PROVIDER_ICON_NAMES } from "./provider-icon-names.js";
  */
 export const PROMPT_SENTINEL = "{{{prompt}}}";
 
-// Prompt forms are taken from each CLI's own `--help`. claude, codex, and pi
-// take the prompt as a trailing positional. opencode's positional is the
-// project directory, so its prompt goes through `--prompt`, written in the
-// `--flag=value` form to keep it one argv entry that can be dropped whole when
-// no prompt is typed.
+// Prompt forms are taken from each CLI's own `--help`: claude and pi take the
+// prompt as a trailing positional.
 export const DEFAULT_TERMINAL_PROFILES: readonly TerminalProfile[] = [
   { id: "claude", name: "Claude Code", command: "claude", args: [PROMPT_SENTINEL], icon: "claude" },
-  { id: "codex", name: "Codex", command: "codex", args: [PROMPT_SENTINEL], icon: "codex" },
-  {
-    id: "opencode",
-    name: "OpenCode",
-    command: "opencode",
-    args: [`--prompt=${PROMPT_SENTINEL}`],
-    icon: "opencode",
-  },
   { id: "pi", name: "Pi", command: "pi", args: [PROMPT_SENTINEL], icon: "pi" },
 ];
 
@@ -105,14 +94,9 @@ export function resolveTerminalProfileLaunch(
   return { name: profile.name, ...substitutePrompt(profile, prompt) };
 }
 
-// CLIs whose binary is not named after their icon. Matching stays exact, so a
-// command only gets an icon when its whole base name is listed.
-const COMMAND_ICON_ALIASES: ReadonlyArray<[string, string]> = [["cursor-agent", "cursor"]];
-
-const WELL_KNOWN_COMMAND_ICONS = new Map([
-  ...KNOWN_PROVIDER_ICON_NAMES.map((name): [string, string] => [name, name]),
-  ...COMMAND_ICON_ALIASES,
-]);
+const WELL_KNOWN_COMMAND_ICONS = new Map(
+  KNOWN_PROVIDER_ICON_NAMES.map((name): [string, string] => [name, name]),
+);
 
 function getCommandBaseName(command: string): string {
   const lastSlash = command.lastIndexOf("/");
@@ -181,48 +165,6 @@ const GLOBAL_OPTIONS_WITH_VALUES_BY_COMMAND = new Map<string, ReadonlySet<string
     ]),
   ],
   [
-    "codex",
-    new Set([
-      "--add-dir",
-      "--ask-for-approval",
-      "--cd",
-      "--config",
-      "--disable",
-      "--enable",
-      "--image",
-      "--local-provider",
-      "--model",
-      "--profile",
-      "--remote",
-      "--remote-auth-token-env",
-      "--sandbox",
-      "-C",
-      "-a",
-      "-c",
-      "-i",
-      "-m",
-      "-p",
-      "-s",
-    ]),
-  ],
-  [
-    "opencode",
-    new Set([
-      "--agent",
-      "--cors",
-      "--hostname",
-      "--log-level",
-      "--mdns-domain",
-      "--model",
-      "--port",
-      "--prompt",
-      "--replay-limit",
-      "--session",
-      "-m",
-      "-s",
-    ]),
-  ],
-  [
     "pi",
     new Set([
       "--api-key",
@@ -262,18 +204,16 @@ const GLOBAL_OPTIONS_WITH_VALUES_BY_COMMAND = new Map<string, ReadonlySet<string
 //
 // Keyed on the command's base name, not the profile id: profiles created
 // through the settings UI get generated ids (`profile_<timestamp>_<random>`),
-// so a real user's Codex profile is never id `codex`. The base name also
-// normalizes `/usr/local/bin/codex` and `codex.cmd` onto the same agent.
+// so a real user's Claude profile is never id `claude`. The base name also
+// normalizes `/usr/local/bin/claude` and `claude.cmd` onto the same agent.
 //
-// User args are preserved: `codex --yolo` becomes `codex --yolo {{{prompt}}}`.
-// The appended form comes from the shipped default for that command, so
-// opencode gets `--prompt=` rather than a trailing positional, which it would
-// read as a project directory. A profile that already carries the sentinel
+// User args are preserved: `claude --verbose` becomes `claude --verbose {{{prompt}}}`.
+// The appended form comes from the shipped default for that command. A profile that already carries the sentinel
 // anywhere is left alone, and so is one pointing at any other command. Nothing
 // is written back, so this stays a read-time adoption with no version stamp and
 // no daemon-start hook.
 // Any positional means this is not the bare interactive form we can safely
-// adopt. It may be a subcommand (`codex --profile work login`) or an existing
+// adopt. It may be a subcommand (`claude --model opus doctor`) or an existing
 // prompt/project argument. Option assignments carry their value inline; known
 // split options consume the next argv entry before positional detection.
 function hasPositionalArg(command: string, args: readonly string[]): boolean {

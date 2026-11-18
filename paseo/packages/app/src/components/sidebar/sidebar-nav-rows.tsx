@@ -1,6 +1,6 @@
 import { router, usePathname } from "expo-router";
-import { Bot, CalendarClock, History, Plus, Search } from "lucide-react-native";
-import { memo, useCallback, useMemo, useRef, type ComponentType } from "react";
+import { Bot, CalendarClock, Search } from "lucide-react-native";
+import { useCallback, useMemo, useRef, type ComponentType } from "react";
 import { useTranslation } from "react-i18next";
 import { View, type StyleProp, type ViewStyle } from "react-native";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
@@ -8,8 +8,6 @@ import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
 import { PluginSidebarItem } from "@/plugins/sidebar-items";
 import { isMobileHomePathname } from "@/plugins/mobile-home";
 import { goToMobileHome, useMobileHome, useStartHome } from "@/plugins/mobile-home-runtime";
-import { canCreateWorktreeForProjectKind } from "@/projects/host-projects";
-import { useHostFeature } from "@/runtime/host-features";
 import {
   builtinSidebarNavLabelKey,
   builtinSidebarNavShortcutAction,
@@ -17,13 +15,7 @@ import {
 } from "@/sidebar-nav/model";
 import { useSidebarNavItems } from "@/sidebar-nav/use-sidebar-nav-items";
 import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
-import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
-import { useWorkspace } from "@/stores/session-store-hooks";
-import {
-  buildNewWorkspaceRoute,
-  buildSchedulesRoute,
-  buildSessionsRoute,
-} from "@/utils/host-routes";
+import { buildSchedulesRoute } from "@/utils/host-routes";
 
 interface SidebarNavRowProps {
   onBeforeNavigate?: () => void;
@@ -68,53 +60,6 @@ export function SidebarNavRows({ style, onBeforeNavigate }: SidebarNavRowsProps)
   );
 }
 
-const SidebarNewWorkspaceRow = memo(function SidebarNewWorkspaceRow({
-  onBeforeNavigate,
-}: SidebarNavRowProps) {
-  const { t } = useTranslation();
-  const shortcutKeys = useShortcutKeys(builtinSidebarNavShortcutAction("new-workspace"));
-  const activeWorkspaceSelection = useActiveWorkspaceSelection();
-  const activeWorkspaceServerId = activeWorkspaceSelection?.serverId ?? null;
-  const activeWorkspaceId = activeWorkspaceSelection?.workspaceId ?? null;
-  const activeWorkspace = useWorkspace(activeWorkspaceServerId, activeWorkspaceId);
-  const supportsWorkspaceMultiplicity = useHostFeature(
-    activeWorkspaceServerId,
-    "workspaceMultiplicity",
-  );
-  const canUseActiveWorkspaceContext = Boolean(
-    activeWorkspace &&
-    (supportsWorkspaceMultiplicity || canCreateWorktreeForProjectKind(activeWorkspace.projectKind)),
-  );
-
-  const handlePress = useCallback(() => {
-    onBeforeNavigate?.();
-    router.push(
-      activeWorkspaceServerId
-        ? buildNewWorkspaceRoute(
-            activeWorkspace && canUseActiveWorkspaceContext
-              ? {
-                  serverId: activeWorkspaceServerId,
-                  sourceDirectory: activeWorkspace.projectRootPath,
-                  projectId: activeWorkspace.projectId,
-                }
-              : { serverId: activeWorkspaceServerId },
-          )
-        : buildNewWorkspaceRoute(),
-    );
-  }, [activeWorkspace, activeWorkspaceServerId, canUseActiveWorkspaceContext, onBeforeNavigate]);
-
-  return (
-    <SidebarHeaderRow
-      icon={Plus}
-      label={t(builtinSidebarNavLabelKey("new-workspace"))}
-      onPress={handlePress}
-      testID="sidebar-global-new-workspace"
-      variant="compact"
-      shortcutKeys={shortcutKeys}
-    />
-  );
-});
-
 /**
  * DinoBot desktop app: a "Bots" row back to the start home (the plugin's Bots home). Only where the
  * start home is not the phone home (phones have their own top bar), so nowhere in the own build.
@@ -136,26 +81,6 @@ function SidebarStartHomeRow({ onBeforeNavigate }: SidebarNavRowProps) {
       onPress={handlePress}
       isActive={isMobileHomePathname(pathname, startHome)}
       testID="sidebar-bots-home"
-      variant="compact"
-    />
-  );
-}
-
-function SidebarHistoryRow({ onBeforeNavigate }: SidebarNavRowProps) {
-  const { t } = useTranslation();
-  const pathname = usePathname();
-  const handlePress = useCallback(() => {
-    onBeforeNavigate?.();
-    router.push(buildSessionsRoute());
-  }, [onBeforeNavigate]);
-
-  return (
-    <SidebarHeaderRow
-      icon={History}
-      label={t(builtinSidebarNavLabelKey("history"))}
-      onPress={handlePress}
-      isActive={pathname.includes("/sessions")}
-      testID="sidebar-sessions"
       variant="compact"
     />
   );
@@ -203,8 +128,6 @@ function SidebarSchedulesRow({ onBeforeNavigate }: SidebarNavRowProps) {
 }
 
 const BUILTIN_ROWS: Record<BuiltinSidebarNavId, ComponentType<SidebarNavRowProps>> = {
-  "new-workspace": SidebarNewWorkspaceRow,
-  history: SidebarHistoryRow,
   search: SidebarSearchRow,
   schedules: SidebarSchedulesRow,
 };

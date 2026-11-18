@@ -1,20 +1,11 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  useSyncExternalStore,
-  type ReactElement,
-} from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactElement } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
-import { CalendarClock, Plus } from "lucide-react-native";
+import { CalendarClock } from "lucide-react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { MenuHeader } from "@/components/headers/menu-header";
-import { ExternalLink } from "@/components/ui/external-link";
 import { HostFilter } from "@/components/hosts/host-filter";
 import { ALL_HOSTS_OPTION_ID } from "@/components/hosts/host-picker";
-import { ScheduleFormSheet } from "@/components/schedules/schedule-form-sheet";
 import { SchedulesTable, type ScheduleRowView } from "@/components/schedules/schedules-table";
 import {
   SystemdTimersSection,
@@ -43,12 +34,6 @@ import {
   buildProjectNameByCwd,
   buildScheduleProjectTargets,
 } from "@/schedules/schedule-project-targets";
-import type { ScheduleSummary } from "@getpaseo/protocol/schedule/types";
-
-type FormState =
-  | { mode: "closed" }
-  | { mode: "create" }
-  | { mode: "edit"; serverId: string; schedule: ScheduleSummary };
 
 const STATUS_FILTER_OPTIONS: { value: ScheduleBucket; label: string; testID: string }[] = [
   { value: "runnable", label: "Active", testID: "schedules-filter-active" },
@@ -96,7 +81,6 @@ function SchedulesScreenContent(): ReactElement {
     return ready;
   }, [hosts, runtime, runtimeVersion]);
 
-  const [form, setForm] = useState<FormState>({ mode: "closed" });
   const [selectedHost, setSelectedHost] = useState(ALL_HOSTS_OPTION_ID);
   const [statusFilter, setStatusFilter] = useState<ScheduleBucket>("runnable");
   const timers = useSystemdTimers(selectedHost);
@@ -109,12 +93,6 @@ function SchedulesScreenContent(): ReactElement {
       setSelectedHost(ALL_HOSTS_OPTION_ID);
     }
   }, [hosts, selectedHost]);
-
-  const openCreate = useCallback(() => setForm({ mode: "create" }), []);
-  const openEdit = useCallback((schedule: AggregatedSchedule) => {
-    setForm({ mode: "edit", serverId: schedule.serverId, schedule });
-  }, []);
-  const closeForm = useCallback(() => setForm({ mode: "closed" }), []);
 
   const agentsByKey = useMemo(() => {
     const map = new Map<string, ScheduleTargetAgent>();
@@ -185,15 +163,6 @@ function SchedulesScreenContent(): ReactElement {
         selectedHost={selectedHost}
         onSelectHost={setSelectedHost}
         onRetry={refetch}
-        onCreate={openCreate}
-        onEdit={openEdit}
-      />
-      <ScheduleFormSheet
-        serverId={form.mode === "edit" ? form.serverId : undefined}
-        visible={form.mode === "create" || form.mode === "edit"}
-        onClose={closeForm}
-        mode={form.mode === "edit" ? "edit" : "create"}
-        schedule={form.mode === "edit" ? form.schedule : undefined}
       />
     </View>
   );
@@ -212,8 +181,6 @@ function SchedulesScreenBody({
   selectedHost,
   onSelectHost,
   onRetry,
-  onCreate,
-  onEdit,
 }: {
   rows: ScheduleRowView[];
   timers: SystemdTimer[];
@@ -227,8 +194,6 @@ function SchedulesScreenBody({
   selectedHost: string;
   onSelectHost: (serverId: string) => void;
   onRetry: () => void;
-  onCreate: () => void;
-  onEdit: (schedule: AggregatedSchedule) => void;
 }): ReactElement {
   const bodyState = resolveSchedulesScreenBodyState({ loadState, showLoadError });
 
@@ -255,14 +220,14 @@ function SchedulesScreenBody({
     return (
       <View style={styles.centered}>
         {hostErrors.length > 0 ? <ScheduleHostErrorsBanner errors={hostErrors} /> : null}
-        <SchedulesEmptyState onCreate={onCreate} testID="schedules-empty" />
+        <SchedulesEmptyState testID="schedules-empty" />
       </View>
     );
   }
 
   let schedulesContent: ReactElement | null;
   if (rows.length > 0) {
-    schedulesContent = <SchedulesTable rows={rows} onEditSchedule={onEdit} />;
+    schedulesContent = <SchedulesTable rows={rows} />;
   } else if (statusFilter === "ended") {
     schedulesContent = <SchedulesEndedEmptyState />;
   } else if (timers.length > 0) {
@@ -270,7 +235,7 @@ function SchedulesScreenBody({
   } else {
     schedulesContent = (
       <View style={styles.filterEmpty}>
-        <SchedulesEmptyState onCreate={onCreate} testID="schedules-empty" />
+        <SchedulesEmptyState testID="schedules-empty" />
       </View>
     );
   }
@@ -295,15 +260,6 @@ function SchedulesScreenBody({
             testID="schedules-status-filter"
           />
         </View>
-        <Button
-          variant="outline"
-          leftIcon={Plus}
-          onPress={onCreate}
-          size="sm"
-          testID="schedules-new"
-        >
-          New schedule
-        </Button>
       </View>
       <ScrollView
         style={styles.scroll}
@@ -322,24 +278,16 @@ function SchedulesScreenBody({
   );
 }
 
-function SchedulesEmptyState({
-  onCreate,
-  testID,
-}: {
-  onCreate: () => void;
-  testID?: string;
-}): ReactElement {
+function SchedulesEmptyState({ testID }: { testID?: string }): ReactElement {
   return (
     <View style={styles.emptyState} testID={testID}>
       <CalendarClock size={styles.emptyIcon.width} color={styles.emptyIcon.color} />
       <View style={styles.emptyTextStack}>
         <Text style={styles.emptyTitle}>No active schedules</Text>
-        <Text style={styles.emptyDescription}>Schedules run agents on a cadence.</Text>
-        <ExternalLink href="https://paseo.sh/docs/schedules" label="See docs" />
+        <Text style={styles.emptyDescription}>
+          Bot timers and agent schedules created elsewhere appear here.
+        </Text>
       </View>
-      <Button variant="outline" leftIcon={Plus} onPress={onCreate} testID="schedules-empty-new">
-        New schedule
-      </Button>
     </View>
   );
 }

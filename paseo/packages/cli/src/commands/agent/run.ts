@@ -38,7 +38,7 @@ export function addRunOptions(cmd: Command): Command {
       .addOption(new Option("--name <name>", "Hidden alias for --title").hideHelp())
       .option(
         "--provider <provider>",
-        "Agent provider, or provider/model (e.g. codex or codex/gpt-5.4)",
+        "Agent provider, or provider/model (e.g. pi or pi/openai-codex/gpt-5.4)",
       )
       .option(
         "--model <model>",

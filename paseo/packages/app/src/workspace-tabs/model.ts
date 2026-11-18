@@ -1,21 +1,5 @@
-import type { AgentProvider } from "@getpaseo/protocol/agent-types";
 import type { JsonValue } from "@getpaseo/protocol/agent-types";
 import type { WorkspaceFileTabTarget } from "@/workspace/file-open";
-
-export interface WorkspaceDraftTabSetup {
-  provider: AgentProvider;
-  cwd: string;
-  modeId: string | null;
-  model: string | null;
-  thinkingOptionId: string | null;
-  featureValues: Record<string, unknown>;
-}
-
-export interface WorkspaceWorkingDiffTabTarget {
-  kind: "working_diff";
-  focusPath?: string;
-  focusRequestId?: number;
-}
 
 export type PluginWorkspaceTabTarget =
   | {
@@ -33,21 +17,12 @@ export type PluginWorkspaceTabTarget =
     };
 
 export type WorkspaceTabTarget =
-  | { kind: "new_tab" }
-  | { kind: "draft"; draftId: string; setup?: WorkspaceDraftTabSetup }
   | { kind: "agent"; agentId: string }
   | { kind: "provider_subagent"; parentAgentId: string; subagentId: string }
-  | { kind: "terminal"; terminalId: string }
-  | { kind: "browser"; browserId: string }
-  | { kind: "changes_tree" }
   | { kind: "files" }
-  | { kind: "pull_request" }
   | { kind: "network_status" }
   | WorkspaceFileTabTarget
-  | WorkspaceWorkingDiffTabTarget
-  | PluginWorkspaceTabTarget
-  | { kind: "setup"; workspaceId: string }
-  | { kind: "commit_diff"; sha: string };
+  | PluginWorkspaceTabTarget;
 
 export interface WorkspaceTab {
   tabId: string;

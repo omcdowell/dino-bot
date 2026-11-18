@@ -162,8 +162,6 @@ export const SHORTCUT_HELP_ROW_ORDER: Record<ShortcutSectionId, readonly string[
     "cycle-theme",
   ],
   workspaces: [
-    "new-agent",
-    "new-workspace",
     "workspace-jump-index",
     "workspace-prev",
     "workspace-next",
@@ -171,11 +169,6 @@ export const SHORTCUT_HELP_ROW_ORDER: Record<ShortcutSectionId, readonly string[
     "archive-workspace",
   ],
   "tabs-panes": [
-    "workspace-tab-new",
-    "workspace-tab-target-agent",
-    "workspace-terminal-new",
-    "workspace-tab-target-browser",
-    "workspace-tab-target-changes",
     "workspace-tab-target-files",
     "workspace-tab-close-current",
     "workspace-tab-jump-index",
@@ -205,14 +198,8 @@ export const SHORTCUT_HELP_ROW_ORDER: Record<ShortcutSectionId, readonly string[
 };
 
 const SHORTCUT_HELP_LABEL_KEYS: Record<string, string> = {
-  "new-agent": "settings.shortcuts.help.openProject",
-  "new-workspace": "settings.shortcuts.help.newWorkspace",
   "switch-project": "settings.shortcuts.help.switchProject",
   "archive-workspace": "settings.shortcuts.help.archiveWorkspace",
-  "workspace-tab-new": "settings.shortcuts.help.newTab",
-  "workspace-tab-target-agent": "workspace.tabs.actions.newAgent",
-  "workspace-tab-target-browser": "workspace.tabs.actions.newBrowser",
-  "workspace-tab-target-changes": "workspace.tabs.actions.changes",
   "workspace-tab-target-files": "workspace.tabs.actions.files",
   "workspace-tab-close-current": "settings.shortcuts.help.closeCurrentTab",
   "workspace-jump-index": "settings.shortcuts.help.jumpToWorkspace",
@@ -232,7 +219,6 @@ const SHORTCUT_HELP_LABEL_KEYS: Record<string, string> = {
   "workspace-pane-move-tab-up": "settings.shortcuts.help.moveTabUp",
   "workspace-pane-move-tab-down": "settings.shortcuts.help.moveTabDown",
   "workspace-pane-close": "settings.shortcuts.help.closePane",
-  "workspace-terminal-new": "settings.shortcuts.help.newTerminal",
   "search-files": "settings.shortcuts.help.searchFiles",
   "toggle-command-center": "settings.shortcuts.help.toggleCommandCenter",
   "show-shortcuts": "settings.shortcuts.help.showKeyboardShortcuts",
@@ -257,58 +243,6 @@ const SHORTCUT_HELP_NOTE_KEYS: Record<string, string> = {
 // --- Binding definitions ---
 
 const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
-  // --- Open project ---
-  // Open project moved from Cmd+Shift+O to Cmd+O. The binding ids intentionally
-  // keep their original "cmd-shift-o" / "ctrl-shift-o" names: user shortcut
-  // overrides are keyed by binding id, so renaming them would silently drop a
-  // user's customized Open project shortcut on upgrade.
-  {
-    id: "agent-new-cmd-shift-o-mac",
-    action: "agent.new",
-    combo: "Cmd+O",
-    when: { mac: true },
-    help: {
-      id: "new-agent",
-      section: "workspaces",
-      label: "Open project",
-    },
-  },
-  {
-    id: "agent-new-ctrl-shift-o-non-mac",
-    action: "agent.new",
-    combo: "Ctrl+O",
-    when: { mac: false, terminal: false },
-    help: {
-      id: "new-agent",
-      section: "workspaces",
-      label: "Open project",
-    },
-  },
-
-  // --- New workspace ---
-  {
-    id: "workspace-new-cmd-n-mac",
-    action: "workspace.new",
-    combo: "Cmd+N",
-    when: { mac: true, commandCenter: false },
-    help: {
-      id: "new-workspace",
-      section: "workspaces",
-      label: "New workspace",
-    },
-  },
-  {
-    id: "workspace-new-ctrl-n-non-mac",
-    action: "workspace.new",
-    combo: "Ctrl+N",
-    when: { mac: false, commandCenter: false, terminal: false },
-    help: {
-      id: "new-workspace",
-      section: "workspaces",
-      label: "New workspace",
-    },
-  },
-
   // --- Search files (switch project on the New Workspace screen) ---
   {
     id: "workspace-project-pick-cmd-p-mac",
@@ -386,96 +320,6 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
   },
 
   // --- Tab management ---
-  {
-    id: "workspace-tab-new-cmd-t-mac",
-    action: "workspace.tab.menu.open",
-    combo: "Cmd+T",
-    when: { mac: true, commandCenter: false },
-    help: {
-      id: "workspace-tab-new",
-      section: "tabs-panes",
-      label: "New tab",
-    },
-  },
-  {
-    id: "workspace-tab-new-ctrl-t-non-mac",
-    action: "workspace.tab.menu.open",
-    combo: "Ctrl+T",
-    when: { mac: false, commandCenter: false, terminal: false },
-    help: {
-      id: "workspace-tab-new",
-      section: "tabs-panes",
-      label: "New tab",
-    },
-  },
-  {
-    id: "workspace-tab-target-agent-cmd-shift-a-mac",
-    action: "workspace.tab.target.agent",
-    combo: "Cmd+Shift+A",
-    when: { mac: true, commandCenter: false },
-    help: {
-      id: "workspace-tab-target-agent",
-      section: "tabs-panes",
-      label: "New agent",
-    },
-  },
-  {
-    id: "workspace-tab-target-agent-ctrl-shift-a-non-mac",
-    action: "workspace.tab.target.agent",
-    combo: "Ctrl+Shift+A",
-    when: { mac: false, commandCenter: false, terminal: false },
-    help: {
-      id: "workspace-tab-target-agent",
-      section: "tabs-panes",
-      label: "New agent",
-    },
-  },
-  {
-    id: "workspace-tab-target-browser-cmd-shift-b-mac",
-    action: "workspace.tab.target.browser",
-    combo: "Cmd+Shift+B",
-    when: { mac: true, commandCenter: false },
-    help: {
-      id: "workspace-tab-target-browser",
-      section: "tabs-panes",
-      label: "New browser",
-    },
-  },
-  {
-    id: "workspace-tab-target-browser-ctrl-shift-b-non-mac",
-    action: "workspace.tab.target.browser",
-    combo: "Ctrl+Shift+B",
-    when: { mac: false, commandCenter: false, terminal: false },
-    help: {
-      id: "workspace-tab-target-browser",
-      section: "tabs-panes",
-      label: "New browser",
-    },
-  },
-  {
-    // Keep the binding id stable so saved overrides from the former Cmd+Shift+C default survive.
-    id: "workspace-tab-target-changes-cmd-shift-c-mac",
-    action: "workspace.tab.target.changes",
-    combo: "Cmd+Shift+G",
-    when: { mac: true, commandCenter: false },
-    help: {
-      id: "workspace-tab-target-changes",
-      section: "tabs-panes",
-      label: "Changes",
-    },
-  },
-  {
-    // Keep the binding id stable so saved overrides from the former Ctrl+Shift+C default survive.
-    id: "workspace-tab-target-changes-ctrl-shift-c-non-mac",
-    action: "workspace.tab.target.changes",
-    combo: "Ctrl+Shift+G",
-    when: { mac: false, commandCenter: false, terminal: false },
-    help: {
-      id: "workspace-tab-target-changes",
-      section: "tabs-panes",
-      label: "Changes",
-    },
-  },
   {
     id: "workspace-tab-target-files-cmd-shift-e-mac",
     action: "workspace.tab.target.files",
@@ -834,29 +678,6 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
       id: "workspace-pane-close",
       section: "tabs-panes",
       label: "Close pane",
-    },
-  },
-  // --- New terminal ---
-  {
-    id: "workspace-terminal-new-cmd-shift-t-mac",
-    action: "workspace.terminal.new",
-    combo: "Cmd+Shift+T",
-    when: { mac: true, commandCenter: false },
-    help: {
-      id: "workspace-terminal-new",
-      section: "tabs-panes",
-      label: "New terminal",
-    },
-  },
-  {
-    id: "workspace-terminal-new-ctrl-shift-t-non-mac",
-    action: "workspace.terminal.new",
-    combo: "Ctrl+Shift+T",
-    when: { mac: false, commandCenter: false, terminal: false },
-    help: {
-      id: "workspace-terminal-new",
-      section: "tabs-panes",
-      label: "New terminal",
     },
   },
 

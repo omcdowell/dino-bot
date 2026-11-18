@@ -96,10 +96,6 @@ export const ru: TranslationResources = {
       open: "Открыть {{name}}",
       openInSidePane: "Открыть {{name}} в боковой панели",
       openInFocusedPane: "Открыть {{name}} в активной области",
-      addProject: "Добавить проект",
-      home: "Главная",
-      groupByProject: "Группировать по проекту",
-      groupByStatus: "Группировать по статусу",
       modelGroupLabel: "Модель",
       modelSearchKeywords: "Сменить, изменить, выбрать или установить модель",
       thinkingGroupLabel: "Мышление",
@@ -277,18 +273,6 @@ export const ru: TranslationResources = {
       unarchive: "Разархивировать",
     },
   },
-  sessions: {
-    title: "История",
-    empty: "Сессий пока нет",
-    noMatches: "Подходящих сессий не найдено",
-    tooManyMatches: "Слишком много совпадений — уточните запрос",
-    hostLoadFailed: "{{host}}: не удалось загрузить историю",
-    searchPlaceholder: "Поиск по истории",
-    actions: {
-      loadMore: "Загрузить ещё",
-      clearSearch: "Очистить поиск",
-    },
-  },
   agentList: {
     fallbackTitle: "Новая сессия",
     dateSections: {
@@ -335,8 +319,6 @@ export const ru: TranslationResources = {
       forkInNewTab: "Создать форк в новой вкладке",
       forkInNewWorkspace: "Создать форк в новом рабочем пространстве",
       forkUnavailable: "Обновите хост, чтобы использовать эту функцию.",
-      forkMissingWorkspace: "Этот агент не связан с рабочим пространством.",
-      forkFailed: "Не удалось создать форк чата",
       openFile: "Открыть файл",
       copied: "Скопировано",
     },
@@ -1158,7 +1140,6 @@ export const ru: TranslationResources = {
     },
   },
   sidebar: {
-    statusGroupAccessibility: "Группа «{{label}}»",
     statusBucket: {
       needsInput: "Ожидает ввода",
       failed: "Ошибка",
@@ -1167,54 +1148,9 @@ export const ru: TranslationResources = {
       done: "Готово",
     },
     display: {
-      showBackground: "Показать фоновые пространства",
-      trigger: "Настройки отображения",
-      heading: "Отображение",
       grouping: {
-        label: "Группировка",
-        project: "Проект",
-        status: "Статус",
         labels: "Метки",
       },
-      titleSource: {
-        label: "Заголовок",
-        title: "Заголовок",
-        branch: "Имя ветки",
-      },
-      show: {
-        label: "Показывать",
-        branch: "Ветка",
-        project: "Проект",
-        host: "Хост",
-        changeRequest: "PR",
-        checks: "Проверки",
-        services: "Сервисы",
-        labels: "Метки",
-        diff: "Статистика изменений",
-        timestamp: "Последняя активность",
-      },
-      checks: {
-        iconAndText: "Значок и текст",
-        icon: "Только значок",
-        none: "Скрыто",
-      },
-      hostFilter: {
-        label: "Хост",
-        all: "Все хосты",
-      },
-      projectFilter: {
-        label: "Проект",
-        all: "Все проекты",
-      },
-    },
-    filterEmpty: {
-      title: "Нет подходящих рабочих пространств",
-      description:
-        "Измените или очистите фильтры боковой панели, чтобы увидеть рабочие пространства.",
-      clear: "Очистить фильтры",
-    },
-    pinned: {
-      title: "Закреплённые",
     },
     host: {
       noHost: "Нет хоста",
@@ -1222,8 +1158,6 @@ export const ru: TranslationResources = {
       searchPlaceholder: "Поиск хостов...",
     },
     actions: {
-      addProject: "Добавить проект",
-      newWorkspace: "Новое рабочее пространство",
       hosts: "Хосты",
       settings: "Настройки",
       closeSidebar: "Закрыть боковую панель",
@@ -1239,77 +1173,28 @@ export const ru: TranslationResources = {
       reportIssue: "Сообщить о проблеме",
       discord: "Discord",
       github: "Создать issue на GitHub",
-      whatsNew: "Что нового",
       appName: "Paseo",
     },
     sections: {
-      sessions: "История",
       search: "Поиск",
       schedules: "Расписания",
     },
-    worktreeSetup: {
-      title: "Настроить скрипты worktree",
-      description:
-        "Добавьте команды настройки для автоматической установки зависимостей и подготовки новых worktree.",
-      openProjectSettings: "Открыть настройки проекта",
-    },
     project: {
       actions: {
-        menu: "Действия проекта",
-        openSettings: "Открыть настройки проекта",
-        openNewWindow: "Открыть в новом окне",
-        openNewWindowFailed: "Не удалось открыть новое окно",
-        openFolder: "Открыть в файловом менеджере",
         openFolderFailed: "Не удалось открыть папку",
-        remove: "Удалить проект",
-        removing: "Удаление...",
-      },
-      confirmations: {
-        removeTitle: "Удалить проект?",
-        removeMessage:
-          "Удалить проект «{{projectName}}» с боковой панели?\n\nФайлы на диске не будут изменены.",
-        removeConfirm: "Удалить",
-        cancel: "Отмена",
-      },
-      toasts: {
-        hostDisconnected: "Хост не подключён",
-        removeFailed: "Не удалось удалить некоторые рабочие пространства.",
-        updateHostToRemove: "Обновите хост, чтобы удалять проекты.",
-      },
-      empty: {
-        title: "Пока нет проектов",
-        description: "Добавьте проект, чтобы начать работу",
       },
     },
     workspace: {
       status: {
         serviceRunning: "Сервис {{name}} запущен",
         serviceUnhealthy: "Сервис {{name}} работает некорректно",
-        creating: "Создание...",
-      },
-      checks: {
-        passed: "Успешные: {{count}}",
-        failed: "Ошибки: {{count}}",
-        warning: "Предупреждения: {{count}}",
-        actionRequired: "Требуется действие: {{count}}",
-        manual: "Вручную: {{count}}",
-        pending: "Ожидают: {{count}}",
       },
       actions: {
-        menu: "Действия рабочего пространства",
-        newWorkspace: "Новое рабочее пространство",
-        showMore: "Показать ещё",
-        showLess: "Показать меньше",
-        createWorkspaceFor: "Создать новое рабочее пространство для {{projectName}}",
-        copyPath: "Копировать путь",
-        copyBranchName: "Скопировать имя ветки",
         rename: "Переименовать рабочее пространство",
         pin: "Закрепить вверху",
         unpin: "Открепить",
-        archive: "Архивировать",
         archiveWorkspace: "Архивировать рабочее пространство",
         hideFromSidebar: "Скрыть на боковой панели",
-        archiving: "Архивирование...",
         hiding: "Скрытие...",
       },
       confirmations: {
@@ -1320,8 +1205,6 @@ export const ru: TranslationResources = {
         cancel: "Отмена",
       },
       rename: {
-        title: "Переименовать рабочее пространство",
-        submit: "Переименовать",
         invalidBranchName: "Недопустимое имя ветки",
       },
       toasts: {
@@ -1335,50 +1218,12 @@ export const ru: TranslationResources = {
     },
   },
   newWorkspace: {
-    title: "Новое рабочее пространство",
-    create: "Создать",
-    isolation: {
-      local: "Локально",
-      worktree: "Новый worktree",
-      label: "Изоляция",
-    },
     fields: {
       project: "Проект",
       base: "Базовая ветка",
       baseNotApplicable: "Неприменимо",
     },
     titlePlaceholder: "Заголовок (необязательно)",
-    errors: {
-      hostDisconnected: "Хост не подключён",
-      createWorktreeFailed: "Не удалось создать worktree.",
-      composerStateRequired: "Редактор сообщения ещё не готов.",
-      selectModel: "Выберите модель",
-    },
-    tooltips: {
-      project: "Выберите проект",
-      host: "Выберите хост",
-      isolation: "Выберите уровень изоляции",
-      startingRef: "Выберите, с чего начать",
-      launch: "Выберите, что запустить",
-    },
-    refPicker: {
-      startingRef: "Исходная точка",
-      intoBase: "в ветку {{baseRef}}",
-      searching: "Идет поиск...",
-      noMatchingRefs: "Нет подходящих веток или PR.",
-      searchPlaceholder: "Поиск веток и PR",
-      title: "Начать с",
-    },
-    launch: {
-      title: "Что запустить",
-      chat: "Чат",
-      terminal: "Терминал",
-      manageProfiles: "Управление профилями терминала",
-      submit: "Запустить",
-      promptPlaceholder: "Промпт для {{name}}",
-      commandPlaceholder:
-        "Введите команду или оставьте поле пустым, чтобы открыть терминал без запуска команды",
-    },
   },
   desktop: {
     windowControls: {
@@ -1471,7 +1316,6 @@ export const ru: TranslationResources = {
         failedTitle: "Обновление не выполнено",
         availableTitle: "Доступно обновление",
         genericError: "Что-то пошло не так.",
-        whatsNew: "Что нового",
         installingAction: "Установка...",
         installAndRestart: "Установить и перезапустить",
         installingDescription: "Установка и перезапуск...",
@@ -1539,12 +1383,6 @@ export const ru: TranslationResources = {
         failed: "Не удалось отправить уведомление.",
       },
     },
-    integrations: {
-      cli: {
-        statusFailed: "Не удалось проверить состояние установки CLI.",
-        installFailed: "Не удалось установить Paseo CLI.",
-      },
-    },
   },
   rootError: {
     title: "В Paseo возникла проблема.",
@@ -1563,21 +1401,8 @@ export const ru: TranslationResources = {
   },
   openProject: {
     tiles: {
-      addProject: {
-        title: "Добавить проект",
-        description: "Откройте папку на своем компьютере",
-      },
-      importSession: {
-        title: "Импортировать сессию",
-        description: "Импортируйте недавние сессии из внешних CLI",
-      },
-      setupProviders: {
-        title: "Настроить провайдеров",
-        description: "Настройте Claude Code, Codex и другие провайдеры",
-      },
       pairDevice: {
         title: "Подключить устройство",
-        description: "Подключите свой телефон к этому демону",
       },
     },
   },
@@ -1592,26 +1417,6 @@ export const ru: TranslationResources = {
       open_failed: "Не удалось открыть проект.",
     },
     openPath: "Открыть путь",
-  },
-  branchSwitcher: {
-    triggerTooltip: "Переключить ветку рабочего пространства",
-    currentBranch: "Текущая ветка: {{branchName}}. Нажмите, чтобы переключить ветку.",
-    placeholder: "Сменить ветку...",
-    searchPlaceholder: "Фильтровать ветки...",
-    empty: "Ветки не найдены.",
-    title: "Переключить ветку",
-    uncommittedTitle: "Незафиксированные изменения",
-    uncommittedMessage:
-      "У вас есть незафиксированные изменения. Убрать их в stash перед переключением ветки?",
-    stashAndSwitch: "Убрать в stash и переключиться",
-    failedToStash: "Не удалось убрать изменения в stash",
-    failedToSwitch: "Не удалось переключить ветку",
-    restoreStashTitle: "Восстановить изменения из stash?",
-    restoreStashMessage:
-      "В этой ветке есть изменения из предыдущей сессии, сохранённые в stash. Восстановить их?",
-    restore: "Восстановить",
-    later: "Позже",
-    stashRestored: "Изменения из stash восстановлены.",
   },
   agentAutocomplete: {
     searchingWorkspace: "Поиск в рабочем пространстве...",
@@ -1684,22 +1489,6 @@ export const ru: TranslationResources = {
     searchPlaceholder: "Поиск моделей...",
     openProviderSettings: "Открыть настройки {{provider}}",
   },
-  providerCatalog: {
-    title: "Добавить провайдера",
-    search: "Поиск провайдеров",
-    noProviders: "Провайдеры не найдены",
-    actions: {
-      add: "Добавить",
-      adding: "Добавление",
-      installed: "Установлено",
-      cancel: "Отмена",
-      installInstructions: "Инструкции по установке",
-      installInstructionsFor: "Инструкции по установке {{provider}}",
-    },
-    errors: {
-      unableToInstall: "Не удалось установить провайдера",
-    },
-  },
   providerSelection: {
     defaultModel: "По умолчанию",
     selectModel: "Выберите модель",
@@ -1737,10 +1526,6 @@ export const ru: TranslationResources = {
       direct: {
         title: "Прямое подключение",
         description: "Локальная сеть или VPN.",
-      },
-      remoteSsh: {
-        title: "Удалённый SSH",
-        description: "Подключение через SSH-клиент настольного приложения.",
       },
       scanQr: {
         title: "Сканировать QR-код",
@@ -1792,29 +1577,6 @@ export const ru: TranslationResources = {
         unableToConnect:
           "Не удалось подключиться. Проверьте адрес хоста и порт, а также доступность демона.",
         details: "Подробности: {{detail}}",
-      },
-    },
-    remoteSsh: {
-      title: "Удалённый SSH",
-      helper: "Подключитесь к демону Paseo на удалённом хосте.",
-      fields: {
-        target: "Хост SSH",
-        password: "Пароль демона",
-        optional: "Необязательно",
-      },
-      passwordVisibility: {
-        show: "Показать пароль",
-        hide: "Скрыть пароль",
-      },
-      actions: {
-        cancel: "Отмена",
-        connect: "Подключить",
-        connecting: "Подключение...",
-      },
-      errors: {
-        targetRequired: "Укажите хост SSH",
-        invalidTarget: "Укажите корректный хост ssh://",
-        failedToConnect: "Не удалось подключиться по SSH. {{detail}}",
       },
     },
     link: {
@@ -1900,13 +1662,6 @@ export const ru: TranslationResources = {
   diffViewer: {
     empty: "Нет изменений для отображения",
   },
-  serviceUrl: {
-    title: "Открыть URL сервиса",
-    message: "Открыть {{url}}?",
-    inPaseo: "В Paseo",
-    externalBrowser: "Внешний браузер",
-    dontAskAgain: "Больше не спрашивать",
-  },
   downloads: {
     requestTokenFailed: "Не удалось запросить токен загрузки.",
     hostUnavailable: "Хост загрузки недоступен.",
@@ -1935,10 +1690,6 @@ export const ru: TranslationResources = {
     archiveFinishedRetry: "Повторить ({{failed}}/{{total}})",
   },
   panels: {
-    draft: {
-      newAgent: "Новый агент",
-      creatingAgent: "Создание агента",
-    },
     file: {
       directoryMissing: "Каталог рабочего пространства не найден.",
       loading: "Загрузка файла...",
@@ -1978,23 +1729,9 @@ export const ru: TranslationResources = {
       tooltip: "Просмотр файлов рабочего пространства",
       chooseFile: "Выберите файл",
     },
-    pullRequest: {
-      label: "PR",
-      subtitle: "Сведения о PR",
-      emptyTitle: "PR пока нет",
-      emptyDescription: "Создайте PR для этой рабочей копии, чтобы увидеть здесь сведения о нём.",
-    },
     diff: {
-      changesLabel: "Изменения",
-      diffLabel: "Дифф",
-      changesSubtitle: "Изменения в worktree",
-      commitSubtitle: "Изменения в коммите",
       uncommittedSubtitle: "Незафиксированные изменения",
       baseSubtitle: "Сравнение с {{baseRef}}",
-      directoryMissing: "Каталог рабочего пространства не найден.",
-      empty: "Нет изменений",
-      loadError: "Не удалось загрузить список изменений",
-      capabilityMissing: "Обновите хост, чтобы просматривать изменения в коммитах.",
     },
   },
   toolCallDetails: {
@@ -2074,33 +1811,18 @@ export const ru: TranslationResources = {
     backToWorkspace: "Назад",
     addHost: "Добавить хост",
     enableBuiltInDaemon: "Включить встроенный демон",
-    projects: "Проекты",
-    projectList: {
-      hostLoadFailed: "Не удалось загрузить проекты с хоста {{hostName}}: {{message}}",
-      editProject: "Изменить {{projectName}}",
-    },
     groupInfo: "О разделе «{{title}}»",
     sections: {
       general: "Основные",
       chat: "Чат",
       appearance: "Оформление",
-      sidebar: "Боковая панель",
-      terminal: "Терминал",
-      browser: "Браузер",
-      editor: "Редактор",
       shortcuts: "Сочетания клавиш",
-      integrations: "Интеграции",
       notifications: "Уведомления",
       permissions: "Разрешения",
       diagnostics: "Диагностика",
       about: "О приложении",
     },
     layout: en.settings.layout,
-    editor: {
-      title: "Редактор",
-      vimKeybindings: "Сочетания клавиш Vim",
-      vimHint: "Применяется к исходным файлам в веб- и настольной версии.",
-    },
     notifications: {
       title: "Уведомления",
       permission: "Разрешение на уведомления",
@@ -2117,49 +1839,19 @@ export const ru: TranslationResources = {
       sendFailedTitle: "Не удалось отправить тестовое уведомление",
     },
     hostSections: {
-      projects: "Проекты",
       connections: "Подключения",
       agents: "Агенты",
-      metadata: "Метаданные",
-      workspaces: "Рабочие пространства",
       providers: "Провайдеры",
       usage: "Использование",
-      terminals: "Терминалы",
       plugins: "Плагины",
       host: "Обзор",
     },
     plugins: pluginSettings.ru,
-    metadataGeneration: {
-      title: "Генерация метаданных",
-      description:
-        "Выберите модель, которую Paseo будет использовать для названий рабочих пространств и веток, сообщений коммитов и черновиков PR",
-      selection: "Выбор модели",
-      automatic: "Автоматически",
-      preferred: "Вручную",
-      automaticHint: "Paseo выбирает быструю доступную модель",
-      preferredHint: "Выберите модель, которую использует Paseo",
-      model: "Модель",
-      fallbackHint: "Если она недоступна, Paseo использует другую доступную модель",
-      docs: "Документация",
-      saveError: "Не удалось обновить настройки генерации метаданных",
-    },
     general: {
       title: "Основные",
       sending: "Отправка",
       network: en.settings.general.network,
       meteredNetwork: en.settings.general.meteredNetwork,
-      browserData: {
-        title: "Данные браузера",
-        siteData: "Файлы cookie и данные сайтов",
-        description: "Вкладки браузера в Paseo используют общие данные входа и данные сайтов.",
-        clear: "Очистить данные браузера",
-        clearing: "Очистка...",
-        confirmTitle: "Очистить данные браузера?",
-        confirmMessage:
-          "Вы выйдете из аккаунтов на сайтах, а открытые вкладки браузера перезагрузятся.",
-        success: "Данные браузера очищены.",
-        error: "Не удалось очистить данные браузера.",
-      },
       defaultSend: {
         label: "Отправка по умолчанию",
         descriptions: {
@@ -2182,11 +1874,6 @@ export const ru: TranslationResources = {
           inApp: "В Paseo",
           external: "Внешний браузер",
         },
-      },
-      terminalScrollback: {
-        label: "Буфер прокрутки терминала",
-        description: "Количество строк, сохраняемых во встроенном буфере терминала",
-        accessibilityLabel: "Количество строк в буфере прокрутки терминала",
       },
       autoExpandReasoning: {
         label: "Всегда разворачивать размышления",
@@ -2250,7 +1937,6 @@ export const ru: TranslationResources = {
     about: {
       title: "О приложении",
       appVersion: "Версия приложения",
-      whatsNewHint: "Заметки о выпуске для каждой версии",
       thisDevice: "Это устройство",
       connectedHosts: "Подключенные хосты",
       offline: "Оффлайн",
@@ -2298,20 +1984,6 @@ export const ru: TranslationResources = {
       chatOutline: {
         title: "Оглавление чата",
         description: "Показывать оглавление для перехода между запросами",
-      },
-      sidebar: {
-        header: {
-          title: "Верх",
-          description:
-            "Выберите, какие элементы отображаются вверху боковой панели и в каком порядке",
-        },
-        footer: {
-          title: "Низ",
-          description:
-            "Выберите, какие строки отображаются внизу боковой панели и в каком порядке. «Добавить проект» и ряд значков видны всегда",
-        },
-        moveUp: "Переместить вверх",
-        moveDown: "Переместить вниз",
       },
       fonts: {
         title: "Шрифты",
@@ -2380,7 +2052,6 @@ export const ru: TranslationResources = {
         newWorkspace: "Новое рабочее пространство",
         newWorktree: "Новый worktree",
         archiveWorkspace: "Архивировать рабочее пространство",
-        newTab: "Новая вкладка",
         closeCurrentTab: "Закрыть текущую вкладку",
         jumpToWorkspace: "Перейти к рабочему пространству",
         jumpToTab: "Перейти на вкладку",
@@ -2399,7 +2070,6 @@ export const ru: TranslationResources = {
         moveTabUp: "Переместить вкладку вверх",
         moveTabDown: "Переместить вкладку вниз",
         closePane: "Закрыть панель",
-        newTerminal: "Новый терминал",
         searchFiles: "Поиск файлов",
         toggleCommandCenter: "Переключить командный центр",
         showKeyboardShortcuts: "Показать сочетания клавиш",
@@ -2421,22 +2091,6 @@ export const ru: TranslationResources = {
       },
       helpNotes: {
         showKeyboardShortcuts: "Доступно, когда фокус находится не в текстовом поле или терминале.",
-      },
-    },
-    integrations: {
-      title: "Интеграции",
-      docs: {
-        cli: "Документация CLI",
-        openCli: "Открыть документацию CLI",
-      },
-      commandLine: {
-        title: "Командная строка",
-        description: "Управляйте агентами и автоматизируйте их работу из терминала",
-      },
-      actions: {
-        install: "Установить",
-        installing: "Установка...",
-        installed: "Установлено",
       },
     },
     permissions: {
@@ -2584,34 +2238,6 @@ export const ru: TranslationResources = {
       agents: {
         unavailable: "Подключитесь к этому хосту, чтобы управлять агентами",
       },
-      workspaces: {
-        unavailable: "Подключитесь к этому хосту, чтобы управлять рабочими пространствами",
-      },
-      terminalProfiles: {
-        unavailable: "Подключитесь к этому хосту, чтобы управлять профилями терминала",
-        sectionTitle: "Профили терминала",
-        editProfile: "Изменить профиль",
-        addProfileTitle: "Добавить профиль терминала",
-        editProfileTitle: "Изменить профиль терминала",
-        namePlaceholder: "Claude Code",
-        commandPlaceholder: "claude",
-        argsPlaceholder: "--dangerously-skip-permissions",
-        nameLabel: "Название",
-        commandLabel: "Команда",
-        argsLabel: "Аргументы",
-        nameRequired: "Укажите название",
-        commandRequired: "Укажите команду",
-        argsHint: "Аргументы, разделённые пробелами и передаваемые команде",
-        saving: "Сохранение...",
-        remove: "Удалить",
-        removeConfirmTitle: "Удалить профиль?",
-        removeConfirmMessage: "Удалить «{{name}}»?",
-        moveUp: "Переместить вверх",
-        moveDown: "Переместить вниз",
-        save: "Сохранить",
-        emptyState:
-          "Профилей пока нет. Добавьте профиль, чтобы запускать терминалы с заданной командой.",
-      },
       agentProfiles: {
         sectionTitle: "Профили агентов",
         unavailable: "Подключитесь к этому хосту, чтобы управлять профилями агентов",
@@ -2723,12 +2349,10 @@ export const ru: TranslationResources = {
     },
     providers: {
       title: "Провайдеры",
-      addProvider: "Добавить провайдера",
       providerDetails: "Сведения о провайдере {{name}}",
       enableProvider: "Включить {{name}}",
       unavailable: "Подключитесь к этому хосту, чтобы увидеть провайдеров",
       loading: "Загрузка...",
-      addErrorTitle: "Не удалось добавить провайдера",
       updateErrorTitle: "Не удалось обновить провайдера",
       actions: {
         menu: "Действия с {{name}}",
@@ -2784,97 +2408,6 @@ export const ru: TranslationResources = {
         none: "Диагностика недоступна",
         failedToFetch: "Не удалось получить диагностику.",
         unknownError: "Неизвестная ошибка",
-      },
-    },
-    project: {
-      noEditableTarget: "Этот проект нельзя редактировать на этом хосте.",
-      backToProjects: "Вернуться к проектам",
-      edit: {
-        title: "Изменить проект",
-        name: "Название",
-        nameLabel: "Название проекта",
-        icon: "Значок",
-        chooseImage: "Выбрать изображение",
-        useAutomatic: "Использовать автоматический значок",
-        imageUrl: "URL изображения или сайта",
-        save: "Сохранить изменения",
-        savedToast: "Проект обновлён",
-      },
-      readFailures: {
-        invalidTitle: "Не удалось разобрать paseo.json",
-        invalidDescription: "Исправьте файл на диске, затем загрузите его заново.",
-        missingTitle: "У этого хоста нет этого проекта",
-        missingSingleHost: "У выбранного хоста нет записей об этом проекте.",
-        transportTitle: "Не удалось загрузить paseo.json.",
-        transportFallback: "Хост не ответил.",
-        failedTitle: "Не удалось загрузить paseo.json.",
-        failedDescription: "Загрузите данные заново, чтобы повторить попытку.",
-      },
-      worktree: {
-        title: "Хуки жизненного цикла worktree",
-        info: "Команды, которые выполняются при создании или удалении worktree для этого проекта.",
-        docs: "Документация",
-        docsTooltip:
-          "Дополнительную информацию и переменные среды, доступные для этих команд, см. в документации.",
-        setup: "Настройка",
-        setupAccessibility: "Команды настройки worktree",
-        uncommittedTitle: "Закоммитьте изменения в paseo.json",
-        uncommittedDescription:
-          "Новые worktree используют скрипт настройки из выбранной базовой ветки.",
-        teardown: "Удаление",
-        teardownAccessibility: "Команды удаления worktree",
-      },
-      scripts: {
-        title: "Скрипты",
-        info: "Долго работающие сервисы и одноразовые команды, которые можно запускать из любого агента этого проекта.",
-        empty: "Скриптов пока нет.",
-        untitled: "Безымянный скрипт",
-        port: "порт {{port}}",
-        menuAccessibility: "Открыть меню скриптов",
-        removeTitle: "Удалить скрипт?",
-        removeMessage: "Удалить {{name}}?",
-        removeFallbackName: "этот скрипт",
-        name: "Название",
-        command: "Команда",
-        nameAccessibility: "Название скрипта",
-        commandAccessibility: "Команда скрипта",
-        nameRequired: "Укажите название",
-        commandRequired: "Требуется команда",
-        newScript: "Новый скрипт",
-        editScript: "Изменить {{name}}",
-        runAsService: "Запускать как сервис",
-        serviceHint: "Paseo управляет процессом и назначает порт через переменную $PASEO_PORT.",
-        actions: {
-          add: "Добавить скрипт",
-          edit: "Редактировать",
-          remove: "Удалить",
-        },
-      },
-      metadata: {
-        title: "Генерация метаданных",
-        info: "Инструкции для этого проекта, добавляемые в промпты ИИ, с помощью которых Paseo генерирует метаданные. Используйте их, чтобы соблюдать принятые в команде правила именования веток, оформления коммитов и формата PR.",
-        branchName: "Названия веток",
-        branchNamePlaceholder:
-          "Добавляйте к веткам префиксы feat/ или fix/, а к личным веткам — mb/",
-        commitMessage: "Сообщения коммитов",
-        commitMessagePlaceholder: "Используйте формат Conventional Commits с областью",
-        pullRequest: "PR",
-        pullRequestPlaceholder:
-          "Начинайте с краткого резюме в один абзац и добавляйте раздел «План тестирования».",
-      },
-      writeFailures: {
-        staleTitle: "Конфигурация изменена на диске",
-        staleDescription: "Перед сохранением загрузите с диска последнюю версию paseo.json.",
-        failedTitle: "Не удалось сохранить paseo.json.",
-        failedDescription: "Повторите попытку или загрузите с диска последнюю версию paseo.json.",
-      },
-      actions: {
-        reload: "Загрузить заново",
-        tryAgain: "Повторить",
-        save: "Сохранить",
-        saved: "Проект сохранён.",
-        saving: "Сохранение...",
-        cancel: "Отмена",
       },
     },
   },

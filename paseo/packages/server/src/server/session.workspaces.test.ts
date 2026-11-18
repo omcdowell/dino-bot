@@ -3335,7 +3335,7 @@ test("fetch_recent_provider_sessions_request lists importable provider sessions 
         entries: [
           {
             providerId: "codex",
-            providerLabel: "Codex",
+            providerLabel: "codex",
             providerHandleId: "newer-handle",
             cwd: "/tmp/recent",
             title: "Newer import",
@@ -3345,7 +3345,7 @@ test("fetch_recent_provider_sessions_request lists importable provider sessions 
           },
           {
             providerId: "codex",
-            providerLabel: "Codex",
+            providerLabel: "codex",
             providerHandleId: "second-handle",
             cwd: "/tmp/recent",
             title: "Second import",

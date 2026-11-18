@@ -91,10 +91,6 @@ export const en = {
       open: "Open {{name}}",
       openInSidePane: "Open {{name}} in side pane",
       openInFocusedPane: "Open {{name}} in focused pane",
-      addProject: "Add project",
-      home: "Home",
-      groupByProject: "Group by project",
-      groupByStatus: "Group by status",
       modelGroupLabel: "Model",
       modelSearchKeywords: "switch model change model set model select model",
       thinkingGroupLabel: "Thinking",
@@ -270,18 +266,6 @@ export const en = {
       unarchive: "Unarchive",
     },
   },
-  sessions: {
-    title: "History",
-    empty: "No sessions yet",
-    noMatches: "No sessions match",
-    tooManyMatches: "Too many matches — narrow your search",
-    hostLoadFailed: "{{host}}: Could not load history",
-    searchPlaceholder: "Search history",
-    actions: {
-      loadMore: "Load more",
-      clearSearch: "Clear search",
-    },
-  },
   agentList: {
     fallbackTitle: "New session",
     dateSections: {
@@ -328,8 +312,6 @@ export const en = {
       forkInNewTab: "Fork in a new tab",
       forkInNewWorkspace: "Fork in a new workspace",
       forkUnavailable: "Update the host to use this.",
-      forkMissingWorkspace: "This agent is not in a workspace.",
-      forkFailed: "Failed to fork chat",
       openFile: "Open file",
       copied: "Copied",
     },
@@ -1149,7 +1131,6 @@ export const en = {
     },
   },
   sidebar: {
-    statusGroupAccessibility: "{{label}} group",
     statusBucket: {
       needsInput: "Needs input",
       failed: "Failed",
@@ -1158,53 +1139,9 @@ export const en = {
       done: "Done",
     },
     display: {
-      showBackground: "Show background",
-      trigger: "Display preferences",
-      heading: "Display",
       grouping: {
-        label: "Grouping",
-        project: "Project",
-        status: "Status",
         labels: "Labels",
       },
-      titleSource: {
-        label: "Title",
-        title: "Title",
-        branch: "Branch name",
-      },
-      show: {
-        label: "Show",
-        branch: "Branch",
-        project: "Project",
-        host: "Host",
-        changeRequest: "Pull request",
-        checks: "Checks",
-        services: "Services",
-        labels: "Labels",
-        diff: "Diff stats",
-        timestamp: "Last activity",
-      },
-      checks: {
-        iconAndText: "Icon and text",
-        icon: "Icon only",
-        none: "Hidden",
-      },
-      hostFilter: {
-        label: "Host",
-        all: "All hosts",
-      },
-      projectFilter: {
-        label: "Project",
-        all: "All projects",
-      },
-    },
-    filterEmpty: {
-      title: "No workspaces match",
-      description: "Change or clear the sidebar filters to see workspaces.",
-      clear: "Clear filters",
-    },
-    pinned: {
-      title: "Pinned",
     },
     host: {
       noHost: "No host",
@@ -1212,8 +1149,6 @@ export const en = {
       searchPlaceholder: "Search hosts...",
     },
     actions: {
-      addProject: "Add project",
-      newWorkspace: "New workspace",
       hosts: "Hosts",
       settings: "Settings",
       closeSidebar: "Close sidebar",
@@ -1229,77 +1164,28 @@ export const en = {
       reportIssue: "Report an issue",
       discord: "Discord",
       github: "Create GitHub issue",
-      whatsNew: "What's new",
       appName: "Paseo",
     },
     sections: {
-      sessions: "History",
       search: "Search",
       schedules: "Schedules",
     },
-    worktreeSetup: {
-      title: "Set up worktree scripts",
-      description:
-        "Add setup commands so new worktrees can install dependencies and prepare themselves automatically.",
-      openProjectSettings: "Open project settings",
-    },
     project: {
       actions: {
-        menu: "Project actions",
-        openSettings: "Open project settings",
-        openNewWindow: "Open in new window",
-        openNewWindowFailed: "Couldn't open a new window",
-        openFolder: "Open in file manager",
         openFolderFailed: "Couldn't open folder",
-        remove: "Remove project",
-        removing: "Removing...",
-      },
-      confirmations: {
-        removeTitle: "Remove project?",
-        removeMessage:
-          'Remove "{{projectName}}" from the sidebar?\n\nFiles on disk will not be changed.',
-        removeConfirm: "Remove",
-        cancel: "Cancel",
-      },
-      toasts: {
-        hostDisconnected: "Host is not connected",
-        removeFailed: "Failed to remove some workspaces",
-        updateHostToRemove: "Update the host to remove projects.",
-      },
-      empty: {
-        title: "No projects yet",
-        description: "Add a project to get started",
       },
     },
     workspace: {
       status: {
         serviceRunning: "Service {{name}} running",
         serviceUnhealthy: "Service {{name}} unhealthy",
-        creating: "Creating...",
-      },
-      checks: {
-        passed: "Passed: {{count}}",
-        failed: "Failed: {{count}}",
-        warning: "Warnings: {{count}}",
-        actionRequired: "Action required: {{count}}",
-        manual: "Manual: {{count}}",
-        pending: "Pending: {{count}}",
       },
       actions: {
-        menu: "Workspace actions",
-        newWorkspace: "New workspace",
-        showMore: "Show more",
-        showLess: "Show less",
-        createWorkspaceFor: "Create a new workspace for {{projectName}}",
-        copyPath: "Copy path",
-        copyBranchName: "Copy branch name",
         rename: "Rename workspace",
         pin: "Pin to top",
         unpin: "Unpin",
-        archive: "Archive",
         archiveWorkspace: "Archive workspace",
         hideFromSidebar: "Hide from sidebar",
-        archiving: "Archiving...",
         hiding: "Hiding...",
       },
       confirmations: {
@@ -1310,8 +1196,6 @@ export const en = {
         cancel: "Cancel",
       },
       rename: {
-        title: "Rename workspace",
-        submit: "Rename",
         invalidBranchName: "Invalid branch name",
       },
       toasts: {
@@ -1325,49 +1209,12 @@ export const en = {
     },
   },
   newWorkspace: {
-    title: "New workspace",
-    create: "Create",
-    isolation: {
-      local: "Local",
-      worktree: "New worktree",
-      label: "Isolation",
-    },
     fields: {
       project: "Project",
       base: "Base",
       baseNotApplicable: "Not applicable",
     },
     titlePlaceholder: "Title (optional)",
-    errors: {
-      hostDisconnected: "Host is not connected",
-      createWorktreeFailed: "Failed to create worktree",
-      composerStateRequired: "Composer state is required",
-      selectModel: "Select a model",
-    },
-    tooltips: {
-      project: "Choose the project",
-      host: "Choose the host",
-      isolation: "Choose the isolation level",
-      startingRef: "Choose where to start from",
-      launch: "Choose what to launch",
-    },
-    refPicker: {
-      startingRef: "Starting ref",
-      intoBase: "into {{baseRef}}",
-      searching: "Searching...",
-      noMatchingRefs: "No matching refs.",
-      searchPlaceholder: "Search branches and PRs",
-      title: "Start from",
-    },
-    launch: {
-      title: "What to launch",
-      chat: "Chat",
-      terminal: "Terminal",
-      manageProfiles: "Manage profiles",
-      submit: "Launch",
-      promptPlaceholder: "Prompt {{name}}",
-      commandPlaceholder: "Run a command, or leave empty for a blank terminal",
-    },
   },
   desktop: {
     windowControls: {
@@ -1473,7 +1320,6 @@ export const en = {
         failedTitle: "Update failed",
         availableTitle: "Update available",
         genericError: "Something went wrong.",
-        whatsNew: "What's new",
         installingAction: "Installing...",
         installAndRestart: "Install & restart",
         installingDescription: "Installing and restarting...",
@@ -1536,12 +1382,6 @@ export const en = {
         failed: "Failed to send notification.",
       },
     },
-    integrations: {
-      cli: {
-        statusFailed: "Unable to check CLI install status.",
-        installFailed: "Unable to install the Paseo CLI.",
-      },
-    },
   },
   rootError: {
     title: "Paseo ran into a problem.",
@@ -1560,21 +1400,8 @@ export const en = {
   },
   openProject: {
     tiles: {
-      addProject: {
-        title: "Add a project",
-        description: "Open a folder on your machine",
-      },
-      importSession: {
-        title: "Import session",
-        description: "Open a Claude Code, Codex or other session you started in a terminal",
-      },
-      setupProviders: {
-        title: "Setup providers",
-        description: "Configure Claude Code, Codex, and more",
-      },
       pairDevice: {
         title: "Pair device",
-        description: "Connect your phone to this daemon",
       },
     },
   },
@@ -1589,25 +1416,6 @@ export const en = {
       open_failed: "Could not open project.",
     },
     openPath: "Open path",
-  },
-  branchSwitcher: {
-    triggerTooltip: "Switch workspace branch",
-    currentBranch: "Current branch: {{branchName}}. Press to switch branch.",
-    placeholder: "Switch branch...",
-    searchPlaceholder: "Filter branches...",
-    empty: "No branches found.",
-    title: "Switch branch",
-    uncommittedTitle: "Uncommitted changes",
-    uncommittedMessage: "You have uncommitted changes. Stash them before switching branches?",
-    stashAndSwitch: "Stash & Switch",
-    failedToStash: "Failed to stash changes",
-    failedToSwitch: "Failed to switch branch",
-    restoreStashTitle: "Restore stashed changes?",
-    restoreStashMessage:
-      "This branch has stashed changes from a previous session. Would you like to restore them?",
-    restore: "Restore",
-    later: "Later",
-    stashRestored: "Stashed changes restored",
   },
   agentAutocomplete: {
     searchingWorkspace: "Searching workspace...",
@@ -1680,22 +1488,6 @@ export const en = {
     searchPlaceholder: "Search models...",
     openProviderSettings: "Open {{provider}} settings",
   },
-  providerCatalog: {
-    title: "Add provider",
-    search: "Search providers",
-    noProviders: "No providers found",
-    actions: {
-      add: "Add",
-      adding: "Adding",
-      installed: "Installed",
-      cancel: "Cancel",
-      installInstructions: "Install instructions",
-      installInstructionsFor: "{{provider}} install instructions",
-    },
-    errors: {
-      unableToInstall: "Unable to install provider",
-    },
-  },
   providerSelection: {
     defaultModel: "Default",
     selectModel: "Select model",
@@ -1733,10 +1525,6 @@ export const en = {
       direct: {
         title: "Direct connection",
         description: "Local network or VPN.",
-      },
-      remoteSsh: {
-        title: "Remote SSH",
-        description: "Connect through the desktop SSH client.",
       },
       scanQr: {
         title: "Scan QR code",
@@ -1787,29 +1575,6 @@ export const en = {
           "TLS error. Direct connections use SSL only when a TLS terminator is in front of the daemon.",
         unableToConnect: "Unable to connect. Check the host/port and that the daemon is reachable.",
         details: "Details: {{detail}}",
-      },
-    },
-    remoteSsh: {
-      title: "Remote SSH",
-      helper: "Connect to a Paseo daemon running on the remote host.",
-      fields: {
-        target: "SSH host",
-        password: "Daemon password",
-        optional: "Optional",
-      },
-      passwordVisibility: {
-        show: "Show password",
-        hide: "Hide password",
-      },
-      actions: {
-        cancel: "Cancel",
-        connect: "Connect",
-        connecting: "Connecting...",
-      },
-      errors: {
-        targetRequired: "SSH host is required",
-        invalidTarget: "Enter a valid ssh:// host",
-        failedToConnect: "Unable to connect over SSH. {{detail}}",
       },
     },
     link: {
@@ -1893,13 +1658,6 @@ export const en = {
   diffViewer: {
     empty: "No changes to display",
   },
-  serviceUrl: {
-    title: "Open service URL",
-    message: "Open {{url}}?",
-    inPaseo: "In Paseo",
-    externalBrowser: "External browser",
-    dontAskAgain: "Don't ask again",
-  },
   downloads: {
     requestTokenFailed: "Failed to request download token.",
     hostUnavailable: "Download host is unavailable.",
@@ -1928,10 +1686,6 @@ export const en = {
     archiveFinishedRetry: "Retry ({{failed}}/{{total}})",
   },
   panels: {
-    draft: {
-      newAgent: "New Agent",
-      creatingAgent: "Creating agent",
-    },
     file: {
       directoryMissing: "Workspace directory not found.",
       loading: "Loading file...",
@@ -1970,23 +1724,9 @@ export const en = {
       tooltip: "Browse workspace files",
       chooseFile: "Choose a file",
     },
-    pullRequest: {
-      label: "Pull request",
-      subtitle: "Pull request details",
-      emptyTitle: "No pull request yet",
-      emptyDescription: "Create a pull request for this checkout to see its details here.",
-    },
     diff: {
-      changesLabel: "Changes",
-      diffLabel: "Diff",
-      changesSubtitle: "Working tree diff",
-      commitSubtitle: "Commit diff",
       uncommittedSubtitle: "Uncommitted changes",
       baseSubtitle: "Compared with {{baseRef}}",
-      directoryMissing: "Workspace directory not found.",
-      empty: "No changes",
-      loadError: "Failed to load diff",
-      capabilityMissing: "Update the host to view commit diffs.",
     },
   },
   toolCallDetails: {
@@ -2066,22 +1806,12 @@ export const en = {
     backToWorkspace: "Back",
     addHost: "Add host",
     enableBuiltInDaemon: "Enable built-in daemon",
-    projects: "Projects",
-    projectList: {
-      hostLoadFailed: "Couldn't load projects from host {{hostName}}: {{message}}",
-      editProject: "Edit {{projectName}}",
-    },
     groupInfo: "About {{title}}",
     sections: {
       general: "General",
       chat: "Chat",
       appearance: "Appearance",
-      sidebar: "Sidebar",
-      editor: "Editor",
-      terminal: "Terminal",
-      browser: "Browser",
       shortcuts: "Shortcuts",
-      integrations: "Integrations",
       notifications: "Notifications",
       permissions: "Permissions",
       diagnostics: "Diagnostics",
@@ -2126,11 +1856,6 @@ export const en = {
         },
       },
     },
-    editor: {
-      title: "Editor",
-      vimKeybindings: "Vim keybindings",
-      vimHint: "Applies to source files on web and desktop.",
-    },
     notifications: {
       title: "Notifications",
       permission: "Notification permission",
@@ -2147,14 +1872,10 @@ export const en = {
       sendFailedTitle: "Unable to send test notification",
     },
     hostSections: {
-      projects: "Projects",
       connections: "Connections",
       agents: "Agents",
-      metadata: "Metadata",
-      workspaces: "Workspaces",
       providers: "Providers",
       usage: "Usage",
-      terminals: "Terminals",
       plugins: "Plugins",
       host: "Overview",
     },
@@ -2221,20 +1942,6 @@ export const en = {
         empty: "No plugins configured",
       },
     },
-    metadataGeneration: {
-      title: "Metadata generation",
-      description:
-        "Choose the model Paseo uses for workspace titles, branch names, commit messages, and pull request drafts",
-      selection: "Model selection",
-      automatic: "Automatic",
-      preferred: "Manual",
-      automaticHint: "Paseo picks a fast available model",
-      preferredHint: "Choose the model Paseo uses",
-      model: "Model",
-      fallbackHint: "If it is unavailable, Paseo falls back to another available model",
-      docs: "Docs",
-      saveError: "Unable to update metadata generation",
-    },
     general: {
       title: "General",
       sending: "Sending",
@@ -2242,17 +1949,6 @@ export const en = {
       meteredNetwork: {
         label: "Treat this network as metered",
         hint: "Bot chats you are not looking at update at the end of each turn instead of streaming live. Use it on a phone hotspot.",
-      },
-      browserData: {
-        title: "Browser data",
-        siteData: "Cookies and site data",
-        description: "Browser tabs share sign-ins and site data across Paseo.",
-        clear: "Clear browser data",
-        clearing: "Clearing...",
-        confirmTitle: "Clear browser data?",
-        confirmMessage: "Sites will be signed out and open browser tabs will reload.",
-        success: "Browser data cleared.",
-        error: "Couldn't clear browser data.",
       },
       defaultSend: {
         label: "Default send",
@@ -2274,11 +1970,6 @@ export const en = {
           inApp: "In Paseo",
           external: "External browser",
         },
-      },
-      terminalScrollback: {
-        label: "Terminal scrollback",
-        description: "Lines kept in the built-in terminal buffer",
-        accessibilityLabel: "Terminal scrollback lines",
       },
       autoExpandReasoning: {
         label: "Always expand reasoning",
@@ -2340,7 +2031,6 @@ export const en = {
     about: {
       title: "About",
       appVersion: "App version",
-      whatsNewHint: "Release notes for every version",
       thisDevice: "This device",
       connectedHosts: "Connected hosts",
       offline: "Offline",
@@ -2387,19 +2077,6 @@ export const en = {
       chatOutline: {
         title: "Chat outline",
         description: "Show an outline for jumping between prompts",
-      },
-      sidebar: {
-        header: {
-          title: "Header",
-          description: "Choose which items appear at the top of the sidebar and in what order",
-        },
-        footer: {
-          title: "Footer",
-          description:
-            "Choose which rows appear at the bottom of the sidebar and in what order. Add project and the icon row always show",
-        },
-        moveUp: "Move up",
-        moveDown: "Move down",
       },
       fonts: {
         title: "Fonts",
@@ -2466,7 +2143,6 @@ export const en = {
         newWorkspace: "New workspace",
         newWorktree: "New worktree",
         archiveWorkspace: "Archive workspace",
-        newTab: "New tab",
         closeCurrentTab: "Close current tab",
         jumpToWorkspace: "Jump to workspace",
         jumpToTab: "Jump to tab",
@@ -2485,7 +2161,6 @@ export const en = {
         moveTabUp: "Move tab up",
         moveTabDown: "Move tab down",
         closePane: "Close pane",
-        newTerminal: "New terminal",
         searchFiles: "Search files",
         toggleCommandCenter: "Toggle command center",
         showKeyboardShortcuts: "Show keyboard shortcuts",
@@ -2507,22 +2182,6 @@ export const en = {
       },
       helpNotes: {
         showKeyboardShortcuts: "Available when focus is not in a text field or terminal.",
-      },
-    },
-    integrations: {
-      title: "Integrations",
-      docs: {
-        cli: "CLI docs",
-        openCli: "Open CLI documentation",
-      },
-      commandLine: {
-        title: "Command line",
-        description: "Control and script agents from your terminal",
-      },
-      actions: {
-        install: "Install",
-        installing: "Installing...",
-        installed: "Installed",
       },
     },
     permissions: {
@@ -2667,33 +2326,6 @@ export const en = {
       agents: {
         unavailable: "Connect to this host to manage agents",
       },
-      workspaces: {
-        unavailable: "Connect to this host to manage workspaces",
-      },
-      terminalProfiles: {
-        unavailable: "Connect to this host to manage terminal profiles",
-        sectionTitle: "Terminal profiles",
-        editProfile: "Edit profile",
-        addProfileTitle: "Add terminal profile",
-        editProfileTitle: "Edit terminal profile",
-        namePlaceholder: "Claude Code",
-        commandPlaceholder: "claude",
-        argsPlaceholder: "--dangerously-skip-permissions",
-        nameLabel: "Name",
-        commandLabel: "Command",
-        argsLabel: "Arguments",
-        nameRequired: "Name is required",
-        commandRequired: "Command is required",
-        argsHint: "Space-separated arguments passed to the command",
-        saving: "Saving...",
-        remove: "Remove",
-        removeConfirmTitle: "Remove profile?",
-        removeConfirmMessage: 'Remove "{{name}}"?',
-        moveUp: "Move up",
-        moveDown: "Move down",
-        save: "Save",
-        emptyState: "No profiles yet. Add one to launch terminals with a specific command.",
-      },
       agentProfiles: {
         sectionTitle: "Agent profiles",
         unavailable: "Connect to this host to manage agent profiles",
@@ -2803,12 +2435,10 @@ export const en = {
     },
     providers: {
       title: "Providers",
-      addProvider: "Add provider",
       providerDetails: "{{name}} provider details",
       enableProvider: "Enable {{name}}",
       unavailable: "Connect to this host to see providers",
       loading: "Loading...",
-      addErrorTitle: "Unable to add provider",
       updateErrorTitle: "Unable to update provider",
       actions: {
         menu: "{{name}} actions",
@@ -2863,95 +2493,6 @@ export const en = {
         none: "No diagnostic available",
         failedToFetch: "Failed to fetch diagnostic",
         unknownError: "Unknown error",
-      },
-    },
-    project: {
-      noEditableTarget: "This project isn't editable on this host.",
-      backToProjects: "Back to projects",
-      edit: {
-        title: "Edit project",
-        name: "Name",
-        nameLabel: "Project name",
-        icon: "Icon",
-        chooseImage: "Choose image",
-        useAutomatic: "Use automatic",
-        imageUrl: "Image or website URL",
-        save: "Save changes",
-        savedToast: "Project updated",
-      },
-      readFailures: {
-        invalidTitle: "paseo.json couldn't be parsed",
-        invalidDescription: "Fix the file on disk, then reload.",
-        missingTitle: "This host doesn't have this project",
-        missingSingleHost: "The selected host has no record of this project.",
-        transportTitle: "Couldn't load paseo.json",
-        transportFallback: "The host didn't respond.",
-        failedTitle: "Couldn't load paseo.json",
-        failedDescription: "Reload to try again.",
-      },
-      worktree: {
-        title: "Worktree lifecycle hooks",
-        info: "Commands that run when a worktree is created or torn down for this project",
-        docs: "Docs",
-        docsTooltip:
-          "See docs for more details and the environment variables available to these commands",
-        setup: "Setup",
-        setupAccessibility: "Worktree setup commands",
-        uncommittedTitle: "Commit paseo.json changes",
-        uncommittedDescription:
-          "New worktrees use the setup script from the base branch you select.",
-        teardown: "Teardown",
-        teardownAccessibility: "Worktree teardown commands",
-      },
-      scripts: {
-        title: "Scripts",
-        info: "Long-running services and one-off commands you can launch from any agent in this project",
-        empty: "No scripts yet.",
-        untitled: "Untitled script",
-        port: "port {{port}}",
-        menuAccessibility: "Open script menu",
-        removeTitle: "Remove script?",
-        removeMessage: "Remove {{name}}?",
-        removeFallbackName: "this script",
-        name: "Name",
-        command: "Command",
-        nameAccessibility: "Script name",
-        commandAccessibility: "Script command",
-        nameRequired: "Name is required",
-        commandRequired: "Command is required",
-        newScript: "New script",
-        editScript: "Edit {{name}}",
-        runAsService: "Run as a service",
-        serviceHint: "Paseo supervises the process and assigns a port via $PASEO_PORT",
-        actions: {
-          add: "Add script",
-          edit: "Edit",
-          remove: "Remove",
-        },
-      },
-      metadata: {
-        title: "Metadata generation",
-        info: "Project-specific instructions injected into the AI prompts Paseo uses to generate metadata - use them to enforce your team's conventions like branch naming, commit style, or PR format",
-        branchName: "Branch names",
-        branchNamePlaceholder: "Prefix branches with feat/ or fix/, mb/ for personal branches",
-        commitMessage: "Commit messages",
-        commitMessagePlaceholder: "Use Conventional Commits with a scope",
-        pullRequest: "Pull requests",
-        pullRequestPlaceholder: "Lead with a one-paragraph summary, include a Test plan section",
-      },
-      writeFailures: {
-        staleTitle: "Config changed on disk",
-        staleDescription: "Reload to fetch the latest paseo.json before saving.",
-        failedTitle: "Couldn't save paseo.json",
-        failedDescription: "Try again, or reload the latest version from disk.",
-      },
-      actions: {
-        reload: "Reload",
-        tryAgain: "Try again",
-        save: "Save",
-        saved: "Project saved",
-        saving: "Saving...",
-        cancel: "Cancel",
       },
     },
   },

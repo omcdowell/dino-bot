@@ -68,7 +68,6 @@ function buildContent(tab: WorkspaceTabDescriptor = agentTab, host: "main" | "ex
     onRetargetCurrentTab: vi.fn(),
     onSetCurrentTabState: vi.fn(),
     onOpenWorkspaceFile: vi.fn(),
-    onOpenImportSheet: vi.fn(),
   });
 }
 
@@ -143,7 +142,7 @@ describe("WorkspacePaneContent", () => {
     expect(snapshots[0]?.paneContextValue.host).toBe("explorer");
   });
 
-  it("keeps pane content mounted when a draft tab is retargeted in place", () => {
+  it("keeps pane content mounted when a tab is retargeted in place", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -151,8 +150,8 @@ describe("WorkspacePaneContent", () => {
     const draftContent = buildContent({
       key: "draft-a",
       tabId: "draft-a",
-      kind: "draft",
-      target: { kind: "draft", draftId: "draft-a" },
+      kind: "file",
+      target: { kind: "file", path: "/repo/a.ts" },
     });
     const agentContent = buildContent({
       key: "draft-a",

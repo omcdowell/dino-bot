@@ -75,7 +75,7 @@ Create a child image for the providers you want available:
 FROM ghcr.io/getpaseo/paseo:latest
 
 USER root
-RUN npm install -g @openai/codex @anthropic-ai/claude-code opencode-ai
+RUN npm install -g @anthropic-ai/claude-code
 ```
 
 Build it:

@@ -747,7 +747,6 @@ describe("evaluatePluginClientBundle", () => {
   it.each([
     "@getpaseo/plugin/server",
     "@getpaseo/plugin/server/provider",
-    "@getpaseo/plugin/server/acp",
     "@getpaseo/plugin/client/host",
     "@getpaseo/plugin/react-native",
     "@getpaseo/plugin/ui",

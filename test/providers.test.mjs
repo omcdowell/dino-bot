@@ -313,6 +313,58 @@ esac
     assert.deepEqual(skillsOf(launch({ WORKER_SKILLS: "none" })), [], "none: no skills at all");
     assert.deepEqual(skillsOf(launch({ WORKER_SKILLS: "none:/opt/a" })), ["/opt/a"]);
   });
+  it("launch.sh loads the context-cap extension when it exists and sets PI_WORKER_COMPACT_AT in the pane", () => {
+    const d = tmp();
+    const bin = join(d, "bin");
+    mkdirSync(bin);
+    const log = join(d, "herdr.log");
+    const runs = join(d, "runs.log");
+    writeFileSync(
+      join(bin, "herdr"),
+      `#!/bin/sh
+case "$1 $2" in
+  "agent get") exit 1 ;;
+  "workspace list") echo '{"result":{"workspaces":[]}}' ;;
+  "workspace create") echo '{"result":{"workspace":{"workspace_id":"w1"},"tab":{"tab_id":"w1:t1"},"root_pane":{"pane_id":"w1:p1"}}}' ;;
+  "pane run") printf '%s\\n' "$4" >> "${runs}"; echo '{"result":{}}' ;;
+  "agent start") printf '%s\\n' "$@" > "${log}"; echo '{"result":{"agent":{"agent_session":{"value":""}}}}' ;;
+  *) echo '{"result":{}}' ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    writeFileSync(join(bin, "bot-worker"), "#!/bin/sh\necho '{}'\n", { mode: 0o755 });
+    const brief = join(d, "brief.md");
+    writeFileSync(brief, "tiny\n");
+    const run = (extra = {}) => {
+      writeFileSync(runs, "");
+      return spawnSync("sh", [join(dir, "launch.sh"), "--engine", "pi", "w-one", brief, "1", d], {
+        encoding: "utf8",
+        env: { PATH: `${bin}:${process.env.PATH}`, BOT: "testbot", HOME: d, ...extra },
+      });
+    };
+    const extOf = () => {
+      const a = readFileSync(log, "utf8").trim().split("\n");
+      return a.flatMap((x, i) => (x === "--extension" ? [a[i + 1]] : []));
+    };
+    const ran = () => readFileSync(runs, "utf8").trim().split("\n").filter(Boolean);
+    assert.equal(run().status, 0);
+    assert.deepEqual(extOf(), [], "no extension file: nothing loaded");
+    const ext = join(d, ".agents", "pi-extensions", "worker-compact-cap.ts");
+    mkdirSync(join(d, ".agents", "pi-extensions"), { recursive: true });
+    writeFileSync(ext, "export default () => {};\n");
+    assert.equal(run().status, 0);
+    assert.deepEqual(extOf(), [ext], "the default path when it exists");
+    assert.ok(!ran().some((c) => c.includes("PI_WORKER_COMPACT_AT")));
+    assert.equal(run({ WORKER_COMPACT_EXT: "" }).status, 0);
+    assert.deepEqual(extOf(), [], "WORKER_COMPACT_EXT empty: none");
+    assert.equal(run({ PI_WORKER_COMPACT_AT: "300000" }).status, 0);
+    assert.deepEqual(extOf(), [ext]);
+    assert.ok(ran().includes("export PI_WORKER_COMPACT_AT=300000"), ran().join(" | "));
+    const bad = run({ PI_WORKER_COMPACT_AT: "3e5" });
+    assert.equal(bad.status, 2);
+    assert.match(bad.stderr, /PI_WORKER_COMPACT_AT must be a whole number/);
+  });
   // --engine cc: the same stand-in herdr; the worker is Claude Code (herdr's claude kind) and the pi path is unchanged.
   const standIn = () => {
     const d = tmp();
@@ -519,6 +571,7 @@ esac
     assert.ok(settings.claudeMdExcludes.includes(join(d, ".claude", "**")), "HOME is d in the stand-in");
     assert.deepEqual(settings.attribution, { commit: "", pr: "" });
     assert.equal(settings.autoMemoryEnabled, false);
+    assert.equal(settings.autoCompactWindow, 200000, "compacts at 200k, as pi workers");
     const info = JSON.parse(r.stdout);
     assert.equal(info.engine, "cc");
     assert.equal(info.model, "claude-sonnet-5");
@@ -531,6 +584,9 @@ esac
     assert.deepEqual(JSON.parse(readFileSync(join(cc, "settings.json"), "utf8")).env.ANTHROPIC_BASE_URL, "http://proxy.invalid/x");
     assert.ok(!started().includes("--model"));
     assert.match(r2.stderr, /not a Claude model/);
+    // PI_WORKER_COMPACT_AT raises the auto-compact window for one launch
+    assert.equal(run(["--engine", "cc"], { PI_WORKER_COMPACT_AT: "300000" }).status, 0);
+    assert.equal(JSON.parse(readFileSync(join(cc, "settings.json"), "utf8")).autoCompactWindow, 300000);
     // WORKER_ENGINE=cc is the same as --engine cc
     assert.equal(run([], { WORKER_ENGINE: "cc" }).status, 0);
     assert.ok(started().includes("claude"));

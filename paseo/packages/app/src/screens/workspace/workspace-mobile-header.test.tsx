@@ -139,9 +139,6 @@ vi.mock("@/hosts/host-badge", () => ({
 // The header's other pieces are not under test here.
 vi.mock("@/components/headers/menu-header", () => ({ SidebarMenuToggle: () => null }));
 vi.mock("@/plugins", () => ({ PluginHeaderButtons: () => null }));
-vi.mock("@/screens/workspace/workspace-scripts-button", () => ({
-  WorkspaceScriptsButton: () => null,
-}));
 vi.mock("@/screens/workspace/workspace-explorer-toggle", () => ({
   WorkspaceExplorerToggle: () => <button type="button" data-testid="workspace-explorer-toggle" />,
 }));
@@ -182,13 +179,13 @@ vi.mock("./use-workspace-bot", () => ({ useWorkspaceBot: () => null }));
 const { MobileHeaderMenuLeading, WorkspaceMobileHeader } =
   await import("./workspace-mobile-header");
 
-function makeTab(kind: "agent" | "terminal", id: string): WorkspaceTabDescriptor {
+function makeTab(kind: "agent" | "file", id: string): WorkspaceTabDescriptor {
   return kind === "agent"
     ? { key: id, tabId: id, kind, target: { kind, agentId: id } }
-    : { key: id, tabId: id, kind, target: { kind, terminalId: id } };
+    : { key: id, tabId: id, kind, target: { kind, path: `/repo/${id}.ts` } };
 }
 
-const tabs = [makeTab("terminal", "t1"), makeTab("agent", "a1"), makeTab("terminal", "t2")];
+const tabs = [makeTab("file", "t1"), makeTab("agent", "a1"), makeTab("file", "t2")];
 
 function actions() {
   return {
@@ -287,29 +284,11 @@ const explorerProps = {
   tooltipKeys: [],
   accessibilityState: { expanded: false },
 };
-const scriptsProps = {
-  scripts: [],
-  liveTerminalIds: [],
-  onScriptTerminalStarted: vi.fn(),
-  onViewTerminal: vi.fn(),
-  onOpenUrlInBrowserTab: vi.fn(),
-};
 const menuProps = {
-  normalizedServerId: "srv",
   currentBranchName: "main",
-  showWorkspaceSetup: false,
-  importAgentDisabled: false,
   copyPathDisabled: false,
-  onOpenImportSheet: vi.fn(),
   onCopyWorkspacePath: vi.fn(),
   onCopyBranchName: vi.fn(),
-  onOpenSetupTab: vi.fn(),
-  showCreateBrowserTab: false,
-  createTerminalDisabled: false,
-  onCreateDraftTab: vi.fn(),
-  onCreateTerminal: vi.fn(),
-  onCreateTerminalWithProfile: vi.fn(),
-  onCreateBrowser: vi.fn(),
 };
 
 describe("WorkspaceMobileHeader", () => {
@@ -345,7 +324,6 @@ describe("WorkspaceMobileHeader", () => {
           activeTabKey="a1"
           tabActions={actions()}
           explorer={explorerProps}
-          scripts={scriptsProps}
           menu={menuProps}
         />,
       );

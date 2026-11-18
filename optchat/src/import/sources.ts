@@ -10,7 +10,8 @@ import { record } from '../cache.ts';
 import { bytes, type Entry, type Kind, type Origin } from '../memory.ts';
 
 export type Source = Origin['source'];
-export type ImportedEntry = Omit<Entry, 'i' | 'size'>;
+import type { ImportedEntry } from './job.ts';
+export type { ImportedEntry };
 export interface Conversation {
   source: Source;
   id: string;

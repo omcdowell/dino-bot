@@ -88,6 +88,7 @@ test('beforeAgentStart: the rendered prompt has the project and profile files bu
       config: { previousExchange: false },
       compactor: () => ({ provider: 'anthropic', model: 'claude-sonnet-5-5', thinking: 'off' }),
       memory: { hasImported: () => imported },
+      turns: { start() {} },
     } as unknown as OpenProfile;
     controller.beforeAgentStart(event, {} as never);
     assert.doesNotMatch(buildSystemPrompt(options), /Entries marked Historical/, 'no import guidance without imported history');

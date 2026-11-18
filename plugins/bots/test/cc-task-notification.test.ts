@@ -99,7 +99,7 @@ describe("cc provider: a background task's notification", () => {
     const turn = (body: unknown) => engine.handle("POST", "/turn", new URLSearchParams(), body);
     const shown = () =>
       events
-        .slice(3)
+        .slice(4) // opened, config, commands, ready
         .map((e) => (e.type === "timeline.item" ? `${e.item.type}:${(e.item as any).text ?? (e.item as any).detail?.label}:${(e.item as any).status ?? ""}` : e.type === "session.turn" ? `turn:${e.state}` : e.type));
     return { turn, shown, events };
   }

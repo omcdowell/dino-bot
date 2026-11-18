@@ -7,7 +7,7 @@ describe("deriveWorkspaceTabModel", () => {
     const uiTabs: WorkspaceTab[] = [
       {
         tabId: "draft_123",
-        target: { kind: "draft", draftId: "draft_123" },
+        target: { kind: "network_status" },
         createdAt: 1,
       },
       {
@@ -31,7 +31,7 @@ describe("deriveWorkspaceTabModel", () => {
       "agent_agent-a",
       "file_/repo/worktree/README.md",
     ]);
-    expect(model.tabs[0]?.descriptor.target).toEqual({ kind: "draft", draftId: "draft_123" });
+    expect(model.tabs[0]?.descriptor.target).toEqual({ kind: "network_status" });
     expect(model.tabs[1]?.descriptor.target).toEqual({ kind: "agent", agentId: "agent-a" });
     expect(model.tabs[2]?.descriptor.target).toEqual({
       kind: "file",
@@ -44,7 +44,7 @@ describe("deriveWorkspaceTabModel", () => {
       tabs: [
         {
           tabId: "terminal_term-1",
-          target: { kind: "terminal", terminalId: "term-1" },
+          target: { kind: "network_status" },
           createdAt: 3,
         },
         { tabId: "agent_agent-b", target: { kind: "agent", agentId: "agent-b" }, createdAt: 2 },

@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -55,10 +54,9 @@ export default function contribute(server) {
   }
 }
 
-const PLUGINS_DIR = path.resolve(__dirname, "../../../../../plugins");
-
+/** Stand-in report icons; the built-in usage-source plugins (and their icons) were removed. */
 function sourceIcon(plugin: string): string {
-  return readFileSync(path.join(PLUGINS_DIR, plugin, "icon.svg"), "utf8");
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" data-source="${plugin}"><circle cx="8" cy="8" r="7"/></svg>`;
 }
 
 function inOneDay(): string {

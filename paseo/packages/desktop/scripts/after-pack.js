@@ -8,12 +8,6 @@ const { installLinuxLauncher } = require("./linux-sandbox");
 // electron-builder arch enum → Node.js arch string
 const ARCH_MAP = { 0: "ia32", 1: "x64", 2: "armv7l", 3: "arm64", 4: "universal" };
 
-const RIPGREP_PLATFORM_DIR = {
-  darwin: { arm64: "arm64-darwin", x64: "x64-darwin" },
-  linux: { arm64: "arm64-linux", x64: "x64-linux" },
-  win32: { arm64: "arm64-win32", x64: "x64-win32" },
-};
-
 function rmSafe(target) {
   fs.rmSync(target, { recursive: true, force: true });
 }
@@ -23,27 +17,6 @@ function pruneChildrenExcept(parent, keep) {
   for (const entry of fs.readdirSync(parent)) {
     if (!keep.has(entry)) {
       rmSafe(path.join(parent, entry));
-    }
-  }
-}
-
-function pruneClaudeAgentSdk(nodeModules, platform, arch) {
-  const vendorRoot = path.join(nodeModules, "@anthropic-ai", "claude-agent-sdk", "vendor");
-  const keepName = RIPGREP_PLATFORM_DIR[platform]?.[arch];
-  if (keepName) {
-    pruneChildrenExcept(path.join(vendorRoot, "ripgrep"), new Set(["COPYING", keepName]));
-    pruneChildrenExcept(path.join(vendorRoot, "tree-sitter-bash"), new Set([keepName]));
-  }
-
-  // SDK ≥0.2.113 ships per-platform Claude Code binaries via optionalDependencies
-  // (~210 MB each). Paseo requires user-installed `claude` on PATH, matching how
-  // Codex/OpenCode are integrated, so drop every bundled copy.
-  const anthropicDir = path.join(nodeModules, "@anthropic-ai");
-  if (fs.existsSync(anthropicDir)) {
-    for (const entry of fs.readdirSync(anthropicDir)) {
-      if (entry.startsWith("claude-agent-sdk-")) {
-        rmSafe(path.join(anthropicDir, entry));
-      }
     }
   }
 }
@@ -84,7 +57,6 @@ function pruneNativeModules(appOutDir, platform, arch, productFilename) {
 
   const before = dirSizeSync(nodeModules);
 
-  pruneClaudeAgentSdk(nodeModules, platform, arch);
   pruneNodePty(nodeModules, platform, arch);
   pruneSharpLibvips(nodeModules, platform, arch);
 

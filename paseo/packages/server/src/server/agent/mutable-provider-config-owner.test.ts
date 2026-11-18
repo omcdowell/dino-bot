@@ -21,11 +21,8 @@ import {
 
 const tempDirs: string[] = [];
 const CONTROLLED_PROVIDERS = {
-  claude: { enabled: false },
-  codex: { enabled: true },
-  copilot: { enabled: false },
-  omp: { enabled: false },
-  opencode: { enabled: false },
+  mock: { enabled: true },
+  "mock-slow": { enabled: false },
   pi: { enabled: false },
 } as const;
 
@@ -34,9 +31,9 @@ interface Catalog {
   modes: AgentMode[];
 }
 
-function controlledCodexClient(fetchCatalog: (options: FetchCatalogOptions) => Promise<Catalog>) {
+function controlledMockClient(fetchCatalog: (options: FetchCatalogOptions) => Promise<Catalog>) {
   return {
-    provider: "codex",
+    provider: "mock",
     capabilities: {
       supportsStreaming: false,
       supportsSessionPersistence: false,
@@ -58,20 +55,20 @@ function controlledCodexClient(fetchCatalog: (options: FetchCatalogOptions) => P
 
 function catalog(modelId: string): Catalog {
   return {
-    models: [{ provider: "codex", id: modelId, label: modelId }],
+    models: [{ provider: "mock", id: modelId, label: modelId }],
     modes: [],
   };
 }
 
-function recordCodexEvent(events: string[]): (transition: ProviderSnapshotTransition) => void {
+function recordMockEvent(events: string[]): (transition: ProviderSnapshotTransition) => void {
   return ({ current }) => {
-    const codex = current.records.find(({ entry }) => entry.provider === "codex")?.entry;
-    events.push(`${codex?.status}:${codex?.models?.[0]?.id ?? "none"}`);
+    const mock = current.records.find(({ entry }) => entry.provider === "mock")?.entry;
+    events.push(`${mock?.status}:${mock?.models?.[0]?.id ?? "none"}`);
   };
 }
 
-function getCodexSnapshot(manager: ProviderSnapshotManager, cwd: string) {
-  return manager.getSnapshot(cwd).records.find(({ entry }) => entry.provider === "codex")?.entry;
+function getMockSnapshot(manager: ProviderSnapshotManager, cwd: string) {
+  return manager.getSnapshot(cwd).records.find(({ entry }) => entry.provider === "mock")?.entry;
 }
 
 function mutableConfig(persisted: PersistedConfig): MutableDaemonConfig {
@@ -104,8 +101,9 @@ describe("mutable provider config owner", () => {
     tempDirs.push(paseoHome);
     const store = new DaemonConfigStore(paseoHome, mutableConfig({ version: 1 }));
     const manager = new ProviderSnapshotManager({
+      isDev: true,
       logger: createTestLogger(),
-      providerOverrides: { codex: { enabled: true } },
+      providerOverrides: { mock: { enabled: true } },
     });
     const cwd = path.resolve("/tmp/provider-config-owner");
     manager.getSnapshot(cwd);
@@ -125,24 +123,24 @@ describe("mutable provider config owner", () => {
     });
 
     try {
-      store.patch({ providers: { codex: { enabled: false } } });
+      store.patch({ providers: { mock: { enabled: false } } });
       expect(events).toEqual([cwd]);
-      expect(agentManagerState.providerDefinitions.codex).toMatchObject({ enabled: false });
+      expect(agentManagerState.providerDefinitions.mock).toMatchObject({ enabled: false });
 
       events.length = 0;
       const unsubscribeFailure = store.onApply(() => {
         throw new Error("later owner failed");
       });
-      expect(() => store.patch({ providers: { codex: { enabled: true } } })).toThrow(
+      expect(() => store.patch({ providers: { mock: { enabled: true } } })).toThrow(
         "later owner failed",
       );
       unsubscribeFailure();
 
       expect(events).toEqual([]);
-      expect(manager.getAgentManagerProviderState().providerDefinitions.codex).toMatchObject({
+      expect(manager.getAgentManagerProviderState().providerDefinitions.mock).toMatchObject({
         enabled: false,
       });
-      expect(agentManagerState.providerDefinitions.codex).toMatchObject({ enabled: false });
+      expect(agentManagerState.providerDefinitions.mock).toMatchObject({ enabled: false });
     } finally {
       unsubscribeTimingCheck();
       unsubscribe();
@@ -173,8 +171,9 @@ describe("mutable provider config owner", () => {
       },
     });
     const manager = new ProviderSnapshotManager({
+      isDev: true,
       logger: createTestLogger(),
-      providerOverrides: { codex: { enabled: true } },
+      providerOverrides: { mock: { enabled: true } },
     });
     manager.getSnapshot("/tmp/provider-config-owner");
     const events: string[] = [];
@@ -208,7 +207,7 @@ describe("mutable provider config owner", () => {
       ]);
       expect(events).toEqual([]);
       expect(registryUpdates).toBe(0);
-      expect(manager.getAgentManagerProviderState().providerDefinitions.codex).toMatchObject({
+      expect(manager.getAgentManagerProviderState().providerDefinitions.mock).toMatchObject({
         enabled: true,
       });
     } finally {
@@ -223,17 +222,16 @@ describe("mutable provider config owner", () => {
     const store = new DaemonConfigStore(paseoHome, mutableConfig({ version: 1 }));
     const catalogResolvers: Array<(value: Catalog) => void> = [];
     const manager = new ProviderSnapshotManager({
+      isDev: true,
       logger: createTestLogger(),
       providerOverrides: CONTROLLED_PROVIDERS,
       extraClients: {
-        codex: controlledCodexClient(
-          () => new Promise((resolve) => catalogResolvers.push(resolve)),
-        ),
+        mock: controlledMockClient(() => new Promise((resolve) => catalogResolvers.push(resolve))),
       },
     });
     const cwd = path.resolve("/tmp/provider-config-commit");
     const events: string[] = [];
-    manager.on("change", recordCodexEvent(events));
+    manager.on("change", recordMockEvent(events));
     const unsubscribe = attachMutableProviderConfigOwner({
       store,
       providerSnapshotManager: manager,
@@ -241,11 +239,11 @@ describe("mutable provider config owner", () => {
     });
 
     try {
-      const originalRead = manager.getProvider({ cwd, provider: "codex", wait: true });
+      const originalRead = manager.getProvider({ cwd, provider: "mock", wait: true });
       await vi.waitFor(() => expect(catalogResolvers).toHaveLength(1));
       expect(events).toEqual([]);
 
-      store.patch({ providers: { codex: { enabled: true, label: "Reloaded Codex" } } });
+      store.patch({ providers: { mock: { enabled: true, label: "Reloaded Mock" } } });
       expect(events).toEqual(["loading:none"]);
       await vi.waitFor(() => expect(catalogResolvers).toHaveLength(2));
 
@@ -255,7 +253,7 @@ describe("mutable provider config owner", () => {
 
       catalogResolvers[1]?.(catalog("current-model"));
       await vi.waitFor(() =>
-        expect(getCodexSnapshot(manager, cwd)).toMatchObject({
+        expect(getMockSnapshot(manager, cwd)).toMatchObject({
           status: "ready",
           models: [{ id: "current-model" }],
         }),
@@ -273,17 +271,16 @@ describe("mutable provider config owner", () => {
     const store = new DaemonConfigStore(paseoHome, mutableConfig({ version: 1 }));
     const catalogResolvers: Array<(value: Catalog) => void> = [];
     const manager = new ProviderSnapshotManager({
+      isDev: true,
       logger: createTestLogger(),
       providerOverrides: CONTROLLED_PROVIDERS,
       extraClients: {
-        codex: controlledCodexClient(
-          () => new Promise((resolve) => catalogResolvers.push(resolve)),
-        ),
+        mock: controlledMockClient(() => new Promise((resolve) => catalogResolvers.push(resolve))),
       },
     });
     const cwd = path.resolve("/tmp/provider-config-rollback");
     const events: string[] = [];
-    manager.on("change", recordCodexEvent(events));
+    manager.on("change", recordMockEvent(events));
     const previousState = manager.getAgentManagerProviderState();
     let agentManagerState = previousState;
     const unsubscribe = attachMutableProviderConfigOwner({
@@ -299,34 +296,34 @@ describe("mutable provider config owner", () => {
     }> = [];
     const unsubscribeFailure = store.onApply(() => {
       observedDuringApply.push({
-        label: manager.getProviderLabel("codex"),
+        label: manager.getProviderLabel("mock"),
         snapshot: manager.getSnapshot(cwd),
       });
       throw new Error("later owner failed");
     });
 
     try {
-      const originalRead = manager.getProvider({ cwd, provider: "codex", wait: true });
+      const originalRead = manager.getProvider({ cwd, provider: "mock", wait: true });
       await vi.waitFor(() => expect(catalogResolvers).toHaveLength(1));
       expect(events).toEqual([]);
 
       const before = manager.getSnapshot(cwd);
       expect(() =>
-        store.patch({ providers: { codex: { enabled: true, label: "Rejected Codex" } } }),
+        store.patch({ providers: { mock: { enabled: true, label: "Rejected Mock" } } }),
       ).toThrow("later owner failed");
       expect(events).toEqual([]);
-      expect(observedDuringApply).toEqual([{ label: "Codex", snapshot: before }]);
+      expect(observedDuringApply).toEqual([{ label: "Mock Load Test", snapshot: before }]);
       expect(observedDuringApply[0]!.snapshot).toBe(before);
       expect(manager.getSnapshot(cwd)).toBe(before);
       expect(agentManagerState).toEqual(previousState);
-      expect(agentManagerState.clients.codex).toBe(previousState.clients.codex);
+      expect(agentManagerState.clients.mock).toBe(previousState.clients.mock);
 
       catalogResolvers[0]?.(catalog("original-model"));
       await expect(originalRead).resolves.toMatchObject({
         status: "ready",
         models: [{ id: "original-model" }],
       });
-      expect(getCodexSnapshot(manager, cwd)).toMatchObject({
+      expect(getMockSnapshot(manager, cwd)).toMatchObject({
         status: "ready",
         models: [{ id: "original-model" }],
       });

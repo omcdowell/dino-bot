@@ -1,7 +1,6 @@
 import { test, expect } from "../support/fixtures";
 import {
   buildHostWorkspaceRoute,
-  buildOpenProjectRoute,
   buildSettingsHostSectionRoute,
   buildSettingsRoute,
   buildSettingsSectionRoute,
@@ -151,7 +150,7 @@ test.describe("Settings — compact master-detail", () => {
     page,
   }) => {
     await gotoAppShell(page);
-    await openCompactSettings(page, buildOpenProjectRoute());
+    await openCompactSettings(page, "/");
 
     await expectSettingsSidebarSections(page, ["general", "diagnostics", "about"]);
     await expectCompactSettingsList(page);
@@ -214,7 +213,7 @@ test.describe("Settings — compact master-detail", () => {
       { serverId: secondaryServerId, label: secondaryHostLabel, endpoint },
     ]);
     await gotoAppShell(page);
-    await openCompactSettings(page, buildOpenProjectRoute());
+    await openCompactSettings(page, "/");
 
     await selectSettingsHost(page, secondaryServerId);
 

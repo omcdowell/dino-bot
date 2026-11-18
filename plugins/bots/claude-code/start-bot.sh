@@ -6,7 +6,8 @@
 #
 # In (env): BOT, CWD (the bot's folder), CCDIR (its state folder: env.sh with the bot's environment, written by the
 # plugin, 0600), CC_WORKER_MODEL / CC_WORKER_EFFORT (optional), CLAUDE_DIR (folder holding `claude`, put first on
-# PATH), CC_PROXY=1 (env.sh carries the owner's Anthropic API proxy: launch.ts ccProxyFor). Prints one JSON line
+# PATH), CC_PROXY=1 (env.sh carries the owner's Anthropic API proxy: launch.ts ccProxyFor), CC_BOTS_WORKSPACE (the herdr
+# workspace label, default "bots"; the release smoke test, scripts/cc-smoke.ts, uses its own). Prints one JSON line
 # {pane, tab, session_file}. Exit 0 started (or already running), 1 a step failed.
 set -eu
 fail() {
@@ -19,6 +20,7 @@ get() {
 HERE=$(cd "$(dirname "$0")" && pwd)
 : "${BOT:?}" "${CWD:?}" "${CCDIR:?}"
 NAME="cc-$BOT"
+WS_LABEL=${CC_BOTS_WORKSPACE:-bots}
 [ -f "$CCDIR/env.sh" ] || fail "no $CCDIR/env.sh"
 [ -z "${CLAUDE_DIR:-}" ] || PATH="$CLAUDE_DIR:$PATH"
 command -v claude >/dev/null 2>&1 || fail "Claude Code (claude) is not installed"
@@ -27,12 +29,12 @@ if herdr agent get "$NAME" >/dev/null 2>&1; then
   exit 0
 fi
 
-WS=$(herdr workspace list | node -e 'let s="";process.stdin.on("data",(d)=>(s+=d)).on("end",()=>{const w=(JSON.parse(s).result?.workspaces??[]).find((x)=>x.label==="bots");process.stdout.write(w?w.workspace_id:"")})')
+WS=$(herdr workspace list | node -e 'let s="";process.stdin.on("data",(d)=>(s+=d)).on("end",()=>{const w=(JSON.parse(s).result?.workspaces??[]).find((x)=>x.label===process.argv[1]);process.stdout.write(w?w.workspace_id:"")})' "$WS_LABEL")
 if [ -n "$WS" ]; then
   OUT=$(herdr tab create --workspace "$WS" --cwd "$CWD" --label "$NAME" --no-focus)
   TAB=$(printf '%s' "$OUT" | get result.tab.tab_id)
 else
-  OUT=$(herdr workspace create --cwd "$CWD" --label bots --no-focus)
+  OUT=$(herdr workspace create --cwd "$CWD" --label "$WS_LABEL" --no-focus)
   TAB=$(printf '%s' "$OUT" | get result.tab.tab_id)
   herdr tab rename "$TAB" "$NAME" >/dev/null
 fi
@@ -67,13 +69,17 @@ fs.renameSync(file + ".tmp", file);
 
 # launch-cc.sh's inputs. No worker skills; web search and fetch (as pi bots' pi-web-access); OptChat's tools (zoom,
 # date, search_memory come from the view mod); no AskUserQuestion (it would hold the TUI: the bot asks in its reply); the
-# three mods; no slash commands or skills in the prompt.
+# three mods and the restart guard; no slash commands or skills in the prompt.
 SESSION_ID=$(node -e 'process.stdout.write(require("crypto").randomUUID())')
 BRIEF="$CCDIR/bot.md"
 MODEL=
 WORKER_SKILLS=none
+# Claude Code's own auto-compact window, not the workers' 200k cap: OptChat compacts after each turn, as for a pi bot.
+CC_COMPACT_WINDOW=auto
 CC_WORKER_TOOLS=${CC_WORKER_TOOLS:-Read,Edit,Write,Bash,Grep,Glob,WebSearch,WebFetch,zoom,date,search_memory}
-CC_PLUGIN_DIRS="$HERE/view:$HERE/trigger:$HERE/inbox"
+# guard: the restart guard (a stock PreToolUse hook on Bash, the same rules as pi bots' OptChat hook); bots only, never
+# workers (launch.sh) or the user's own Claude Code.
+CC_PLUGIN_DIRS="$HERE/view:$HERE/trigger:$HERE/inbox:$HERE/guard"
 CC_EXTRA_ARGS=--disable-slash-commands
 # The plan login only (no ANTHROPIC_* in the pane), unless the owner chose a proxy (CC_PROXY=1, set above).
 if [ "${CC_PROXY:-}" = 1 ]; then unset CC_PLAN_LOGIN; else CC_PLAN_LOGIN=1; fi

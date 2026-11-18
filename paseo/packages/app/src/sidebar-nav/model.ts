@@ -5,10 +5,10 @@ export type SidebarSection = PluginSidebarSection;
 
 /**
  * Each section's built-in items in their default order. The footer's bottom line
- * (Add project and the Hosts, Help and support, Settings icons) is fixed.
+ * (the Hosts, Help and support, Settings icons) is fixed.
  */
 export const BUILTIN_SIDEBAR_ITEM_IDS = {
-  header: ["new-workspace", "history", "search", "schedules"],
+  header: ["search", "schedules"],
   footer: ["usage"],
 } as const satisfies Record<SidebarSection, readonly string[]>;
 
@@ -41,8 +41,6 @@ export type SidebarNavItem<Section extends SidebarSection = SidebarSection> =
   | PluginSidebarNavItem;
 
 const BUILTIN_LABEL_KEYS: Record<BuiltinSidebarItemId, string> = {
-  "new-workspace": "sidebar.actions.newWorkspace",
-  history: "sidebar.sections.sessions",
   search: "sidebar.sections.search",
   schedules: "sidebar.sections.schedules",
   usage: "sidebar.footer.usage",
@@ -58,8 +56,6 @@ export function builtinSidebarNavLabelKey(id: BuiltinSidebarItemId): string {
  * two never disagree about which shortcut belongs to which item.
  */
 const BUILTIN_SHORTCUT_ACTIONS: Record<BuiltinSidebarItemId, string | null> = {
-  "new-workspace": "new-workspace",
-  history: null,
   search: "toggle-command-center",
   schedules: null,
   usage: null,

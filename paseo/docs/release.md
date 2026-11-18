@@ -41,8 +41,7 @@ commit instead of `origin/main`.
 
 Before making release-preparation commits, confirm the existing CI run for the
 resolved commit is green. Pending CI is watched to completion. Release
-preparation then stays local through the changelog, any explicitly requested ACP
-catalog update, lockfile preparation, and the version commit. After approval,
+preparation then stays local through the changelog, lockfile preparation, and the version commit. After approval,
 commit the prepared inputs locally and run the release command. Its branch and
 tag push is the one remote release batch and starts CI for the complete release
 commit.
@@ -76,19 +75,6 @@ use the normal release flow with it as the explicit source, choosing a new patch
 or beta version. Ensure the fixes and changelog also reach `main` and any active
 `next`, preserving newer development and version changes there. This is a
 short-lived hotfix branch, not another maintained release track.
-
-## ACP catalog updates
-
-ACP catalog work enters a release through an explicit user request:
-
-- **Check ACP drift** — run `npm run acp:version-drift:check`. When drift exists,
-  run `npm run acp:version-drift:update`, verify the catalog, and include the
-  update in the local release-preparation commits.
-- **Update ACP** — run `npm run acp:version-drift:update`, verify the catalog, and
-  include the update in the local release-preparation commits.
-
-The release authorization covers the requested ACP commit. It ships in the same
-release push as the changelog and version commit.
 
 ## Two paths
 

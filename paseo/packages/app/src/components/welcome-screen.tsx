@@ -3,29 +3,19 @@ import { useTranslation } from "react-i18next";
 import { Pressable, Share, Text, View, ScrollView } from "react-native";
 import { useRouter, type Href } from "expo-router";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import {
-  QrCode,
-  Link2,
-  ClipboardPaste,
-  ExternalLink,
-  Settings,
-  Terminal,
-} from "lucide-react-native";
+import { QrCode, Link2, ClipboardPaste, ExternalLink, Settings } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { HostProfile } from "@/types/host-connection";
 import { getHostRuntimeStore, isHostRuntimeConnected, useHosts } from "@/runtime/host-runtime";
 import { AddHostModal } from "./add-host-modal";
-import { AddRemoteSshHostModal } from "./add-remote-ssh-host-modal";
 import { PairLinkModal } from "./pair-link-modal";
 import { Button } from "@/components/ui/button";
 import { resolveDisplayVersion } from "@/utils/app-version";
 import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
-import { buildOpenProjectRoute } from "@/utils/host-routes";
 import { PaseoLogo } from "@/components/icons/paseo-logo";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { isFdroidBuild } from "@/constants/build-profile";
 import { isWeb, isNative } from "@/constants/platform";
-import { isElectronRuntime } from "@/desktop/host";
 import * as Clipboard from "expo-clipboard";
 import {
   APP_INSTALL_URL,
@@ -43,7 +33,7 @@ import {
 import { useIsFocused } from "@react-navigation/native";
 
 interface WelcomeAction {
-  key: "scan-qr" | "direct-connection" | "remote-ssh" | "paste-pairing-link";
+  key: "scan-qr" | "direct-connection" | "paste-pairing-link";
   label: string;
   testID: string;
   primary: boolean;
@@ -225,7 +215,6 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
   const router = useRouter();
   const appVersionText = formatVersionWithPrefix(resolveDisplayVersion());
   const [isDirectOpen, setIsDirectOpen] = useState(false);
-  const [isRemoteSshOpen, setIsRemoteSshOpen] = useState(false);
   const [isPasteLinkOpen, setIsPasteLinkOpen] = useState(false);
   const hosts = useHosts();
   const anyOnlineServerId = useAnyHostOnline(hosts.map((h) => h.serverId));
@@ -234,11 +223,11 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
   const finishOnboardingFor = useCallback(
     (serverId: string | null) => {
       if (!serverId || !RELEASE_POLICY.importOnboarding) {
-        router.replace(buildOpenProjectRoute());
+        router.replace("/");
         return;
       }
       void routeAfterPairing(serverId)
-        .catch(() => buildOpenProjectRoute())
+        .catch(() => "/")
         .then((route) => router.replace(route as Href));
     },
     [router],
@@ -251,11 +240,7 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
   // gets "Continue setup" below instead of a bounce straight back in.
   const isFocused = useIsFocused();
   const routedFor = useRef<string | null>(null);
-  useSyncExternalStore(
-    subscribeOnboardingPause,
-    onboardingPauseVersion,
-    onboardingPauseVersion,
-  );
+  useSyncExternalStore(subscribeOnboardingPause, onboardingPauseVersion, onboardingPauseVersion);
   const pausedServerId = isOnboardingPaused(anyOnlineServerId) ? anyOnlineServerId : null;
   useEffect(() => {
     if (!anyOnlineServerId || !isFocused || routedFor.current === anyOnlineServerId) return;
@@ -280,8 +265,6 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
 
   const handleOpenDirect = useCallback(() => setIsDirectOpen(true), []);
   const handleCloseDirect = useCallback(() => setIsDirectOpen(false), []);
-  const handleOpenRemoteSsh = useCallback(() => setIsRemoteSshOpen(true), []);
-  const handleCloseRemoteSsh = useCallback(() => setIsRemoteSshOpen(false), []);
   const handleOpenPasteLink = useCallback(() => setIsPasteLinkOpen(true), []);
   const handleClosePasteLink = useCallback(() => setIsPasteLinkOpen(false), []);
   const handleScanQr = useCallback(() => {
@@ -354,17 +337,6 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
   // "Continue setup" is the main way on for a paired host; the pairing buttons step back.
   if (pausedServerId) for (const action of actions) action.primary = false;
 
-  if (isElectronRuntime() && RELEASE_POLICY.desktopRemoteSsh) {
-    actions.splice(1, 0, {
-      key: "remote-ssh",
-      label: t("pairing.connectionMethods.remoteSsh.title"),
-      testID: "welcome-remote-ssh",
-      primary: false,
-      icon: Terminal,
-      onPress: handleOpenRemoteSsh,
-    });
-  }
-
   const scrollContentContainerStyle = useMemo(
     () => [styles.container, { paddingBottom: theme.spacing[6] + insets.bottom }],
     [theme.spacing, insets.bottom],
@@ -432,12 +404,6 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
         <AddHostModal
           visible={isDirectOpen}
           onClose={handleCloseDirect}
-          onSaved={handleHostSaved}
-        />
-
-        <AddRemoteSshHostModal
-          visible={isRemoteSshOpen}
-          onClose={handleCloseRemoteSsh}
           onSaved={handleHostSaved}
         />
 

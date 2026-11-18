@@ -82,7 +82,7 @@ Create a child image for the agents you use:
 FROM ghcr.io/getpaseo/paseo:latest
 
 USER root
-RUN npm install -g @openai/codex @anthropic-ai/claude-code opencode-ai
+RUN npm install -g @anthropic-ai/claude-code
 ```
 
 Build it:

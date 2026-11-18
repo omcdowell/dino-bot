@@ -22,7 +22,7 @@ scheme comes from the name (`dinobot://pair`), as in the app.
 | starter coordinator bot | wizard | On by default; untick it in the extras checklist (it moves to `~/bots/.trash`). |
 | start services | wizard | systemd user units (+ linger, never sudo) or launchd agents; no systemd (or `--service none`): detached processes. See [Linux](linux.md). |
 | Tailscale check | wizard | **Required.** Missing, off or logged out: setup stops before starting anything, prints the steps for your OS and the command to finish. No LAN mode. |
-| **QR** | wizard | Printed once the daemon **accepts app connections**, so the first connect works. After it, only what needs you (the PATH line, missing `git`/`bzip2` on Linux, a sleeping laptop) and the done line; addresses, timings and details with `setup --verbose` (and in `~/.dinobot/state.json`). The direct offer `dinobot://pair/#offer=…` carries the MagicDNS name, the tailnet IP, the password and the daemon key; the app sends the password only inside the end-to-end encrypted channel keyed to that key. |
+| **QR** | wizard | Printed once the daemon **accepts app connections**, so the first connect works. After it, only what needs you (the PATH line, missing `git`/`bzip2` on Linux, a sleeping laptop) and the done line; addresses, timings and details with `setup --verbose` (and in `~/.dinobot/state.json`). The direct offer `dinobot://pair/#offer=…` carries one address, the tailnet IP (no MagicDNS name: with both, the phone switched routes under load and each switch remounted the bots screen), the password and the daemon key; the app sends the password only inside the end-to-end encrypted channel keyed to that key. |
 | sign-in | wizard or phone | Only if nothing was found. pi's own device-code / paste-code logins or an API key. The Claude login is labelled "billed as extra usage". |
 | extras | wizard | One checklist: starter bot [x], import past chats [ ] with an estimate. Import runs in the background. |
 | herdr for workers | services | Its own session `paseo-bots` (`dinobot-herdr.service`) and a daily cleanup timer. |
@@ -36,7 +36,7 @@ is up (20 minute limit).
 
 ## Commands
 
-`dinobot setup [--verbose] | pair [--link] | status | doctor [--json] | update [--check] [--tarball F|--url U] | start | stop | uninstall [--yes] | uninstall --purge [--yes] | import-status | herdr-gc | claude-code install | claude-code install-cli`
+`dinobot setup [--verbose] | pair [--link] | status | doctor [--json] | update [--check] [--tarball F|--url U] | start | stop | uninstall [--yes] | uninstall --purge [--yes] | import-status | herdr-gc | claude-code install-cli`
 
 `dinobot` alone (or `dinobot help`) lists the commands; setup runs only as `dinobot setup`.
 
@@ -61,8 +61,6 @@ Push notifications and Live Activities are off unless you turn them on with
   step fails or the daemon does not become ready. Prints old -> new version. Config, password,
   bots and sign-ins are untouched. `DINOBOT_RELEASE=<tag>` picks one release instead of the latest.
 - `pair --link` prints the pairing link (for "Paste pairing link" in the desktop app).
-- `claude-code install` fetches the Claude Agent SDK from npm on your computer (integrity-checked);
-  it is proprietary, so it is not in the tarball.
 - `claude-code install-cli` installs the `claude` CLI with Anthropic's own native installer
   (`curl -fsSL https://claude.ai/install.sh | bash`, as you, no sudo; it lands in `~/.local/bin`),
   then prints the login step. The app's "Install Claude Code" button runs the same installer and
@@ -128,8 +126,12 @@ and rooms. Only the engine differs.
   plugin's skills, the bot's own and the policy's globals (`server/cc/skills.ts`).
 - **Limits.**
   - Team and Enterprise logins switch Claude Code mods off, so OptChat cannot run there.
-  - Answer text and thinking stream; a tool's output shows when it ends (Claude Code mods have no progress hook).
-  - No slash commands (`/skill:x` goes as text; the bot reads the skill from its list) and no rewind or session list.
+  - Answer text and thinking stream. A Bash command's output shows while it runs: Claude Code mods have no progress
+    hook, so the view mod reads the output file Claude Code keeps for a running command (its temp folder's
+    `tasks/<id>.output`) about once a second. Other tools show their result when they end.
+  - Slash commands as on a pi bot: `/skill:<name>` (each skill in the bot's prompt) sends pi's skill message, and
+    `/compact` gets OptChat's note (it compacts after every turn). `/optchat` and the commands of pi's own packages
+    are pi's. No rewind or session list.
   - A reopened chat's history shows messages and tool calls, not thinking.
   - Images typed into the TUI are not kept (those sent from the app are).
 

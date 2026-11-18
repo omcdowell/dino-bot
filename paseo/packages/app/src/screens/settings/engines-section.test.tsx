@@ -242,17 +242,14 @@ describe("Settings → Providers: two engines", () => {
     expect(h.push).toHaveBeenCalledWith("/setup-signin?serverId=mac&from=settings");
   });
 
-  it("Add and Other tools rows", async () => {
+  it("Add rows", async () => {
     h.rpc.mockResolvedValue(STATUS);
     await render();
     await click("engines-add-signin");
     expect(h.push).toHaveBeenLastCalledWith("/setup-signin?serverId=mac&from=settings");
     await click("engines-add-package");
-    expect(h.push).toHaveBeenLastCalledWith(
-      "/setup-signin?serverId=mac&from=settings&add=package",
-    );
-    await click("engines-terminal");
-    expect(h.push).toHaveBeenLastCalledWith("/new?serverId=mac");
+    expect(h.push).toHaveBeenLastCalledWith("/setup-signin?serverId=mac&from=settings&add=package");
+    expect(byId("engines-terminal")).toBeNull();
   });
 
   it("Claude Code card: logged in, plan, bots, version; log out after confirming", async () => {
@@ -295,7 +292,13 @@ describe("Settings → Providers: two engines", () => {
   it("Claude Code card: not installed on a host that can install it: one Install Claude Code button (install, then login)", async () => {
     h.rpc.mockResolvedValue({
       ...STATUS,
-      claudeCode: { ...STATUS.claudeCode, installed: false, canInstall: true, loggedIn: false, version: null },
+      claudeCode: {
+        ...STATUS.claudeCode,
+        installed: false,
+        canInstall: true,
+        loggedIn: false,
+        version: null,
+      },
     });
     await render();
     expect(byId("engine-claude-login")).toBeNull();

@@ -11,6 +11,12 @@
  * - `…`                    the host's catalog: plugin ids, bundle hashes and requirements;
  * - `…:bundle:<pluginId>`  `{ hash, clientBundle }`, rewritten only when the bundle changes;
  * - `…:queries:<pluginId>` the plugin's persisted queries (TanStack dehydrated state), debounced.
+ *
+ * A plugin missing from a live catalog (it failed to load, crashed, or was not loaded yet after a
+ * daemon restart) keeps its bundle and queries; the index lists it under `absent` with the time it
+ * went missing, and they are dropped only once it has been missing for `absentGraceMs` (7 days).
+ * Deleting them at once made its return fetch the bundle and every bot avatar again
+ * (avatar-reload, 2026-11-18).
  */
 import {
   dehydrate,
@@ -71,10 +77,23 @@ const IndexSchema = z.object({
       requirements: z.object({ paseo: z.string().optional() }).optional(),
     }),
   ),
+  /** Plugins missing from the last live catalogs, kept until `absentGraceMs` after `since`. */
+  absent: z
+    .array(
+      z.object({
+        id: z.string(),
+        hash: z.string().nullable(),
+        since: z.number(),
+      }),
+    )
+    .optional(),
 });
 type CacheIndex = z.infer<typeof IndexSchema>;
 
-const BundleSchema = z.object({ hash: z.string().nullable(), clientBundle: z.string().min(1) });
+const BundleSchema = z.object({
+  hash: z.string().nullable(),
+  clientBundle: z.string().min(1),
+});
 const DehydratedSchema = z.object({
   queries: z.array(z.unknown()),
   mutations: z.array(z.unknown()),
@@ -138,7 +157,10 @@ export function dehydratePersisted(client: QueryClient): DehydratedState {
  */
 function withinLimit(state: DehydratedState, maxBytes: number): DehydratedState {
   if (JSON.stringify(state).length <= maxBytes) return state;
-  const sized = state.queries.map((query) => ({ query, size: JSON.stringify(query).length }));
+  const sized = state.queries.map((query) => ({
+    query,
+    size: JSON.stringify(query).length,
+  }));
   const dropped = new Set<(typeof sized)[number]["query"]>();
   let total = JSON.stringify({ ...state, queries: [] }).length + sized.length;
   for (const { size } of sized) total += size;
@@ -147,7 +169,10 @@ function withinLimit(state: DehydratedState, maxBytes: number): DehydratedState 
     dropped.add(entry.query);
     total -= entry.size + 1;
   }
-  return { ...state, queries: state.queries.filter((query) => !dropped.has(query)) };
+  return {
+    ...state,
+    queries: state.queries.filter((query) => !dropped.has(query)),
+  };
 }
 
 function parseJson<T>(raw: string | null, schema: z.ZodType<T>): T | null {
@@ -165,11 +190,19 @@ interface KnownBundle {
   clientBundle: string;
 }
 
+const ABSENT_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+
 export function createPluginCache(
   storage: PluginCacheStorage,
-  options: { debounceMs?: number; now?: () => number; maxQueryBytes?: number } = {},
+  options: {
+    debounceMs?: number;
+    now?: () => number;
+    maxQueryBytes?: number;
+    absentGraceMs?: number;
+  } = {},
 ) {
   const debounceMs = options.debounceMs ?? 2_000;
+  const absentGraceMs = options.absentGraceMs ?? ABSENT_GRACE_MS;
   const now = options.now ?? Date.now;
   const maxQueryBytes = options.maxQueryBytes ?? 1_000_000;
   /** Bundles the app has per host (from storage, then from live catalogs), by plugin id. */
@@ -178,6 +211,10 @@ export function createPluginCache(
   const writtenQueries = new Map<string, string>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const tracked = new Map<string, Map<string, TrackedPlugin>>();
+  /** Per host: when each plugin missing from the live catalog went missing, by plugin id. */
+  const absentSince = new Map<string, Map<string, number>>();
+  /** Per host: the stored queries of plugins that were absent at load, by plugin id. */
+  const parked = new Map<string, Map<string, DehydratedState>>();
 
   const hostBundles = (serverId: string) => {
     let byId = bundles.get(serverId);
@@ -219,8 +256,34 @@ export function createPluginCache(
         };
       }),
     );
+    await Promise.all((index.absent ?? []).map((plugin) => readAbsent(serverId, plugin)));
     const kept = plugins.filter((plugin): plugin is CachedPlugin => plugin !== null);
     return kept.length > 0 ? { serverId, savedAt: index.savedAt, plugins: kept } : null;
+  }
+
+  /** An absent plugin: its bundle stays known (sent as a hash) and its queries wait for it. */
+  async function readAbsent(
+    serverId: string,
+    plugin: { id: string; hash: string | null; since: number },
+  ): Promise<void> {
+    const [rawBundle, rawQueries] = await Promise.all([
+      storage.getItem(bundleKey(serverId, plugin.id)),
+      storage.getItem(queriesKey(serverId, plugin.id)),
+    ]);
+    const bundle = parseJson(rawBundle, BundleSchema);
+    if (!bundle || bundle.hash !== plugin.hash) return;
+    hostBundles(serverId).set(plugin.id, {
+      hash: plugin.hash,
+      clientBundle: bundle.clientBundle,
+    });
+    let since = absentSince.get(serverId);
+    if (!since) absentSince.set(serverId, (since = new Map()));
+    since.set(plugin.id, plugin.since);
+    const queries = parseJson(rawQueries, DehydratedSchema) as DehydratedState | null;
+    if (!queries) return;
+    let byId = parked.get(serverId);
+    if (!byId) parked.set(serverId, (byId = new Map()));
+    byId.set(plugin.id, queries);
   }
 
   function writeQueries(serverId: string, plugin: TrackedPlugin): Promise<void> {
@@ -283,13 +346,36 @@ export function createPluginCache(
       return quietly(storage.removeItem(bundleKey(serverId, pluginId)));
     },
 
-    /** Keeps a live (resolved) catalog: bundles that changed, then the host's index. */
+    /**
+     * The stored queries of plugins that were absent from the host's catalog when the cache was
+     * read (the live install of a returning plugin starts from them).
+     */
+    parkedQueries(serverId: string): ReadonlyMap<string, DehydratedState> {
+      return parked.get(serverId) ?? new Map<string, DehydratedState>();
+    },
+
+    /**
+     * Keeps a live (resolved) catalog: bundles that changed, then the host's index. A plugin
+     * missing from it is kept as absent, and dropped once it has been missing for the grace period.
+     */
     async saveCatalog(serverId: string, catalog: readonly CatalogPlugin[]): Promise<void> {
       const byId = hostBundles(serverId);
       const live = catalog.filter((entry) => entry.clientBundle && !entry.clientBundleUnchanged);
+      let since = absentSince.get(serverId);
+      if (!since) absentSince.set(serverId, (since = new Map()));
+      const at = now();
       for (const [id] of byId) {
-        if (live.some((entry) => entry.id === id)) continue;
+        if (live.some((entry) => entry.id === id)) {
+          since.delete(id);
+          parked.get(serverId)?.delete(id);
+          continue;
+        }
+        const missingSince = since.get(id) ?? at;
+        since.set(id, missingSince);
+        if (at - missingSince < absentGraceMs) continue;
         byId.delete(id);
+        since.delete(id);
+        parked.get(serverId)?.delete(id);
         await quietly(storage.removeItem(bundleKey(serverId, id)));
         await quietly(storage.removeItem(queriesKey(serverId, id)));
       }
@@ -305,10 +391,14 @@ export function createPluginCache(
           ),
         );
       }
+      const absent = [...since].flatMap(([id, missingSince]) => {
+        const known = byId.get(id);
+        return known ? [{ id, hash: known.hash, since: missingSince }] : [];
+      });
       const index: CacheIndex = {
         version: 1,
         serverId,
-        savedAt: now(),
+        savedAt: at,
         plugins: live.map((entry) => {
           const plugin: CacheIndex["plugins"][number] = {
             id: entry.id,
@@ -317,6 +407,7 @@ export function createPluginCache(
           if (entry.requirements) plugin.requirements = entry.requirements;
           return plugin;
         }),
+        ...(absent.length > 0 ? { absent } : {}),
       };
       await quietly(storage.setItem(pluginCacheKey(serverId), JSON.stringify(index)));
     },

@@ -1,7 +1,6 @@
 import type { Href } from "expo-router";
 import type { ActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
-import type { WorkspaceDescriptor } from "@/stores/session-store";
-import { buildWorkspaceArchiveRedirectRoute } from "@/utils/workspace-archive-navigation";
+import { buildHostRootRoute } from "@/utils/host-routes";
 
 export interface RedirectIfArchivingActiveWorkspaceInput {
   serverId: string;
@@ -11,9 +10,12 @@ export interface RedirectIfArchivingActiveWorkspaceInput {
 
 export interface RedirectIfArchivingActiveWorkspaceDeps {
   navigateToRoute: (route: Href) => void;
-  readWorkspaces: (serverId: string) => Iterable<WorkspaceDescriptor>;
 }
 
+/**
+ * Archiving the open workspace leaves the screen empty, so move to the host root (which restores
+ * another workspace or the host's start page).
+ */
 export function redirectIfArchivingActiveWorkspace(
   input: RedirectIfArchivingActiveWorkspaceInput,
   deps: RedirectIfArchivingActiveWorkspaceDeps,
@@ -25,12 +27,6 @@ export function redirectIfArchivingActiveWorkspace(
     return false;
   }
 
-  deps.navigateToRoute(
-    buildWorkspaceArchiveRedirectRoute({
-      serverId: input.serverId,
-      archivedWorkspaceId: input.workspaceId,
-      workspaces: deps.readWorkspaces(input.serverId),
-    }),
-  );
+  deps.navigateToRoute(buildHostRootRoute(input.serverId));
   return true;
 }

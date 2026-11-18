@@ -94,7 +94,9 @@ export class PluginService {
   private globalStartsBlocked = true;
   private started = false;
   private readonly settingsListeners = new Set<(pluginId: string, settingsId: string) => void>();
-  private readonly eventListeners = new Set<(pluginId: string, name: string, data: unknown) => void>();
+  private readonly eventListeners = new Set<
+    (pluginId: string, name: string, data: unknown) => void
+  >();
 
   constructor(
     logger: pino.Logger,
@@ -429,6 +431,24 @@ export class PluginService {
       if (this.configStore.get().pluginsEnabled !== true) {
         throw new Error("Plugins are globally disabled");
       }
+      // A running plugin is checked (manifest, requirements, compile) before it is stopped: a
+      // broken source keeps the running version, so a bad go-live does not take the plugin
+      // away from every app (avatar-reload, 2026-11-18).
+      if (this.runtime.validatePlugin && this.isRunning(pluginId)) {
+        try {
+          await this.runtime.validatePlugin(source.path);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.logger.warn(
+            { pluginId, err: error },
+            "Plugin reload failed validation; the running version is kept",
+          );
+          throw new Error(
+            `Plugin ${pluginId} was not reloaded (the running version is kept): ${message}`,
+            { cause: error },
+          );
+        }
+      }
       this.errors.delete(pluginId);
       await this.stopPlugin(pluginId);
       await this.startExplicit(pluginId, source.path);
@@ -536,6 +556,10 @@ export class PluginService {
       }
       throw error;
     }
+  }
+
+  private isRunning(pluginId: string): boolean {
+    return this.runtime.catalog().some((plugin) => plugin.id === pluginId);
   }
 
   private canPublish(pluginId: string): boolean {

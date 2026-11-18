@@ -120,6 +120,27 @@ test("list shows a worker that stopped on an error as stalled (with the error); 
   assert.deepEqual(JSON.parse(h.out[0]!).workers.map((w: any) => [w.state, w.reason]), [["finished", "done"]]);
 });
 
+test("add --session records a Claude Code worker's transcript; list reads it (herdr reports no session)", async () => {
+  const agents: HerdrAgent[] = [{ name: "cc-w", pane_id: "w85:p1", agent_status: "working", agent_session: null }];
+  const h = harness({ PASEO_AGENT_ID: "agent-1" }, agents);
+  const transcript = join(mkdtempSync(join(tmpdir(), "bw-cc-")), "ca2a49c7.jsonl");
+  const fixture = readFileSync(join(import.meta.dirname, "fixtures", "cc-transcripts", "worker-overloaded-529.jsonl"), "utf8");
+  // the error in the fixture is from 2026-11-18; the launch must come before it
+  h.tick(Date.parse("2026-11-18T06:40:00.000Z") - Date.parse("2026-10-08T07:00:00.000Z"));
+  assert.equal(await run(["add", "cc-w", "--session", transcript], h.deps), 0);
+  assert.equal(h.registry()[0].session, transcript);
+  assert.equal(await run(["add", "cc-x", "--session", "relative.jsonl"], h.deps), 2);
+  writeFileSync(transcript, fixture);
+  agents[0]!.agent_status = "idle";
+  h.tick(15 * 60_000);
+  h.out.length = 0;
+  assert.equal(await run(["list"], h.deps), 0); // default reader: session files only, as in tests
+  const [row] = JSON.parse(h.out[0]!).workers;
+  assert.equal(row.state, "stalled");
+  assert.equal(row.error.source, "session");
+  assert.match(row.error.message, /529 Overloaded/);
+});
+
 test("list: a worker that reported is still listed while herdr shows it working (settings-back)", async () => {
   const agents: HerdrAgent[] = [{ name: "settings-back", pane_id: "w9F:p1", agent_status: "working" }];
   const h = harness({ PASEO_AGENT_ID: "agent-1" }, agents);

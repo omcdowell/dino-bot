@@ -33,19 +33,7 @@ import type {
   ProviderProfileModel,
   ProviderRuntimeSettings,
 } from "./provider-launch-config.js";
-import { ClaudeAgentClient } from "./providers/claude/agent.js";
-import { CodexAppServerAgentClient } from "./providers/codex-app-server-agent.js";
-import { CopilotACPAgentClient } from "./providers/copilot-acp-agent.js";
-import { CursorACPAgentClient } from "./providers/cursor-acp-agent.js";
-import { GenericACPAgentClient } from "./providers/generic-acp-agent.js";
-import { KimiACPAgentClient } from "./providers/kimi-acp-agent.js";
-import { KiroACPAgentClient } from "./providers/kiro-acp-agent.js";
-import { OpenCodeRuntimeClient } from "./providers/opencode/runtime-client.js";
-import type { OpenCodeBridge } from "./providers/opencode/bridge.js";
-import { OmpAgentClient } from "./providers/omp/agent.js";
-import type { OmpRuntime } from "./providers/omp/runtime.js";
 import { PiRpcAgentClient } from "./providers/pi/agent.js";
-import { TraeACPAgentClient } from "./providers/trae-acp-agent.js";
 import { MockLoadTestAgentClient } from "./providers/mock-load-test-agent.js";
 import { MockSlowProviderClient } from "./providers/mock-slow-provider.js";
 import { ToolPolicyUnsupportedError, mergeProviderOptions } from "./provider-options.js";
@@ -57,10 +45,6 @@ import {
   type AgentProviderDefinition,
 } from "@getpaseo/protocol/provider-manifest";
 
-function isNonEmptyStringArray(value: string[]): value is [string, ...string[]] {
-  return value.length > 0;
-}
-
 export type { AgentProviderDefinition };
 
 export { AGENT_PROVIDER_DEFINITIONS, getAgentProviderDefinition };
@@ -71,9 +55,8 @@ export interface ProviderDefinition extends AgentProviderDefinition {
   iconSvg?: string;
   enabled: boolean;
   /**
-   * The id of another *registered* provider this one extends (e.g. a Z.AI
-   * profile that extends "claude"). null for built-in providers and for
-   * generic ACP providers (which only extend the literal "acp" sentinel).
+   * The id of another *registered* provider this one extends (e.g. OptChat,
+   * which extends "pi"). null for built-in and plugin providers.
    */
   derivedFromProviderId: string | null;
   supportsExactMcpPreapproval: boolean;
@@ -109,15 +92,12 @@ export interface BuildProviderRegistryOptions {
   workspaceGitService?: Pick<WorkspaceGitService, "resolveRepoRoot">;
   managedProcesses?: ManagedProcessRegistry;
   isDev?: boolean;
-  ompRuntime?: OmpRuntime;
-  openCodeBridge?: OpenCodeBridge;
 }
 
 interface ProviderClientFactoryOptions extends Pick<
   BuildProviderRegistryOptions,
-  "workspaceGitService" | "managedProcesses" | "ompRuntime"
+  "workspaceGitService" | "managedProcesses"
 > {
-  openCodeBridge?: OpenCodeBridge;
   customProvider?: {
     id: string;
     label: string;
@@ -149,96 +129,23 @@ interface ProviderContract {
   applyToolPolicy?: (provider: string, toolPolicy: ToolPolicy) => ToolPolicy;
 }
 
-const PROVIDER_CONTRACTS: Record<string, ProviderContract> = {
-  claude: { supportsExactMcpPreapproval: true },
-  codex: { supportsExactMcpPreapproval: true },
-  opencode: { supportsExactMcpPreapproval: true },
-};
+// No remaining built-in provider can preapprove exact MCP tools (Claude SDK was deleted);
+// plugin providers declare their own contract.
+const PROVIDER_CONTRACTS: Record<string, ProviderContract> = {};
 
 const UNSUPPORTED_PROVIDER_CONTRACT: ProviderContract = {
   supportsExactMcpPreapproval: false,
 };
 
-const HUB_E2E_PROVIDER_ID = "hub-e2e";
-const HUB_E2E_MCP_SERVER = "hub";
-const HUB_E2E_TOOL_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/u;
-// The cross-repository Hub harness owns this synthetic provider ID. It exercises the production
-// registry path without extending exact-preapproval support to user-defined ACP providers.
-const HUB_E2E_PROVIDER_CONTRACT: ProviderContract = {
-  supportsExactMcpPreapproval: true,
-  applyToolPolicy: (provider, toolPolicy) => {
-    for (const grant of toolPolicy.preapproved) {
-      if (
-        grant.kind !== "mcp" ||
-        grant.server !== HUB_E2E_MCP_SERVER ||
-        !HUB_E2E_TOOL_NAME.test(grant.tool)
-      ) {
-        throw new ToolPolicyUnsupportedError(
-          provider,
-          `Provider '${provider}' accepts only exact MCP tool grants for the injected '${HUB_E2E_MCP_SERVER}' server`,
-        );
-      }
-    }
-    return {
-      preapproved: toolPolicy.preapproved.map((grant) => ({ ...grant })),
-    };
-  },
-};
-
 const PROVIDER_CLIENT_FACTORIES: Record<string, ProviderClientFactory> = {
-  claude: (logger, runtimeSettings) =>
-    new ClaudeAgentClient({
-      logger,
-      runtimeSettings,
-    }),
-  codex: (logger, runtimeSettings, options) =>
-    new CodexAppServerAgentClient(logger, runtimeSettings, {
-      workspaceGitService: options?.workspaceGitService,
-      customProvider: options?.customProvider,
-    }),
-  copilot: (logger, runtimeSettings) =>
-    new CopilotACPAgentClient({
-      logger,
-      runtimeSettings,
-    }),
-  cursor: (logger, runtimeSettings) =>
-    new CursorACPAgentClient({
-      logger,
-      command: getCursorACPCommand(runtimeSettings),
-      env: runtimeSettings?.env,
-    }),
-  opencode: (logger, runtimeSettings, options) =>
-    new OpenCodeRuntimeClient(logger, runtimeSettings, {
-      managedProcesses: options?.managedProcesses,
-      bridge: options?.openCodeBridge,
-    }),
   pi: (logger, runtimeSettings) =>
     new PiRpcAgentClient({
       logger,
       runtimeSettings,
     }),
-  omp: (logger, runtimeSettings, options) =>
-    new OmpAgentClient({
-      logger,
-      runtimeSettings,
-      runtime: options?.ompRuntime,
-    }),
   mock: (logger) => new MockLoadTestAgentClient(logger),
   "mock-slow": () => new MockSlowProviderClient(),
 };
-
-function getCursorACPCommand(
-  runtimeSettings: ProviderRuntimeSettings | undefined,
-): [string, ...string[]] {
-  if (
-    runtimeSettings?.command?.mode === "replace" &&
-    isNonEmptyStringArray(runtimeSettings.command.argv)
-  ) {
-    return runtimeSettings.command.argv;
-  }
-
-  return ["cursor-agent", "acp"];
-}
 
 function getProviderClientFactory(provider: string): ProviderClientFactory {
   const factory = PROVIDER_CLIENT_FACTORIES[provider];
@@ -756,10 +663,7 @@ function resolveRegisteredProvider(input: RegisteredProvider): ResolvedProvider 
 function buildResolvedBuiltinProviders(
   providerOverrides: Record<string, ProviderOverride>,
   runtimeSettings: AgentProviderRuntimeSettingsMap | undefined,
-  options: Pick<
-    BuildProviderRegistryOptions,
-    "workspaceGitService" | "managedProcesses" | "ompRuntime" | "openCodeBridge"
-  >,
+  options: Pick<BuildProviderRegistryOptions, "workspaceGitService" | "managedProcesses">,
   isDev: boolean,
 ): Map<string, ResolvedProvider> {
   const resolvedProviders = new Map<string, ResolvedProvider>();
@@ -781,8 +685,6 @@ function buildResolvedBuiltinProviders(
           factory(logger, settings, {
             workspaceGitService: options.workspaceGitService,
             managedProcesses: options.managedProcesses,
-            ompRuntime: options.ompRuntime,
-            openCodeBridge: options.openCodeBridge,
           }),
         contract: PROVIDER_CONTRACTS[definition.id] ?? UNSUPPORTED_PROVIDER_CONTRACT,
       }),
@@ -793,9 +695,10 @@ function buildResolvedBuiltinProviders(
 }
 
 function addDerivedProviders(
+  logger: Logger,
   resolvedProviders: Map<string, ResolvedProvider>,
   providerOverrides: Record<string, ProviderOverride>,
-  options: Pick<BuildProviderRegistryOptions, "managedProcesses" | "openCodeBridge">,
+  options: Pick<BuildProviderRegistryOptions, "managedProcesses">,
 ): void {
   for (const [providerId, override] of Object.entries(providerOverrides)) {
     if (resolvedProviders.has(providerId) || BUILTIN_PROVIDER_IDS.includes(providerId)) {
@@ -807,68 +710,16 @@ function addDerivedProviders(
       continue;
     }
 
-    if (override.extends === "acp") {
-      if (!override.command || !isNonEmptyStringArray(override.command)) {
-        throw new Error(`ACP provider '${providerId}' requires a command`);
-      }
-      // Capture command in const for closure - TypeScript can't track type refinement inside closures
-      const command = override.command;
-
-      resolvedProviders.set(providerId, {
-        definition: createDerivedDefinition(
-          providerId,
-          {
-            id: providerId,
-            label: override.label ?? providerId,
-            description: override.description ?? "Custom ACP provider",
-            defaultModeId: null,
-            modes: [],
-          },
-          override,
-        ),
-        runtimeSettings: toRuntimeSettings(override),
-        profileModels: override.models ?? [],
-        additionalModels: override.additionalModels ?? [],
-        profileModelsAreAdditive: false,
-        enabled: override.enabled !== false,
-        derivedFromProviderId: null,
-        providerOptions: configuredProviderOptions(override),
-        createBaseClient: (logger) => {
-          const acpOptions = {
-            logger,
-            command,
-            env: override.env,
-            providerId,
-            label: override.label ?? providerId,
-          };
-          if (providerId === "cursor") {
-            return new CursorACPAgentClient(acpOptions);
-          }
-          if (providerId === "kimi") {
-            return new KimiACPAgentClient(acpOptions);
-          }
-          if (providerId === "kiro") {
-            return new KiroACPAgentClient(acpOptions);
-          }
-          if (providerId === "traecli") {
-            return new TraeACPAgentClient(acpOptions);
-          }
-          return new GenericACPAgentClient(acpOptions);
-        },
-        contract:
-          providerId === HUB_E2E_PROVIDER_ID
-            ? HUB_E2E_PROVIDER_CONTRACT
-            : UNSUPPORTED_PROVIDER_CONTRACT,
-      });
-      continue;
-    }
-
     const baseProviderId = override.extends;
     const baseProvider = resolvedProviders.get(baseProviderId);
     if (!baseProvider) {
-      throw new Error(
-        `Custom provider '${providerId}' extends unknown provider '${baseProviderId}'`,
+      // A provider this build no longer has (ACP, Claude SDK, Codex, OpenCode, OMP were deleted):
+      // skip it so an old config cannot stop the daemon from starting.
+      logger.warn(
+        { provider: providerId, extends: baseProviderId },
+        "Custom provider extends a provider this build does not have; skipped",
       );
+      continue;
     }
 
     const mergedRuntimeSettings = mergeRuntimeSettings(
@@ -891,7 +742,6 @@ function addDerivedProviders(
       createBaseClient: (logger) =>
         baseFactory(logger, mergedRuntimeSettings, {
           managedProcesses: options.managedProcesses,
-          openCodeBridge: options.openCodeBridge,
           customProvider: {
             id: providerId,
             label: override.label ?? providerId,
@@ -915,8 +765,6 @@ export function buildProviderRegistry(
     {
       workspaceGitService: options?.workspaceGitService,
       managedProcesses: options?.managedProcesses,
-      ompRuntime: options?.ompRuntime,
-      openCodeBridge: options?.openCodeBridge,
     },
     options?.isDev === true,
   );
@@ -942,9 +790,8 @@ export function buildProviderRegistry(
       }),
     );
   }
-  addDerivedProviders(resolvedProviders, providerOverrides, {
+  addDerivedProviders(logger, resolvedProviders, providerOverrides, {
     managedProcesses: options?.managedProcesses,
-    openCodeBridge: options?.openCodeBridge,
   });
 
   return Object.fromEntries(

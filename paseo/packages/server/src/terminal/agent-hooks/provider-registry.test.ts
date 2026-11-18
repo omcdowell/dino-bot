@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -39,30 +39,21 @@ function createWarningLogger(): WarningLogger {
 }
 
 describe("terminal agent hook provider registry", () => {
-  it("continues installing provider hooks after one provider fails", () => {
+  it("logs and skips a provider whose hook install fails", () => {
     const root = createTempDir("paseo-agent-hook-registry-");
     const badClaudeConfigDir = join(root, "not-a-directory");
-    const codexHome = join(root, "codex");
-    const opencodeConfigDir = join(root, "opencode");
     const logger = createWarningLogger();
     writeFileSync(badClaudeConfigDir, "");
 
     const results = installRegisteredAgentHooks({
       env: {
         CLAUDE_CONFIG_DIR: badClaudeConfigDir,
-        CODEX_HOME: codexHome,
-        OPENCODE_CONFIG_DIR: opencodeConfigDir,
       },
       homeDir: join(root, "home"),
       logger,
     });
 
-    expect(results.map((result) => result.configPath)).toEqual([
-      join(codexHome, "hooks.json"),
-      join(opencodeConfigDir, "plugins", "paseo-terminal-activity.js"),
-    ]);
-    expect(existsSync(join(codexHome, "hooks.json"))).toBe(true);
-    expect(existsSync(join(opencodeConfigDir, "plugins", "paseo-terminal-activity.js"))).toBe(true);
+    expect(results).toEqual([]);
     expect(logger.entries).toEqual([
       {
         bindings: expect.objectContaining({ err: expect.any(Error), provider: "claude" }),

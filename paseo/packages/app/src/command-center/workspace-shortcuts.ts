@@ -14,10 +14,6 @@ export function resolveWorkspaceCommandCenterShortcuts({
   platform,
 }: ResolveWorkspaceCommandCenterShortcutsInput): WorkspaceCommandCenterShortcuts {
   return {
-    newAgent:
-      resolveShortcutKeysForAction("workspace-tab-target-agent", overrides, platform) ?? undefined,
-    newTerminal:
-      resolveShortcutKeysForAction("workspace-terminal-new", overrides, platform) ?? undefined,
     splitRight:
       resolveShortcutKeysForAction("workspace-pane-split-right", overrides, platform) ?? undefined,
     splitDown:

@@ -95,10 +95,6 @@ export const ar: TranslationResources = {
       open: "فتح {{name}}",
       openInSidePane: "فتح {{name}} في اللوحة الجانبية",
       openInFocusedPane: "فتح {{name}} في الجزء النشط",
-      addProject: "إضافة مشروع",
-      home: "بيت",
-      groupByProject: "تجميع حسب المشروع",
-      groupByStatus: "تجميع حسب الحالة",
       modelGroupLabel: "النموذج",
       modelSearchKeywords: "تبديل النموذج تغيير النموذج تعيين النموذج اختيار النموذج",
       thinkingGroupLabel: "التفكير",
@@ -273,18 +269,6 @@ export const ar: TranslationResources = {
       unarchive: "إلغاء الأرشفة",
     },
   },
-  sessions: {
-    title: "السجل",
-    empty: "لا توجد جلسات بعد",
-    noMatches: "لا توجد جلسات مطابقة",
-    tooManyMatches: "نتائج كثيرة جدًا — ضيّق نطاق البحث",
-    hostLoadFailed: "{{host}}: تعذر تحميل السجل",
-    searchPlaceholder: "البحث في السجل",
-    actions: {
-      loadMore: "تحميل المزيد",
-      clearSearch: "مسح البحث",
-    },
-  },
   agentList: {
     fallbackTitle: "جلسة جديدة",
     dateSections: {
@@ -331,8 +315,6 @@ export const ar: TranslationResources = {
       forkInNewTab: "تفريع في تبويب جديد",
       forkInNewWorkspace: "تفريع في مساحة عمل جديدة",
       forkUnavailable: "حدّث المضيف لاستخدام هذا.",
-      forkMissingWorkspace: "هذا الوكيل ليس في مساحة عمل.",
-      forkFailed: "فشل تفريع المحادثة",
       openFile: "افتح الملف",
       copied: "منقول",
     },
@@ -1141,7 +1123,6 @@ export const ar: TranslationResources = {
     },
   },
   sidebar: {
-    statusGroupAccessibility: "مجموعة {{label}}",
     statusBucket: {
       needsInput: "تحتاج إدخالاً",
       failed: "فشل",
@@ -1150,53 +1131,9 @@ export const ar: TranslationResources = {
       done: "تم",
     },
     display: {
-      showBackground: "إظهار مساحات العمل في الخلفية",
-      trigger: "تفضيلات العرض",
-      heading: "العرض",
       grouping: {
-        label: "التجميع",
-        project: "المشروع",
-        status: "الحالة",
         labels: "التسميات",
       },
-      titleSource: {
-        label: "العنوان",
-        title: "العنوان",
-        branch: "اسم الفرع",
-      },
-      show: {
-        label: "إظهار",
-        branch: "الفرع",
-        project: "المشروع",
-        host: "المضيف",
-        changeRequest: "طلب السحب",
-        checks: "الفحوصات",
-        services: "الخدمات",
-        labels: "التسميات",
-        diff: "إحصائيات الفروق",
-        timestamp: "آخر نشاط",
-      },
-      checks: {
-        iconAndText: "أيقونة ونص",
-        icon: "أيقونة فقط",
-        none: "مخفي",
-      },
-      hostFilter: {
-        label: "المضيف",
-        all: "كل المضيفين",
-      },
-      projectFilter: {
-        label: "المشروع",
-        all: "كل المشاريع",
-      },
-    },
-    filterEmpty: {
-      title: "لا توجد مساحات عمل مطابقة",
-      description: "غيّر عوامل تصفية الشريط الجانبي أو امسحها لعرض مساحات العمل.",
-      clear: "مسح عوامل التصفية",
-    },
-    pinned: {
-      title: "المثبتة",
     },
     host: {
       noHost: "لا مضيف",
@@ -1204,8 +1141,6 @@ export const ar: TranslationResources = {
       searchPlaceholder: "بحث عن المضيفين...",
     },
     actions: {
-      addProject: "إضافة مشروع",
-      newWorkspace: "مساحة عمل جديدة",
       hosts: "المضيفون",
       settings: "إعدادات",
       closeSidebar: "إغلاق الشريط الجانبي",
@@ -1221,77 +1156,28 @@ export const ar: TranslationResources = {
       reportIssue: "الإبلاغ عن مشكلة",
       discord: "Discord",
       github: "إنشاء مشكلة على GitHub",
-      whatsNew: "ما الجديد",
       appName: "Paseo",
     },
     sections: {
-      sessions: "السجل",
       search: "بحث",
       schedules: "الجداول",
     },
-    worktreeSetup: {
-      title: "إعداد البرامج النصية لشجرة العمل",
-      description:
-        "أضف أوامر الإعداد حتى تتمكن أشجار العمل الجديدة من تثبيت التبعيات وإعداد نفسها تلقائيًا.",
-      openProjectSettings: "افتح إعدادات المشروع",
-    },
     project: {
       actions: {
-        menu: "إجراءات المشروع",
-        openSettings: "افتح إعدادات المشروع",
-        openNewWindow: "Open in new window",
-        openNewWindowFailed: "Couldn't open a new window",
-        openFolder: "Open in file manager",
         openFolderFailed: "Couldn't open folder",
-        remove: "إزالة المشروع",
-        removing: "جارٍ الإزالة...",
-      },
-      confirmations: {
-        removeTitle: "هل تريد إزالة المشروع؟",
-        removeMessage:
-          'هل تريد إزالة "{{projectName}}" من الشريط الجانبي؟\n\n لن يتم تغيير الملفات الموجودة على القرص.',
-        removeConfirm: "يزيل",
-        cancel: "يلغي",
-      },
-      toasts: {
-        hostDisconnected: "Host غير متصل",
-        removeFailed: "فشل في إزالة بعض مساحات العمل",
-        updateHostToRemove: "قم بتحديث Host لإزالة المشاريع.",
-      },
-      empty: {
-        title: "لا توجد مشاريع حتى الآن",
-        description: "أضف مشروعًا للبدء",
       },
     },
     workspace: {
       status: {
         serviceRunning: "الخدمة {{name}} قيد التشغيل",
         serviceUnhealthy: "الخدمة {{name}} غير سليمة",
-        creating: "جارٍ الإنشاء...",
-      },
-      checks: {
-        passed: "ناجحة: {{count}}",
-        failed: "فاشلة: {{count}}",
-        warning: "تحذيرات: {{count}}",
-        actionRequired: "إجراء مطلوب: {{count}}",
-        manual: "يدوية: {{count}}",
-        pending: "قيد الانتظار: {{count}}",
       },
       actions: {
-        menu: "إجراءات Workspace",
-        newWorkspace: "مساحة عمل جديدة",
-        showMore: "عرض المزيد",
-        showLess: "عرض أقل",
-        createWorkspaceFor: "قم بإنشاء مساحة عمل جديدة لـ{{projectName}}",
-        copyPath: "نسخ المسار",
-        copyBranchName: "انسخ اسم الفرع",
         rename: "إعادة تسمية مساحة العمل",
         pin: "تثبيت في الأعلى",
         unpin: "إلغاء التثبيت",
-        archive: "أرشيف",
         archiveWorkspace: "أرشفة مساحة العمل",
         hideFromSidebar: "إخفاء من الشريط الجانبي",
-        archiving: "أرشفة...",
         hiding: "إخفاء...",
       },
       confirmations: {
@@ -1302,8 +1188,6 @@ export const ar: TranslationResources = {
         cancel: "يلغي",
       },
       rename: {
-        title: "إعادة تسمية مساحة العمل",
-        submit: "إعادة تسمية",
         invalidBranchName: "اسم الفرع غير صالح",
       },
       toasts: {
@@ -1317,49 +1201,12 @@ export const ar: TranslationResources = {
     },
   },
   newWorkspace: {
-    title: "مساحة عمل جديدة",
-    create: "يخلق",
-    isolation: {
-      local: "محلي",
-      worktree: "شجرة عمل جديدة",
-      label: "العزل",
-    },
     fields: {
       project: "المشروع",
       base: "الأساس",
       baseNotApplicable: "غير قابل للتطبيق",
     },
     titlePlaceholder: "العنوان (اختياري)",
-    errors: {
-      hostDisconnected: "Host غير متصل",
-      createWorktreeFailed: "فشل في إنشاء شجرة العمل",
-      composerStateRequired: "حالة الملحن مطلوبة",
-      selectModel: "اختر نموذجا",
-    },
-    tooltips: {
-      project: "Choose the project",
-      host: "Choose the host",
-      isolation: "Choose the isolation level",
-      startingRef: "اختر من أين تبدأ",
-      launch: "Choose what to launch",
-    },
-    refPicker: {
-      startingRef: "بدء المرجع",
-      intoBase: "إلى {{baseRef}}",
-      searching: "جارٍ البحث...",
-      noMatchingRefs: "لا توجد مراجع مطابقة.",
-      searchPlaceholder: "بحث الفروع والعلاقات العامة",
-      title: "ابدأ من",
-    },
-    launch: {
-      title: "What to launch",
-      chat: "Chat",
-      terminal: "Terminal",
-      manageProfiles: "Manage profiles",
-      submit: "Launch",
-      promptPlaceholder: "Prompt {{name}}",
-      commandPlaceholder: "Run a command, or leave empty for a blank terminal",
-    },
   },
   desktop: {
     windowControls: {
@@ -1448,7 +1295,6 @@ export const ar: TranslationResources = {
         failedTitle: "فشل التحديث",
         availableTitle: "التحديث متاح",
         genericError: "حدث خطأ ما.",
-        whatsNew: "ما هو الجديد",
         installingAction: "جارٍ التثبيت...",
         installAndRestart: "التثبيت وإعادة التشغيل",
         installingDescription: "التثبيت وإعادة التشغيل...",
@@ -1512,12 +1358,6 @@ export const ar: TranslationResources = {
         failed: "فشل في إرسال الإخطار.",
       },
     },
-    integrations: {
-      cli: {
-        statusFailed: "غير قادر على التحقق من حالة تثبيت CLI.",
-        installFailed: "غير قادر على تثبيت PaseoCLI.",
-      },
-    },
   },
   rootError: {
     title: "واجه Paseo مشكلة.",
@@ -1536,21 +1376,8 @@ export const ar: TranslationResources = {
   },
   openProject: {
     tiles: {
-      addProject: {
-        title: "أضف مشروعًا",
-        description: "افتح مجلدًا على جهازك",
-      },
-      importSession: {
-        title: "جلسة الاستيراد",
-        description: "أحضر جلسات CLI الخارجية الأخيرة",
-      },
-      setupProviders: {
-        title: "موفري الإعداد",
-        description: "قم بتكوين Claude Code و Codex والمزيد",
-      },
       pairDevice: {
         title: "إقران الجهاز",
-        description: "قم بتوصيل هاتفك بهذا البرنامج الخفي",
       },
     },
   },
@@ -1565,24 +1392,6 @@ export const ar: TranslationResources = {
       open_failed: "تعذر فتح المشروع.",
     },
     openPath: "فتح المسار",
-  },
-  branchSwitcher: {
-    triggerTooltip: "تبديل فرع مساحة العمل",
-    currentBranch: "الفرع الحالي:{{branchName}}. اضغط لتبديل الفرع.",
-    placeholder: "تبديل الفرع...",
-    searchPlaceholder: "تصفية الفروع...",
-    empty: "لم يتم العثور على فروع.",
-    title: "فرع التبديل",
-    uncommittedTitle: "تغييرات غير ملتزم بها",
-    uncommittedMessage: "لديك تغييرات غير ملتزم بها. خبأهم قبل تبديل الفروع؟",
-    stashAndSwitch: "خبأ والتبديل",
-    failedToStash: "فشل في تخزين التغييرات",
-    failedToSwitch: "فشل في تبديل الفرع",
-    restoreStashTitle: "هل تريد استعادة التغييرات المخبأة؟",
-    restoreStashMessage: "قام هذا الفرع بتخزين التغييرات من جلسة سابقة. هل ترغب في استعادتها؟",
-    restore: "يعيد",
-    later: "لاحقاً",
-    stashRestored: "تمت استعادة التغييرات المخفية",
   },
   agentAutocomplete: {
     searchingWorkspace: "جارٍ البحث في مساحة العمل...",
@@ -1655,22 +1464,6 @@ export const ar: TranslationResources = {
     searchPlaceholder: "نماذج البحث...",
     openProviderSettings: "افتح إعدادات{{provider}}",
   },
-  providerCatalog: {
-    title: "إضافة مزود",
-    search: "مقدمي البحث",
-    noProviders: "لم يتم العثور على مقدمي الخدمات",
-    actions: {
-      add: "يضيف",
-      adding: "إضافة",
-      installed: "تم التثبيت",
-      cancel: "يلغي",
-      installInstructions: "تعليمات التثبيت",
-      installInstructionsFor: "تعليمات تثبيت{{provider}}",
-    },
-    errors: {
-      unableToInstall: "غير قادر على تثبيت الموفر",
-    },
-  },
   providerSelection: {
     defaultModel: "تقصير",
     selectModel: "حدد النموذج",
@@ -1708,10 +1501,6 @@ export const ar: TranslationResources = {
       direct: {
         title: "اتصال مباشر",
         description: "الشبكة المحلية أو VPN.",
-      },
-      remoteSsh: {
-        title: "SSH عن بُعد",
-        description: "الاتصال عبر عميل SSH لسطح المكتب.",
       },
       scanQr: {
         title: "مسح رمز QR",
@@ -1763,29 +1552,6 @@ export const ar: TranslationResources = {
         unableToConnect:
           "غير قادر على الاتصال. تحقق من المضيف /port ومن إمكانية الوصول إلى البرنامج الخفي.",
         details: "التفاصيل:{{detail}}",
-      },
-    },
-    remoteSsh: {
-      title: "SSH عن بُعد",
-      helper: "الاتصال بخادم Paseo يعمل على المضيف البعيد.",
-      fields: {
-        target: "مضيف SSH",
-        password: "كلمة مرور الدايمون",
-        optional: "خياري",
-      },
-      passwordVisibility: {
-        show: "إظهار كلمة المرور",
-        hide: "إخفاء كلمة المرور",
-      },
-      actions: {
-        cancel: "إلغاء",
-        connect: "اتصال",
-        connecting: "جارٍ الاتصال...",
-      },
-      errors: {
-        targetRequired: "مضيف SSH مطلوب",
-        invalidTarget: "أدخل مضيف ssh:// صالحًا",
-        failedToConnect: "تعذر الاتصال عبر SSH. {{detail}}",
       },
     },
     link: {
@@ -1868,13 +1634,6 @@ export const ar: TranslationResources = {
   diffViewer: {
     empty: "لا توجد تغييرات للعرض",
   },
-  serviceUrl: {
-    title: "افتح الخدمة URL",
-    message: "افتح{{url}}؟",
-    inPaseo: "في Paseo",
-    externalBrowser: "متصفح خارجي",
-    dontAskAgain: "لا تسأل مرة أخرى",
-  },
   downloads: {
     requestTokenFailed: "فشل طلب رمز التنزيل.",
     hostUnavailable: "مضيف التنزيل غير متاح.",
@@ -1903,10 +1662,6 @@ export const ar: TranslationResources = {
     archiveFinishedRetry: "إعادة المحاولة ({{failed}}/{{total}})",
   },
   panels: {
-    draft: {
-      newAgent: "وكيل جديد",
-      creatingAgent: "وكيل الخلق",
-    },
     file: {
       directoryMissing: "لم يتم العثور على دليل Workspace.",
       loading: "جارٍ تحميل الملف...",
@@ -1945,23 +1700,9 @@ export const ar: TranslationResources = {
       tooltip: "تصفح ملفات مساحة العمل",
       chooseFile: "اختر ملفًا",
     },
-    pullRequest: {
-      label: "طلب السحب",
-      subtitle: "تفاصيل طلب السحب",
-      emptyTitle: "لا يوجد طلب سحب بعد",
-      emptyDescription: "أنشئ طلب سحب لنسخة العمل هذه لعرض تفاصيله هنا.",
-    },
     diff: {
-      changesLabel: "التغييرات",
-      diffLabel: "الفرق",
-      changesSubtitle: "فروقات شجرة العمل",
-      commitSubtitle: "فروقات الالتزام",
       uncommittedSubtitle: "تغييرات غير ملتزم بها",
       baseSubtitle: "مقارنة مع {{baseRef}}",
-      directoryMissing: "لم يتم العثور على دليل Workspace.",
-      empty: "لا توجد تغييرات",
-      loadError: "فشل تحميل الفروقات",
-      capabilityMissing: "حدّث المضيف لعرض فروقات الالتزامات.",
     },
   },
   toolCallDetails: {
@@ -2041,33 +1782,18 @@ export const ar: TranslationResources = {
     backToWorkspace: "خلف",
     addHost: "أضف مضيفًا",
     enableBuiltInDaemon: "تفعيل البرنامج الخفي المدمج",
-    projects: "المشاريع",
-    projectList: {
-      hostLoadFailed: "تعذر تحميل المشاريع من المضيف{{hostName}}:{{message}}",
-      editProject: "تحرير{{projectName}}",
-    },
     groupInfo: "حول{{title}}",
     sections: {
       general: "عام",
       chat: "الدردشة",
       appearance: "مظهر",
-      sidebar: "الشريط الجانبي",
-      terminal: "الطرفية",
-      browser: "المتصفح",
-      editor: "المحرر",
       shortcuts: "الاختصارات",
-      integrations: "التكامل",
       notifications: "الإشعارات",
       permissions: "الأذونات",
       diagnostics: "التشخيص",
       about: "عن",
     },
     layout: en.settings.layout,
-    editor: {
-      title: "المحرر",
-      vimKeybindings: "اختصارات Vim",
-      vimHint: "تنطبق على ملفات المصدر في الويب وسطح المكتب.",
-    },
     notifications: {
       title: "الإشعارات",
       permission: "إذن الإشعارات",
@@ -2084,48 +1810,19 @@ export const ar: TranslationResources = {
       sendFailedTitle: "تعذر إرسال إشعار الاختبار",
     },
     hostSections: {
-      projects: "المشاريع",
       connections: "اتصالات",
       agents: "Agents",
-      metadata: "البيانات الوصفية",
-      workspaces: "Workspaces",
       providers: "مقدمي الخدمات",
       usage: "الاستخدام",
-      terminals: "Terminals",
       plugins: "Plugins",
       host: "نظرة عامة",
     },
     plugins: pluginSettings.ar,
-    metadataGeneration: {
-      title: "إنشاء البيانات الوصفية",
-      description:
-        "اختر النموذج الذي يستخدمه Paseo لعناوين مساحات العمل وأسماء الفروع ورسائل الالتزام ومسودات طلبات السحب",
-      selection: "اختيار النموذج",
-      automatic: "تلقائي",
-      preferred: "يدوي",
-      automaticHint: "يختار Paseo نموذجًا سريعًا متاحًا",
-      preferredHint: "اختر النموذج الذي يستخدمه Paseo",
-      model: "النموذج",
-      fallbackHint: "إذا لم يكن متاحًا، يستخدم Paseo نموذجًا آخر متاحًا",
-      docs: "الوثائق",
-      saveError: "تعذر تحديث إنشاء البيانات الوصفية",
-    },
     general: {
       title: "عام",
       sending: "الإرسال",
       network: en.settings.general.network,
       meteredNetwork: en.settings.general.meteredNetwork,
-      browserData: {
-        title: "بيانات المتصفح",
-        siteData: "ملفات تعريف الارتباط وبيانات المواقع",
-        description: "تتشارك علامات تبويب المتصفح تسجيلات الدخول وبيانات المواقع عبر Paseo.",
-        clear: "مسح بيانات المتصفح",
-        clearing: "جارٍ المسح...",
-        confirmTitle: "هل تريد مسح بيانات المتصفح؟",
-        confirmMessage: "سيتم تسجيل خروجك من المواقع وإعادة تحميل علامات تبويب المتصفح المفتوحة.",
-        success: "تم مسح بيانات المتصفح.",
-        error: "تعذر مسح بيانات المتصفح.",
-      },
       defaultSend: {
         label: "إرسال افتراضي",
         descriptions: {
@@ -2147,11 +1844,6 @@ export const ar: TranslationResources = {
           inApp: "في Paseo",
           external: "متصفح خارجي",
         },
-      },
-      terminalScrollback: {
-        label: "التمرير Terminal",
-        description: "يتم الاحتفاظ بالخطوط في المخزن المؤقت الطرفي المدمج",
-        accessibilityLabel: "خطوط التمرير Terminal",
       },
       autoExpandReasoning: {
         label: "عرض التفكير دائماً",
@@ -2213,7 +1905,6 @@ export const ar: TranslationResources = {
     about: {
       title: "عن",
       appVersion: "نسخة التطبيق",
-      whatsNewHint: "ملاحظات الإصدار لكل نسخة",
       thisDevice: "هذا الجهاز",
       connectedHosts: "المضيفين المتصلين",
       offline: "غير متصل",
@@ -2260,19 +1951,6 @@ export const ar: TranslationResources = {
       chatOutline: {
         title: "مخطط المحادثة",
         description: "عرض مخطط للتنقل بين المطالبات",
-      },
-      sidebar: {
-        header: {
-          title: "الرأس",
-          description: "اختر العناصر التي تظهر أعلى الشريط الجانبي وترتيبها",
-        },
-        footer: {
-          title: "التذييل",
-          description:
-            "اختر الصفوف التي تظهر أسفل الشريط الجانبي وترتيبها. يظهر «إضافة مشروع» وصف الأيقونات دائمًا",
-        },
-        moveUp: "نقل لأعلى",
-        moveDown: "نقل لأسفل",
       },
       fonts: {
         title: "الخطوط",
@@ -2340,7 +2018,6 @@ export const ar: TranslationResources = {
         newWorkspace: "مساحة عمل جديدة",
         newWorktree: "شجرة عمل جديدة",
         archiveWorkspace: "أرشفة مساحة العمل",
-        newTab: "علامة تبويب جديدة",
         closeCurrentTab: "إغلاق علامة التبويب الحالية",
         jumpToWorkspace: "انتقل إلى مساحة العمل",
         jumpToTab: "انتقل إلى علامة التبويب",
@@ -2359,7 +2036,6 @@ export const ar: TranslationResources = {
         moveTabUp: "حرك علامة التبويب لأعلى",
         moveTabDown: "حرك علامة التبويب لأسفل",
         closePane: "إغلاق الجزء",
-        newTerminal: "محطة جديدة",
         searchFiles: "البحث في الملفات",
         toggleCommandCenter: "تبديل مركز القيادة",
         showKeyboardShortcuts: "إظهار اختصارات لوحة المفاتيح",
@@ -2381,22 +2057,6 @@ export const ar: TranslationResources = {
       },
       helpNotes: {
         showKeyboardShortcuts: "متاح عندما لا يكون التركيز في حقل نص أو محطة طرفية.",
-      },
-    },
-    integrations: {
-      title: "التكامل",
-      docs: {
-        cli: "مستندات CLI",
-        openCli: "افتح وثائق CLI",
-      },
-      commandLine: {
-        title: "سطر الأوامر",
-        description: "وكلاء التحكم والبرنامج النصي من المحطة الطرفية الخاصة بك",
-      },
-      actions: {
-        install: "ثَبَّتَ",
-        installing: "جارٍ التثبيت...",
-        installed: "تم التثبيت",
       },
     },
     permissions: {
@@ -2537,33 +2197,6 @@ export const ar: TranslationResources = {
       agents: {
         unavailable: "Connect to this host to manage agents",
       },
-      workspaces: {
-        unavailable: "Connect to this host to manage workspaces",
-      },
-      terminalProfiles: {
-        unavailable: "Connect to this host to manage terminal profiles",
-        sectionTitle: "Terminal profiles",
-        editProfile: "Edit profile",
-        addProfileTitle: "Add terminal profile",
-        editProfileTitle: "Edit terminal profile",
-        namePlaceholder: "Claude Code",
-        commandPlaceholder: "claude",
-        argsPlaceholder: "--dangerously-skip-permissions",
-        nameLabel: "Name",
-        commandLabel: "Command",
-        argsLabel: "Arguments",
-        nameRequired: "Name is required",
-        commandRequired: "Command is required",
-        argsHint: "Space-separated arguments passed to the command",
-        saving: "Saving...",
-        remove: "Remove",
-        removeConfirmTitle: "Remove profile?",
-        removeConfirmMessage: 'Remove "{{name}}"?',
-        moveUp: "Move up",
-        moveDown: "Move down",
-        save: "Save",
-        emptyState: "No profiles yet. Add one to launch terminals with a specific command.",
-      },
       agentProfiles: {
         sectionTitle: "ملفات تعريف الوكيل",
         unavailable: "اتصل بهذا المضيف لإدارة ملفات تعريف الوكيل",
@@ -2672,12 +2305,10 @@ export const ar: TranslationResources = {
     },
     providers: {
       title: "مقدمي الخدمات",
-      addProvider: "إضافة مزود",
       providerDetails: "تفاصيل مزود{{name}}",
       enableProvider: "تمكين{{name}}",
       unavailable: "اتصل بهذا المضيف لرؤية مقدمي الخدمة",
       loading: "تحميل...",
-      addErrorTitle: "Unable to add provider",
       updateErrorTitle: "غير قادر على تحديث الموفر",
       actions: {
         menu: "{{name}} actions",
@@ -2732,94 +2363,6 @@ export const ar: TranslationResources = {
         none: "لا يوجد تشخيص متاح",
         failedToFetch: "فشل جلب التشخيص",
         unknownError: "خطأ غير معروف",
-      },
-    },
-    project: {
-      noEditableTarget: "هذا المشروع غير متاح للتحرير على هذا المضيف.",
-      backToProjects: "العودة إلى المشاريع",
-      edit: {
-        title: "تعديل المشروع",
-        name: "الاسم",
-        nameLabel: "اسم المشروع",
-        icon: "الأيقونة",
-        chooseImage: "اختيار صورة",
-        useAutomatic: "استخدام التلقائي",
-        imageUrl: "رابط صورة أو موقع",
-        save: "حفظ التغييرات",
-        savedToast: "تم تحديث المشروع",
-      },
-      readFailures: {
-        invalidTitle: "تعذر تحليل paseo.json",
-        invalidDescription: "قم بإصلاح الملف على القرص، ثم أعد تحميله.",
-        missingTitle: "هذا المضيف ليس لديه هذا المشروع",
-        missingSingleHost: "المضيف المحدد ليس لديه سجل لهذا المشروع.",
-        transportTitle: "تعذر تحميل paseo.json",
-        transportFallback: "المضيف لم يستجب.",
-        failedTitle: "تعذر تحميل paseo.json",
-        failedDescription: "أعد التحميل للمحاولة مرة أخرى.",
-      },
-      worktree: {
-        title: "خطافات دورة حياة شجرة العمل",
-        info: "الأوامر التي يتم تشغيلها عند إنشاء شجرة عمل أو هدمها لهذا المشروع",
-        docs: "المستندات",
-        docsTooltip: "راجع المستندات لمزيد من التفاصيل ومتغيرات البيئة المتاحة لهذه الأوامر",
-        setup: "يثبت",
-        setupAccessibility: "أوامر إعداد شجرة العمل",
-        uncommittedTitle: "ثبّت تغييرات paseo.json",
-        uncommittedDescription:
-          "تستخدم أشجار العمل الجديدة نص الإعداد البرمجي من الفرع الأساسي الذي تحدده.",
-        teardown: "هدم",
-        teardownAccessibility: "أوامر هدم شجرة العمل",
-      },
-      scripts: {
-        title: "البرامج النصية",
-        info: "خدمات طويلة الأمد وأوامر لمرة واحدة يمكنك إطلاقها من أي وكيل في هذا المشروع",
-        empty: "لا توجد نصوص حتى الآن.",
-        untitled: "نص بدون عنوان",
-        port: "منفذ{{port}}",
-        menuAccessibility: "فتح قائمة البرنامج النصي",
-        removeTitle: "هل تريد إزالة البرنامج النصي؟",
-        removeMessage: "إزالة{{name}}؟",
-        removeFallbackName: "هذا البرنامج النصي",
-        name: "اسم",
-        command: "يأمر",
-        nameAccessibility: "اسم البرنامج النصي",
-        commandAccessibility: "أمر البرنامج النصي",
-        nameRequired: "الاسم مطلوب",
-        commandRequired: "الأمر مطلوب",
-        newScript: "نص جديد",
-        editScript: "تحرير{{name}}",
-        runAsService: "تشغيل كخدمة",
-        serviceHint: "يشرف Paseo على العملية ويعين منفذًا عبر $PASEO_PORT",
-        actions: {
-          add: "إضافة البرنامج النصي",
-          edit: "يحرر",
-          remove: "يزيل",
-        },
-      },
-      metadata: {
-        title: "توليد البيانات الوصفية",
-        info: "تعليمات خاصة بالمشروع يتم إدخالها في الذكاء الاصطناعي الذي يستخدمه Paseo لإنشاء بيانات التعريف - استخدمها لفرض اصطلاحات فريقك مثل تسمية الفرع أو نمط الالتزام أو تنسيق PR",
-        branchName: "اسماء الفروع",
-        branchNamePlaceholder: "بادئة الفروع بـ fet/ أو Fix/, mb/ للفروع الشخصية",
-        commitMessage: "ارتكاب الرسائل",
-        commitMessagePlaceholder: "استخدم الالتزامات التقليدية مع النطاق",
-        pullRequest: "سحب الطلبات",
-        pullRequestPlaceholder: "ابدأ بملخص من فقرة واحدة، مع تضمين قسم لخطة الاختبار",
-      },
-      writeFailures: {
-        staleTitle: "تم تغيير التكوين على القرص",
-        staleDescription: "أعد التحميل لجلب أحدث ملف paseo.json قبل الحفظ.",
-        failedTitle: "تعذر حفظ paseo.json",
-        failedDescription: "حاول مرة أخرى، أو أعد تحميل الإصدار الأحدث من القرص.",
-      },
-      actions: {
-        reload: "إعادة تحميل",
-        tryAgain: "حاول ثانية",
-        save: "حفظ",
-        saved: "تم حفظ المشروع",
-        saving: "جارٍ الحفظ...",
-        cancel: "يلغي",
       },
     },
   },

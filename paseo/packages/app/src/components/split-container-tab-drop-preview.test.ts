@@ -6,10 +6,10 @@ function tab(tabId: string): WorkspaceTabDescriptor {
   return {
     key: tabId,
     tabId,
-    kind: "draft",
+    kind: "agent",
     target: {
-      kind: "draft",
-      draftId: tabId,
+      kind: "agent",
+      agentId: tabId,
     },
   };
 }

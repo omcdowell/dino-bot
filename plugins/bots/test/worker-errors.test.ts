@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   PANE_LINES,
+  ccSessionBusy,
   herdrErrorReader,
   paneStopError,
   readSessionError,
@@ -24,6 +25,12 @@ import { outstandingCount, stalledCount } from "../shared/workers-rpc";
 import type { StallError } from "../server/worker-errors";
 
 const T0 = Date.parse("2026-10-10T03:04:03.839Z");
+/** A reader's answer as an error (or null); "working" fails the test. */
+const asStop = async (answer: Promise<StallError | "working" | null>) => {
+  const value = await answer;
+  assert.notEqual(value, "working");
+  return value as StallError | null;
+};
 const iso = (ms: number) => new Date(ms).toISOString();
 
 /** pi session lines shaped like the chat-prefetch-build incident (2026-10-10). */
@@ -89,7 +96,7 @@ test("session file: read from its tail; a missing file is no error", async () =>
   const dir = mkdtempSync(join(tmpdir(), "werr-"));
   const path = join(dir, "s.jsonl");
   writeFileSync(path, incident.join("\n") + "\n");
-  assert.equal((await readSessionError(path))?.at, iso(T0 + 667_743));
+  assert.equal((await asStop(readSessionError(path)))?.at, iso(T0 + 667_743));
   assert.equal(await readSessionError(join(dir, "missing.jsonl")), null);
 });
 
@@ -102,6 +109,11 @@ test("pane fallback: only error-shaped lines near the bottom count", () => {
   assert.equal(paneStopError(screen(["Operation aborted"]))?.at, null);
   // ordinary output is not an error, even when it mentions codes or the word error in passing
   assert.equal(paneStopError(screen(["Done. Report sent.", "no errors found in 429 files"])), null);
+  // Claude Code still retrying (live pane, 2.1.323): not stopped; once the retries are used up, the error line is
+  const retrying = "✻ 429 Number of request tokens has exceeded your per-minute rate limit · Retrying in 11s · attempt 6/10";
+  assert.equal(paneStopError(screen([retrying])), null);
+  assert.equal(paneStopError(screen(["● API Error: Repeated 529 Overloaded errors. The API is at capacity", retrying])), null);
+  assert.match(paneStopError(screen([retrying, "● API Error: Request rejected (429) · Number of request tokens has exceeded your per-minute rate limit"]))!.message, /429/);
   // an error far above the bottom (scrolled away, the agent carried on) does not count
   const filler = Array.from({ length: PANE_LINES + 5 }, (_, i) => `line ${i}`);
   assert.equal(paneStopError(["Error: Request timed out", ...filler].join("\n")), null);
@@ -120,7 +132,7 @@ test("herdrErrorReader: the session file wins; the pane is read only without one
   chmodSync(bin, 0o755);
   const read = herdrErrorReader({ PASEO_BOTS_HERDR: bin });
   const agent = (session: HerdrAgent["agent_session"]): HerdrAgent => ({ name: "w", pane_id: "w85:p1", agent_status: "idle", agent_session: session });
-  assert.equal((await read(agent({ kind: "path", value: session })))?.source, "session");
+  assert.equal((await asStop(read(agent({ kind: "path", value: session }))))?.source, "session");
   // the session says it ended fine: the pane is not consulted
   assert.equal(await read(agent({ kind: "path", value: ok })), null);
   // no session (another agent kind): the pane
@@ -129,7 +141,119 @@ test("herdrErrorReader: the session file wins; the pane is read only without one
   assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["agent read w85:p1 --source recent --lines 50"]);
   // session-only reader never runs herdr
   assert.equal(await sessionErrorReader(agent(null)), null);
-  assert.equal((await sessionErrorReader(agent({ kind: "path", value: session })))?.message, "Request timed out.");
+  assert.equal((await asStop(sessionErrorReader(agent({ kind: "path", value: session }))))?.message, "Request timed out.");
+});
+
+// Claude Code transcripts: tails of real worker transcripts (copies, long strings shortened by the copy).
+//   worker-overloaded-529: probe worker (launch.sh --engine cc, Claude Code 2.1.323) against an API that answers 529
+//   worker-rate-limit-429: the same worker prompted again against 429 rate_limit_error, after Claude Code's 10 retries
+//   rate-limit-429: an older session (2.1.186) stopped by the proxy's 429 rate limit
+//   worker-finished: a CC worker (emmet-setup-flow-v0113) that reported and ended its turn normally
+const ccLines = (name: string) =>
+  readFileSync(join(import.meta.dirname, "fixtures", "cc-transcripts", `${name}.jsonl`), "utf8").split("\n").filter((l) => l.trim());
+const ccUser = (at: number, text: string, extra: object = {}) =>
+  JSON.stringify({ type: "user", isSidechain: false, timestamp: iso(at), message: { role: "user", content: [{ type: "text", text }] }, ...extra });
+const ccAssistant = (at: number, text: string, extra: object = {}) =>
+  JSON.stringify({ type: "assistant", isSidechain: false, timestamp: iso(at), message: { role: "assistant", model: "claude-opus-5-5", content: [{ type: "text", text }] }, ...extra });
+
+test("Claude Code transcript: a turn that died on an API error is a stop on that error (429, 529 overloaded)", () => {
+  const overloaded = sessionStopError(ccLines("worker-overloaded-529"))!;
+  assert.equal(overloaded.source, "session");
+  assert.match(overloaded.message, /^API Error: Repeated 529 Overloaded errors/);
+  assert.ok(overloaded.at && !Number.isNaN(Date.parse(overloaded.at)));
+  const limited = sessionStopError(ccLines("worker-rate-limit-429"))!;
+  assert.match(limited.message, /429/);
+  assert.match(limited.message, /rate limit/i);
+  // the status goes in front when the text does not carry it (the proxy's 429 text has no number)
+  const proxy = sessionStopError(ccLines("rate-limit-429"))!;
+  assert.match(proxy.message, /^429 API Error: Server is temporarily limiting requests/);
+  assert.equal(proxy.at, "2026-06-23T20:32:22.374Z");
+  // entries Claude Code writes after the error (turn_duration, last-prompt, cost-state, …) do not hide it
+  assert.equal(sessionStopError([...ccLines("worker-overloaded-529"), '{"type":"last-prompt"}', '{"type":"cost-state"}'])?.message, overloaded.message);
+  // Esc (interrupt), as pi's "aborted"
+  const interrupted = sessionStopError([ccAssistant(T0, "Working on it"), ccUser(T0 + 1000, "[Request interrupted by user]")])!;
+  assert.deepEqual(interrupted, { message: "Request interrupted by user", at: iso(T0 + 1000), source: "session" });
+  assert.equal(sessionStopError([ccUser(T0, "[Request interrupted by user for tool use]")])?.message, "Request interrupted by user");
+});
+
+test("Claude Code transcript: not an error stop after a normal end, a later reply, a new prompt or mid-turn", () => {
+  // a worker that reported and ended its turn
+  assert.equal(sessionStopError(ccLines("worker-finished")), null);
+  const died = ccLines("worker-overloaded-529");
+  // the bot resumed it: a new prompt after the error
+  assert.equal(sessionStopError([...died, ccUser(T0, "Carry on")]), null);
+  // it got going again: a real reply after the error
+  assert.equal(sessionStopError([...died, ccUser(T0, "Carry on"), ccAssistant(T0 + 1000, "Done.")]), null);
+  // mid-turn: a tool result is the last message
+  const toolResult = JSON.stringify({ type: "user", timestamp: iso(T0), message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t", content: "ok" }] } });
+  assert.equal(sessionStopError([...died, ccUser(T0, "Carry on"), toolResult]), null);
+  // a subagent's API error (sidechain) is not the worker's stop
+  assert.equal(sessionStopError([ccAssistant(T0, "Done."), ccAssistant(T0 + 1, "API Error: 529", { isSidechain: true, isApiErrorMessage: true })]), null);
+});
+
+test("herdr reports no session for Claude Code: the transcript recorded at launch is read, not the pane", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "werr-"));
+  const transcript = join(dir, "cc.jsonl");
+  writeFileSync(transcript, ccLines("worker-rate-limit-429").join("\n") + "\n");
+  const log = join(dir, "calls.log");
+  const bin = join(dir, "herdr");
+  writeFileSync(bin, `#!/bin/sh\necho "$@" >> ${log}\nprintf 'nothing to see\\n'\n`);
+  chmodSync(bin, 0o755);
+  const cc: HerdrAgent = { name: "w", pane_id: "w85:p1", agent_status: "idle", agent_session: null };
+  const read = herdrErrorReader({ PASEO_BOTS_HERDR: bin });
+  assert.equal((await asStop(read(cc, transcript)))?.source, "session");
+  assert.equal((await asStop(sessionErrorReader(cc, transcript)))?.source, "session");
+  assert.throws(() => readFileSync(log), /ENOENT/, "the pane is not read when a transcript is known");
+  // herdr's own path (pi) wins over a recorded one; relative paths are ignored
+  const pi = join(dir, "pi.jsonl");
+  writeFileSync(pi, incident.join("\n") + "\n");
+  assert.equal((await asStop(sessionErrorReader({ ...cc, agent_session: { kind: "path", value: pi } }, transcript)))?.message, "Request timed out.");
+  assert.equal(await sessionErrorReader(cc, "cc.jsonl"), null);
+  // a recorded transcript that does not exist: the pane after all
+  assert.deepEqual(await read(cc, join(dir, "missing.jsonl")), null);
+  assert.equal(readFileSync(log, "utf8").trim(), "agent read w85:p1 --source recent --lines 50");
+});
+
+test("Claude Code retrying (herdr says idle, its session record says busy) is working, not finished or stalled", async () => {
+  // Measured live: during Claude Code's own 429 retries herdr shows the claude agent idle, the pane's bottom line is
+  // "429 … rate limit · Retrying in 11s · attempt 6/10" (the pane check called that stalled) and the transcript
+  // ends on the user prompt. Claude Code's <config>/sessions/<pid>.json says busy.
+  const config = mkdtempSync(join(tmpdir(), "cc-config-"));
+  const id = "ca2a49c7-309a-4fdf-8db3-12c2b01e3194";
+  const { mkdirSync } = await import("node:fs");
+  mkdirSync(join(config, "projects", "-tmp-ccfx-probe-cwd"), { recursive: true });
+  mkdirSync(join(config, "sessions"));
+  const transcript = join(config, "projects", "-tmp-ccfx-probe-cwd", `${id}.jsonl`);
+  const lines = ccLines("worker-rate-limit-429");
+  const retrying = lines.slice(0, lines.findIndex((l) => JSON.parse(l).isApiErrorMessage === true));
+  writeFileSync(transcript, retrying.join("\n") + "\n");
+  const record = (status: string, pid = process.pid) =>
+    writeFileSync(join(config, "sessions", `${pid}.json`), JSON.stringify({ pid, sessionId: id, cwd: "/tmp/ccfx/probe/cwd", kind: "interactive", name: "ccp2stall-probe", status }));
+  const cc: HerdrAgent = { name: "ccp2stall-probe", pane_id: "wHJ:p1", agent_status: "idle", agent_session: null };
+  // no session record (Claude Code gone, or an older one): no error known
+  assert.equal(await sessionErrorReader(cc, transcript), null);
+  record("busy");
+  assert.equal(await sessionErrorReader(cc, transcript), "working");
+  const ctx = { now: T0 + 20 * 60_000, doneAt: null, reportAt: null, agents: [cc] };
+  const w = launch("ccp2stall-probe", T0, { pane: "wHJ:p1", session: transcript });
+  const view = await resolveWorker(w, { ...ctx, readError: sessionErrorReader });
+  assert.equal(view.state, "running");
+  assert.equal(view.herdr, "idle");
+  // a mid-job report, then retrying: still running
+  assert.equal((await resolveWorker(w, { ...ctx, reportAt: T0 + 1000, readError: sessionErrorReader })).state, "running");
+  // retries used up: the error lands in the transcript and the record goes idle; now stalled
+  writeFileSync(transcript, lines.join("\n") + "\n");
+  record("idle");
+  const stalled = await resolveWorker(w, { ...ctx, readError: sessionErrorReader });
+  assert.equal(stalled.state, "stalled");
+  assert.match(stalled.error!.message, /429/);
+  // a busy record whose process is gone does not count
+  writeFileSync(transcript, retrying.join("\n") + "\n");
+  rmSync(join(config, "sessions", `${process.pid}.json`));
+  record("busy", 2 ** 22 + 12345);
+  assert.equal(await sessionErrorReader(cc, transcript), null);
+  // pi sessions are never looked up there
+  assert.equal(await ccSessionBusy(join(config, "sessions", "x.jsonl")), false);
 });
 
 const launch = (worker: string, at: number, extra: Partial<LaunchRecord> = {}): LaunchRecord => ({
@@ -221,6 +345,18 @@ test("resolveWorker: a mid-job report, then prompted again and died on an API er
   assert.equal(reads, 0);
   // a report after the error clears it
   assert.equal((await resolveWorker(w, { ...ctx, reportAt: T0 + 700_000 })).reason, "reported");
+});
+
+test("resolveWorker: the launch's recorded session is handed to the reader (Claude Code workers)", async () => {
+  const seen: Array<string | null | undefined> = [];
+  const readError = async (_agent: HerdrAgent, session?: string | null) => {
+    seen.push(session);
+    return session ? ERR : null;
+  };
+  const ctx = { now: T0 + 20 * 60_000, doneAt: null, reportAt: null, agents: [herdr("cc-w", "w85:p1", "idle")], readError };
+  assert.equal((await resolveWorker(launch("cc-w", T0, { session: "/x/cc.jsonl" }), ctx)).state, "stalled");
+  assert.equal((await resolveWorker(launch("cc-w", T0), ctx)).reason, "idle");
+  assert.deepEqual(seen, ["/x/cc.jsonl", null]);
 });
 
 test("WorkersService: a stalled worker is listed as stalled for its bot; it is not outstanding", async () => {

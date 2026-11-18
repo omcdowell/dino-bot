@@ -20,7 +20,7 @@ describe("workspace-pane-state", () => {
     const tabs: WorkspaceTab[] = [
       createTab("agent_agent-a", { kind: "agent", agentId: "agent-a" }),
       createTab("file_/repo/README.md", { kind: "file", path: "/repo/README.md" }),
-      createTab("terminal_term-1", { kind: "terminal", terminalId: "term-1" }),
+      createTab("terminal_term-1", { kind: "network_status" }),
     ];
     const layout: WorkspaceLayout = {
       root: {
@@ -69,8 +69,8 @@ describe("workspace-pane-state", () => {
       focusedTabId: " ",
     };
     const tabs: WorkspaceTab[] = [
-      createTab("draft_2", { kind: "draft", draftId: "draft_2" }),
-      createTab("draft_1", { kind: "draft", draftId: "draft_1" }),
+      createTab("draft_2", { kind: "agent", agentId: "draft_2" }),
+      createTab("draft_1", { kind: "agent", agentId: "draft_1" }),
     ];
 
     const state = deriveWorkspacePaneState({ pane, tabs });

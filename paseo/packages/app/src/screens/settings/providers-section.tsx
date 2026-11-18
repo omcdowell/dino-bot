@@ -17,11 +17,6 @@ import { useHostFeature } from "@/runtime/host-features";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useDaemonConfig } from "@/hooks/use-daemon-config";
 import { buildProviderDefinitions } from "@/utils/provider-definitions";
-import {
-  buildAcpProviderConfigPatch,
-  type AcpProviderCatalogItem,
-} from "@/hooks/use-acp-provider-catalog";
-import { ProviderCatalogList } from "@/components/provider-catalog-list";
 import { EnginesSection } from "@/screens/settings/engines-section";
 import { useProviderIcon } from "@/components/provider-icons";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -328,15 +323,13 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
   const { t } = useTranslation();
   const isConnected = useHostRuntimeIsConnected(serverId);
   const supportsProviderRemoval = useHostFeature(serverId, "providerRemoval");
-  const { entries, isLoading, refresh } = useProvidersSnapshot(serverId);
+  const { entries, isLoading } = useProvidersSnapshot(serverId);
   const { patchConfig } = useDaemonConfig(serverId);
   const openProviderSettings = useProviderSettingsStore((state) => state.open);
   const [pendingProviderId, setPendingProviderId] = useState<string | null>(null);
   const [removingProviderId, setRemovingProviderId] = useState<string | null>(null);
   const removingProviderIdRef = useRef<string | null>(null);
-  const [installingProviderId, setInstallingProviderId] = useState<string | null>(null);
-  // DinoBot host (bots plugin answers): Bot sign-ins only; Paseo's own provider list and catalogue
-  // stay hidden (providers redesign, stage 0: the daemon runs OptChat only). null = not known yet,
+  // DinoBot host (bots plugin answers): Bot sign-ins only; Paseo's own provider list stays hidden (providers redesign, stage 0: the daemon runs OptChat only). null = not known yet,
   // also hidden so a DinoBot host never flashes them. Other hosts: upstream behaviour.
   const [isDinoBotHost, setIsDinoBotHost] = useState<boolean | null>(null);
   const showPaseoProviders = isDinoBotHost === false;
@@ -400,25 +393,6 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
     [patchConfig, t],
   );
 
-  const handleInstall = useCallback(
-    async (entry: AcpProviderCatalogItem) => {
-      if (installingProviderId) return;
-      setInstallingProviderId(entry.id);
-      try {
-        await patchConfig(buildAcpProviderConfigPatch(entry));
-        await refresh([entry.id]);
-      } catch (error) {
-        Alert.alert(
-          t("settings.providers.addErrorTitle"),
-          error instanceof Error ? error.message : String(error),
-        );
-      } finally {
-        setInstallingProviderId((current) => (current === entry.id ? null : current));
-      }
-    },
-    [installingProviderId, patchConfig, refresh, t],
-  );
-
   return (
     <>
       {/* DinoBot hosts only: the pi and Claude Code cards (older daemons: Bot sign-ins; hidden elsewhere). */}
@@ -467,20 +441,6 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
           ) : null}
         </SettingsSection>
       ) : null}
-
-      {hasServer && isConnected && showPaseoProviders ? (
-        <SettingsSection
-          title={t("settings.providers.addProvider")}
-          testID="host-page-add-provider-card"
-          style={styles.addProviderSection}
-        >
-          <ProviderCatalogList
-            serverId={serverId}
-            installingProviderId={installingProviderId}
-            onInstall={handleInstall}
-          />
-        </SettingsSection>
-      ) : null}
     </>
   );
 }
@@ -488,9 +448,6 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
 const styles = StyleSheet.create((theme) => ({
   sectionSpacing: {
     marginBottom: theme.spacing[4],
-  },
-  addProviderSection: {
-    marginTop: theme.spacing[4],
   },
   emptyCard: {
     padding: theme.spacing[4],

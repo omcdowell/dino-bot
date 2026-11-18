@@ -65,10 +65,11 @@ describe("plugin cache", () => {
     });
   });
 
-  it("rewrites a bundle only when it changes and drops plugins the host no longer has", async () => {
+  it("rewrites a bundle only when it changes; a missing plugin is kept, then dropped after the grace period", async () => {
     const { items, storage } = memoryStorage();
     const cache = createPluginCache(storage);
     await cache.saveCatalog("host-a", [bots, apns]);
+    items.set(`${pluginCacheKey("host-a")}:queries:apns`, '{"queries":[],"mutations":[]}');
     const writes: string[] = [];
     const counting: PluginCacheStorage = {
       ...storage,
@@ -77,12 +78,23 @@ describe("plugin cache", () => {
         await storage.setItem(key, value);
       },
     };
-    const sameCache = createPluginCache(counting);
+    let clock = 1_000;
+    const sameCache = createPluginCache(counting, { now: () => clock, absentGraceMs: 500 });
     await sameCache.load("host-a");
     await sameCache.saveCatalog("host-a", [bots]);
     expect(writes).toEqual([pluginCacheKey("host-a")]);
-    expect([...items.keys()].some((key) => key.endsWith(":bundle:apns"))).toBe(false);
+    // apns is missing, not removed: its bundle and queries stay, and its hash is still sent.
+    expect(items.has(`${pluginCacheKey("host-a")}:bundle:apns`)).toBe(true);
+    expect(items.has(`${pluginCacheKey("host-a")}:queries:apns`)).toBe(true);
+    expect(sameCache.knownBundles("host-a")).toEqual([
+      { id: "bots", hash: "h1" },
+      { id: "apns", hash: "a1" },
+    ]);
+    expect(JSON.parse(items.get(pluginCacheKey("host-a")) ?? "{}").absent).toEqual([
+      { id: "apns", hash: "a1", since: 1_000 },
+    ]);
 
+    clock = 1_400;
     await sameCache.saveCatalog("host-a", [
       { ...bots, clientBundle: "bots-bundle-2", clientBundleHash: "h2" },
     ]);
@@ -90,7 +102,47 @@ describe("plugin cache", () => {
       `${pluginCacheKey("host-a")}:bundle:bots`,
       pluginCacheKey("host-a"),
     ]);
+    expect(items.has(`${pluginCacheKey("host-a")}:bundle:apns`)).toBe(true);
+
+    clock = 1_500;
+    await sameCache.saveCatalog("host-a", [
+      { ...bots, clientBundle: "bots-bundle-2", clientBundleHash: "h2" },
+    ]);
+    expect([...items.keys()].some((key) => key.includes(":apns"))).toBe(false);
     expect(sameCache.knownBundles("host-a")).toEqual([{ id: "bots", hash: "h2" }]);
+    expect(JSON.parse(items.get(pluginCacheKey("host-a")) ?? "{}").absent).toBeUndefined();
+  });
+
+  it("an absent plugin's bundle and queries survive a restart, and its return clears its absence", async () => {
+    const { items, storage } = memoryStorage();
+    await createPluginCache(storage).saveCatalog("host-a", [bots, apns]);
+    const stored = { queries: [{ queryKey: ["x"], state: { data: 1 } }], mutations: [] };
+    items.set(`${pluginCacheKey("host-a")}:queries:apns`, JSON.stringify(stored));
+    let clock = 1_000;
+    const missing = createPluginCache(storage, { now: () => clock });
+    await missing.load("host-a");
+    await missing.saveCatalog("host-a", [bots]);
+
+    const restarted = createPluginCache(storage, { now: () => clock });
+    const cached = await restarted.load("host-a");
+    expect(cached?.plugins.map((plugin) => plugin.entry.id)).toEqual(["bots"]);
+    expect(restarted.knownBundles("host-a")).toEqual([
+      { id: "bots", hash: "h1" },
+      { id: "apns", hash: "a1" },
+    ]);
+    expect(restarted.parkedQueries("host-a").get("apns")).toEqual(stored);
+
+    clock = 2_000;
+    const back = restarted.resolve("host-a", [
+      bots,
+      { id: "apns", clientBundle: "", clientBundleHash: "a1", clientBundleUnchanged: true },
+    ]);
+    expect(back.missing).toEqual([]);
+    await restarted.saveCatalog("host-a", back.catalog);
+    expect(restarted.parkedQueries("host-a").size).toBe(0);
+    const index = JSON.parse(items.get(pluginCacheKey("host-a")) ?? "{}");
+    expect(index.absent).toBeUndefined();
+    expect(index.plugins.map((plugin: { id: string }) => plugin.id)).toEqual(["bots", "apns"]);
   });
 
   it("caches bundles from daemons without hashes for start-up, but never claims to know them", async () => {

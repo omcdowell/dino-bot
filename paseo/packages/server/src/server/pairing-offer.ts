@@ -2,6 +2,7 @@ import type { Logger } from "pino";
 
 import {
   buildDirectOfferEndpoints,
+  dropShadowedMagicDnsEndpoints,
   isTailnetEndpoint,
   createConnectionOfferV2,
   createDirectConnectionOffer,
@@ -51,7 +52,10 @@ export interface DirectPairingArgs {
    * every endpoint and sends this password only inside it, after the daemon has proved that key.
    */
   password?: string;
-  /** Extra endpoints offered first, e.g. the MagicDNS name (PASEO_DIRECT_ENDPOINTS, comma list). */
+  /**
+   * Extra endpoints offered first (PASEO_DIRECT_ENDPOINTS, comma list; the installer writes the
+   * tailnet IP). A MagicDNS name here is dropped when a tailnet IP is offered too (one route).
+   */
   extraEndpoints?: string[];
 }
 
@@ -111,9 +115,11 @@ export async function generateLocalPairingOffer(args: {
       port: tcp.port,
       extra: args.direct.extraEndpoints,
     });
-    const endpoints = DIRECT_OFFER_TAILNET_ONLY
-      ? allEndpoints.filter(isTailnetEndpoint)
-      : allEndpoints;
+    // One route per host: an old env (PASEO_DIRECT_ENDPOINTS with the MagicDNS name) still
+    // offers the tailnet IP only when the daemon knows it.
+    const endpoints = dropShadowedMagicDnsEndpoints(
+      DIRECT_OFFER_TAILNET_ONLY ? allEndpoints.filter(isTailnetEndpoint) : allEndpoints,
+    );
     if (endpoints.length === 0) {
       return { relayEnabled: false, url: null, qr: null, kind: "direct", reason: "no_tailnet" };
     }

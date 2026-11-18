@@ -31,24 +31,10 @@ import {
 } from "../support/helpers/workspace-tabs";
 import { getServerId } from "../support/helpers/server-id";
 import { buildHostWorkspaceRoute } from "@/utils/host-routes";
-import { WORKSPACE_DECK_MAX_MOUNTED_WORKSPACES } from "@/screens/workspace/workspace-deck-retention";
 import { delayBrowserAgentCreatedStatus } from "../support/helpers/new-workspace";
 import { installDaemonWebSocketGate } from "../support/helpers/daemon-websocket-gate";
 import { gotoAppShell, openSettings, selectModel } from "../support/helpers/app";
-import { observeTimelineSubscriptions } from "../support/helpers/timeline-delivery";
-import { rememberTimelineRequestCounts } from "../support/helpers/timeline-resume";
-import {
-  recordPanelToasts,
-  switchWorkspaceViaSidebar,
-  waitForWorkspaceInSidebar,
-  workspaceDeckEntryLocator,
-} from "../support/helpers/workspace-ui";
-import {
-  openSessions,
-  clickSessionRow,
-  expectWorkspaceTabVisible,
-} from "../support/helpers/archive-tab";
-import { expectInFlightForkAvailable } from "../support/helpers/assistant-fork";
+import { recordPanelToasts } from "../support/helpers/workspace-ui";
 import {
   scrollTimelineToNewestLoadedEdge,
   scrollTimelineUntilOlderHistoryIsReachable,
@@ -365,7 +351,6 @@ async function replaySteeredSleepTurnInBrowser(
 
     await expect(page.getByText("hello", { exact: true })).toHaveCount(1);
     await expect(page.getByRole("button", { name: /^Worked for/ })).toHaveCount(0);
-    await expectInFlightForkAvailable(page);
 
     await gate.waitForHeldServerMessage();
     gate.releaseHeldServerMessage();
@@ -436,108 +421,6 @@ async function expectInterruptedTurnOrderAfterReconnect(
   } finally {
     gate.restore();
     await agent.cleanup();
-  }
-}
-
-async function visitEvictionWorkspaces(
-  page: Page,
-  agents: readonly { agentId: string }[],
-): Promise<void> {
-  for (const [index, agent] of agents.entries()) {
-    await openSessions(page);
-    await clickSessionRow(page, `Workspace eviction ${index + 1}.`);
-    await expectWorkspaceTabVisible(page, agent.agentId);
-    await expectComposerVisible(page);
-  }
-}
-
-async function expectHiddenStreamingSubmissionOrderAfterWorkspaceEviction(
-  page: Page,
-  testInfo: { workerIndex: number },
-): Promise<void> {
-  const subscriptions = observeTimelineSubscriptions(page);
-  const gate = await installDaemonWebSocketGate(page);
-  const target = await seedMockAgentWorkspace({
-    repoPrefix: `submission-hidden-stream-${testInfo.workerIndex}-`,
-    title: "Hidden streaming submission",
-    model: "ten-second-stream",
-  });
-  const evictionAgents = await Promise.all(
-    Array.from({ length: WORKSPACE_DECK_MAX_MOUNTED_WORKSPACES }, (_unused, index) =>
-      seedMockAgentWorkspace({
-        repoPrefix: `submission-workspace-eviction-${testInfo.workerIndex}-${index}-`,
-        title: `Workspace eviction ${index + 1}.`,
-      }),
-    ),
-  );
-  const prompt = "Keep this hidden image prompt before its streaming output.";
-  const targetDeckEntry = workspaceDeckEntryLocator(page, getServerId(), target.workspaceId);
-  const openAgentIds = [target.agentId, ...evictionAgents.map((agent) => agent.agentId)];
-
-  try {
-    await openAgentRoute(page, target);
-    await expectComposerVisible(page);
-    // Open every chat before holding output. Adding chats replaces the timeline
-    // subscription and retires the IDs stamped on already-buffered frames.
-    await visitEvictionWorkspaces(page, evictionAgents);
-    await subscriptions.waitForSubscribedAgents(openAgentIds);
-    await switchWorkspaceViaSidebar({
-      page,
-      serverId: getServerId(),
-      workspaceId: target.workspaceId,
-    });
-    await expectWorkspaceTabVisible(page, target.agentId);
-    await expectComposerVisible(page);
-    const subscriptionRequests = gate.getClientRequestCount(
-      "agent.timeline.set_subscription.request",
-    );
-
-    const userMessageCount = gate.getAgentStreamItemCount("user_message");
-    gate.setAgentStreamItemSuppressed("user_message", true);
-    gate.holdNextAgentStreamEvent("turn_started");
-    const promptRow = await submitMessageWithImage(page, prompt);
-    await gate.waitForAgentStreamItem("user_message", userMessageCount + 1);
-    await gate.waitForHeldAgentStreamEvent("turn_started");
-    // Finish production before navigation so passing cannot depend on late
-    // chunks arriving after the final workspace switch.
-    await target.client.waitForFinish(target.agentId, 30_000);
-
-    // Navigate inside the app: a document reload discards the retained deck and
-    // adds startup history fetches, so it cannot prove eviction/resume behavior.
-    await visitEvictionWorkspaces(page, evictionAgents);
-    await expect(targetDeckEntry).toHaveCount(0);
-    await subscriptions.waitForSubscribedAgents(openAgentIds);
-    expect(gate.getClientRequestCount("agent.timeline.set_subscription.request")).toBe(
-      subscriptionRequests,
-    );
-    gate.releaseHeldAgentStreamEvent("turn_started");
-    const requestsBeforeReturn = rememberTimelineRequestCounts(gate, target.agentId);
-    await waitForWorkspaceInSidebar(page, {
-      serverId: getServerId(),
-      workspaceId: target.workspaceId,
-    });
-    await switchWorkspaceViaSidebar({
-      page,
-      serverId: getServerId(),
-      workspaceId: target.workspaceId,
-    });
-    await expectComposerVisible(page);
-    await subscriptions.waitForSubscribedAgents(openAgentIds);
-
-    const responseStart = page.getByText("Cycle 1", { exact: true });
-    const response = page.getByText("(end of synthetic stream)", { exact: true }).last();
-    await expect(promptRow).toBeVisible();
-    await expect(responseStart).toBeVisible();
-    await expect(response).toBeVisible();
-    await expectRenderedBefore(promptRow, responseStart);
-    await expectRenderedBefore(promptRow, response);
-    // Open chats stay subscribed when their workspace view is evicted. Returning
-    // uses that live timeline without another resume check or startup tail fetch.
-    expect(rememberTimelineRequestCounts(gate, target.agentId)).toEqual(requestsBeforeReturn);
-  } finally {
-    gate.setAgentStreamItemSuppressed("user_message", false);
-    gate.restore();
-    await Promise.all([...evictionAgents.map((agent) => agent.cleanup()), target.cleanup()]);
   }
 }
 
@@ -1350,13 +1233,6 @@ test.describe("Agent message submission", () => {
   }, testInfo) => {
     test.setTimeout(90_000);
     await expectInterruptedTurnOrderAfterReconnect(page, testInfo);
-  });
-
-  test("keeps a streaming hidden submission before its output after workspace eviction", async ({
-    page,
-  }, testInfo) => {
-    test.setTimeout(240_000);
-    await expectHiddenStreamingSubmissionOrderAfterWorkspaceEviction(page, testInfo);
   });
 
   test("clears an attachment-only submission when canonical history arrives after a missed running transition", async ({

@@ -15,20 +15,6 @@ type PanelManifestByKind = {
 };
 
 const manifests = {
-  new_tab: {
-    kind: "new_tab",
-    supportedHosts: ["main", "explorer"],
-    showCloseButton: true,
-    singleton: false,
-    resourceKey: () => "new_tab",
-  },
-  draft: {
-    kind: "draft",
-    supportedHosts: ["main", "explorer"],
-    showCloseButton: true,
-    singleton: false,
-    resourceKey: (target) => target.draftId,
-  },
   agent: {
     kind: "agent",
     supportedHosts: ["main", "explorer"],
@@ -43,40 +29,12 @@ const manifests = {
     singleton: false,
     resourceKey: (target) => `${target.parentAgentId}:${target.subagentId}`,
   },
-  terminal: {
-    kind: "terminal",
-    supportedHosts: ["main", "explorer"],
-    showCloseButton: true,
-    singleton: false,
-    resourceKey: (target) => target.terminalId,
-  },
-  browser: {
-    kind: "browser",
-    supportedHosts: ["main"],
-    showCloseButton: true,
-    singleton: false,
-    resourceKey: (target) => target.browserId,
-  },
-  changes_tree: {
-    kind: "changes_tree",
-    supportedHosts: ["explorer"],
-    showCloseButton: false,
-    singleton: true,
-    resourceKey: () => "changes_tree",
-  },
   files: {
     kind: "files",
     supportedHosts: ["explorer"],
     showCloseButton: false,
     singleton: true,
     resourceKey: () => "files",
-  },
-  pull_request: {
-    kind: "pull_request",
-    supportedHosts: ["main", "explorer"],
-    showCloseButton: true,
-    singleton: false,
-    resourceKey: () => "pull_request",
   },
   network_status: {
     kind: "network_status",
@@ -92,13 +50,6 @@ const manifests = {
     singleton: false,
     resourceKey: (target) => target.path,
   },
-  working_diff: {
-    kind: "working_diff",
-    supportedHosts: ["main", "explorer"],
-    showCloseButton: true,
-    singleton: false,
-    resourceKey: () => "working_diff",
-  },
   plugin: {
     kind: "plugin",
     // Plugin targets are narrowed by the target-aware plugin panel capability resolver.
@@ -109,20 +60,6 @@ const manifests = {
       target.context === "agent"
         ? `${target.pluginId}:${target.panelId}:agent:${target.agentId}`
         : `${target.pluginId}:${target.panelId}:workspace`,
-  },
-  setup: {
-    kind: "setup",
-    supportedHosts: ["main"],
-    showCloseButton: true,
-    singleton: false,
-    resourceKey: (target) => target.workspaceId,
-  },
-  commit_diff: {
-    kind: "commit_diff",
-    supportedHosts: ["main", "explorer"],
-    showCloseButton: true,
-    singleton: false,
-    resourceKey: (target) => target.sha,
   },
 } satisfies PanelManifestByKind;
 

@@ -83,7 +83,7 @@ Each agent is stored as a separate JSON file, grouped by project directory.
 | Field                | Type                                     | Description                                                                                                                                                                                                                                                                                                                                                                         |
 | -------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `id`                 | `string`                                 | UUID, primary key                                                                                                                                                                                                                                                                                                                                                                   |
-| `provider`           | `string`                                 | Agent provider (`"claude"`, `"codex"`, `"opencode"`, etc.)                                                                                                                                                                                                                                                                                                                          |
+| `provider`           | `string`                                 | Agent provider (`"pi"`, a custom profile or a plugin provider)                                                                                                                                                                                                                                                                                                                      |
 | `cwd`                | `string`                                 | Working directory the agent operates in                                                                                                                                                                                                                                                                                                                                             |
 | `workspaceId`        | `string?`                                | Owning workspace id — the single source of ownership. Every agent is stamped with one at create time; legacy cwd-only records are backfilled once by `migrations/backfill-workspace-id.migration.ts` (the only place a cwd→id mapping exists). Runtime code never infers ownership or status from cwd: status is computed per `workspaceId`, and same-cwd siblings are independent. |
 | `createdAt`          | `string` (ISO 8601)                      | Creation timestamp                                                                                                                                                                                                                                                                                                                                                                  |
@@ -282,9 +282,9 @@ older daemon.
 
 ### Agent provider Paseo tools
 
-`agents.providers` is keyed by the exact provider ID used to launch the agent. The built-in IDs are
-`claude`, `codex`, `copilot`, `opencode`, `pi`, and `omp`. Custom provider IDs are their literal
-configuration keys, such as `my-claude` or `zai`, not the provider named by `extends`.
+`agents.providers` is keyed by the exact provider ID used to launch the agent. The built-in ID is
+`pi`. Custom provider IDs are their literal configuration keys, such as `my-pi`, not the provider
+named by `extends`.
 
 Each entry may include a Paseo-tool policy:
 
@@ -292,9 +292,9 @@ Each entry may include a Paseo-tool policy:
 {
   "agents": {
     "providers": {
-      "my-claude": {
-        "extends": "claude",
-        "label": "My Claude",
+      "my-pi": {
+        "extends": "pi",
+        "label": "My Pi",
         "paseoTools": {
           "enabled": true,
           "disabledTools": ["browser_evaluate"]

@@ -29,20 +29,11 @@ describe("focused chat target", () => {
     ).toEqual({ tabId: "focused-tab", draftKey: "agent:server-1:agent-1" });
   });
 
-  it("targets the focused unsent draft", () => {
-    expect(
-      resolveFocusedChatTarget({
-        serverId: "server-1",
-        layout: layoutWithTarget({ kind: "draft", draftId: "draft-1" }),
-      }),
-    ).toEqual({ tabId: "focused-tab", draftKey: "draft:server-1:draft-1" });
-  });
-
   it("does not guess when the focused tab is not a chat", () => {
     expect(
       resolveFocusedChatTarget({
         serverId: "server-1",
-        layout: layoutWithTarget({ kind: "terminal", terminalId: "terminal-1" }),
+        layout: layoutWithTarget({ kind: "files" }),
       }),
     ).toBeNull();
   });

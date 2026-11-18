@@ -7,8 +7,8 @@
 //                              <dir>/cost.json and prints "$<spent> · <model>", or "$<spent> / budget $<n> · <model>"
 //                              when <dir>/budget holds a figure.
 //
-// Advisory, as for pi workers: nothing here blocks a tool call. The bot reads the spend from the pane and stops the
-// worker at its budget (SKILL.md, section 5).
+// Advisory, as for pi workers: nothing here blocks a tool call. The bot reads the spend from the pane and
+// judges the work at its budget (SKILL.md, section 5).
 // Claude Code's figure restarts at 0 when the process restarts (a resumed worker, a relaunched bot): cost.json keeps
 // each process's figure as a run (its session and start, now minus total_duration_ms), so the total only grows, and
 // a status line that runs late with an older, lower figure changes nothing (each run keeps its highest).

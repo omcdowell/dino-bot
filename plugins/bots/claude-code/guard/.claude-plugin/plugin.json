@@ -1,0 +1,1 @@
+{ "name": "dinobot-restart-guard", "version": "1.0.0", "description": "A DinoBot bot may not restart or reload DinoBot from its own session: bot-restart in a worker is the route" }

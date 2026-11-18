@@ -67,9 +67,6 @@ function canReplacePreview(input: {
   currentTarget: WorkspaceTabTarget;
   nextTarget: WorkspaceTabTarget;
 }): boolean {
-  if (input.nextTarget.kind === "working_diff") {
-    return input.currentTarget.kind === "working_diff";
-  }
   return (
     input.nextTarget.kind === "file" &&
     input.currentTarget.kind === "file" &&

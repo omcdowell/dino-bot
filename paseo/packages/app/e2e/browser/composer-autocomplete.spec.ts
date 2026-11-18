@@ -1,16 +1,9 @@
 import { expect, test, type Page } from "../support/fixtures";
 import { composerLocator, expectComposerVisible } from "../support/helpers/composer";
-import {
-  openAgentRoute,
-  seedMockAgentWorkspace,
-  type MockAgentWorkspace,
-} from "../support/helpers/mock-agent";
-import { expectWorkspaceTabVisible, openSessions } from "../support/helpers/archive-tab";
+import { openAgentRoute, seedMockAgentWorkspace } from "../support/helpers/mock-agent";
+import { expectWorkspaceTabVisible } from "../support/helpers/archive-tab";
 import { daemonWsRoutePattern } from "../support/helpers/daemon-port";
-import { getServerId } from "../support/helpers/server-id";
-import { switchWorkspaceViaSidebar } from "../support/helpers/workspace-ui";
 import { expectMobileAgentSidebarVisible } from "../support/helpers/sidebar";
-import { expectNewWorkspaceProjectSelected } from "../support/helpers/new-workspace";
 
 const TEST_COMMANDS = [
   {
@@ -147,50 +140,6 @@ async function installListCommandsStub(page: Page): Promise<void> {
 
       ws.send(message);
     });
-  });
-}
-
-async function openAppWideNewWorkspace(page: Page): Promise<void> {
-  await page.getByTestId("sidebar-global-new-workspace").first().click();
-  await page.waitForURL((url) => url.pathname === "/new", { timeout: 30_000 });
-}
-
-async function openSettingsThenBackToWorkspace(page: Page): Promise<void> {
-  await page.getByTestId("sidebar-settings").filter({ visible: true }).first().click();
-  await expect(page).toHaveURL(/\/settings\/general$/, { timeout: 30_000 });
-  await page.getByTestId("settings-back-to-workspace").click();
-  await page.waitForURL((url) => url.pathname.includes("/workspace/"), { timeout: 30_000 });
-}
-
-async function expectSingleCurrentWorkspaceDeckEntry(
-  page: Page,
-  input: { expectedDeckEntryCount: number; serverId: string; workspaceId: string },
-): Promise<void> {
-  const summary = await page
-    .locator('[data-testid^="workspace-deck-entry-"]')
-    .evaluateAll((elements, target) => {
-      const currentTestId = `workspace-deck-entry-${target.serverId}:${target.workspaceId}`;
-      const entries = elements.map((element) => {
-        const rect = element.getBoundingClientRect();
-        return {
-          testId: element.getAttribute("data-testid"),
-          hasLayout: rect.width > 0 && rect.height > 0,
-        };
-      });
-      const currentEntries = entries.filter((entry) => entry.testId === currentTestId);
-      return {
-        totalDeckEntryCount: entries.length,
-        currentWorkspaceEntryCount: currentEntries.length,
-        visibleCurrentWorkspaceEntryCount: currentEntries.filter((entry) => entry.hasLayout).length,
-        hiddenCurrentWorkspaceEntryCount: currentEntries.filter((entry) => !entry.hasLayout).length,
-      };
-    }, input);
-
-  expect(summary).toEqual({
-    totalDeckEntryCount: input.expectedDeckEntryCount,
-    currentWorkspaceEntryCount: 1,
-    visibleCurrentWorkspaceEntryCount: 1,
-    hiddenCurrentWorkspaceEntryCount: 0,
   });
 }
 
@@ -339,16 +288,6 @@ function expectPopoverFramesStable(frames: PopoverFrame[]): void {
   ).toBeUndefined();
 }
 
-function recordCommandRequestsByAgentId(page: Page): string[] {
-  const requests: string[] = [];
-  const record = ({ payload }: { payload: string | Buffer }) => {
-    if (typeof payload !== "string" || !payload.includes("list_commands_request")) return;
-    if (!payload.includes("draftConfig")) requests.push(payload);
-  };
-  page.on("websocket", (socket) => socket.on("framesent", record));
-  return requests;
-}
-
 function expectPopoverDoesNotDisappearAfterFirstVisible(frames: PopoverFrame[]): void {
   const firstVisibleIndex = frames.findIndex(
     (frame) =>
@@ -370,101 +309,6 @@ function expectPopoverDoesNotDisappearAfterFirstVisible(frames: PopoverFrame[]):
 }
 
 test.describe("Composer autocomplete", () => {
-  test("keeps New workspace off the running-agent command list before a project is chosen", async ({
-    page,
-  }) => {
-    const commandRequestsByAgentId = recordCommandRequestsByAgentId(page);
-
-    await page.goto("/new");
-    await expectNewWorkspaceProjectSelected(page, "Choose project");
-    await composerLocator(page).fill("/");
-
-    const popover = page
-      .getByTestId("composer-autocomplete-popover")
-      .filter({ visible: true })
-      .first();
-    await expect(popover).toContainText("Choose a project to see commands", { timeout: 30_000 });
-    await expect(popover).not.toContainText("/clear");
-    await expect(popover).not.toContainText("/exit");
-    expect(commandRequestsByAgentId).toEqual([]);
-  });
-
-  test("stays visible after returning from app-wide routes", async ({ page }) => {
-    await installListCommandsStub(page);
-    const serverId = getServerId();
-    const sessions: MockAgentWorkspace[] = [];
-
-    try {
-      sessions.push(
-        await seedMockAgentWorkspace({
-          repoPrefix: "autocomplete-new-route-a-",
-          title: "Autocomplete new route A",
-        }),
-      );
-      sessions.push(
-        await seedMockAgentWorkspace({
-          repoPrefix: "autocomplete-new-route-b-",
-          title: "Autocomplete new route B",
-        }),
-      );
-      sessions.push(
-        await seedMockAgentWorkspace({
-          repoPrefix: "autocomplete-new-route-c-",
-          title: "Autocomplete new route C",
-        }),
-      );
-
-      const [first, second, third] = sessions;
-
-      await openAgentRoute(page, first);
-      await expectComposerVisible(page, { timeout: 30_000 });
-
-      await openAppWideNewWorkspace(page);
-      await switchWorkspaceViaSidebar({ page, serverId, workspaceId: second.workspaceId });
-      await expectComposerVisible(page, { timeout: 30_000 });
-      await expectSingleCurrentWorkspaceDeckEntry(page, {
-        expectedDeckEntryCount: 2,
-        serverId,
-        workspaceId: second.workspaceId,
-      });
-
-      await openSettingsThenBackToWorkspace(page);
-      await expectComposerVisible(page, { timeout: 30_000 });
-      await expectSingleCurrentWorkspaceDeckEntry(page, {
-        expectedDeckEntryCount: 2,
-        serverId,
-        workspaceId: second.workspaceId,
-      });
-
-      await openSessions(page);
-      await switchWorkspaceViaSidebar({ page, serverId, workspaceId: third.workspaceId });
-      await expectComposerVisible(page, { timeout: 30_000 });
-      await expectSingleCurrentWorkspaceDeckEntry(page, {
-        expectedDeckEntryCount: sessions.length,
-        serverId,
-        workspaceId: third.workspaceId,
-      });
-
-      await openAppWideNewWorkspace(page);
-      await switchWorkspaceViaSidebar({ page, serverId, workspaceId: first.workspaceId });
-      await expectComposerVisible(page, { timeout: 30_000 });
-      await expectSingleCurrentWorkspaceDeckEntry(page, {
-        expectedDeckEntryCount: sessions.length,
-        serverId,
-        workspaceId: first.workspaceId,
-      });
-
-      await composerLocator(page).fill("/");
-      const popover = page
-        .getByTestId("composer-autocomplete-popover")
-        .filter({ hasText: "/help", visible: true })
-        .first();
-      await expect(popover).toBeInViewport({ timeout: 30_000 });
-    } finally {
-      await Promise.allSettled(sessions.map((session) => session.cleanup()));
-    }
-  });
-
   test("does not flash at the wrong position on the first slash command paint", async ({
     page,
   }) => {

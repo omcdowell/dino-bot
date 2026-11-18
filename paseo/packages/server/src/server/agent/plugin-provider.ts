@@ -1592,6 +1592,18 @@ class PluginAgentSession implements AgentSession {
       token,
       scope,
     });
+    if (scope === "files") return;
+    // The agent manager rebuilds the timeline from this history after a rewind: the rewound message and every row after
+    // it go, as a built-in provider's history after its own rewind.
+    const at = this.history.findIndex(
+      (event) =>
+        event.type === "timeline" &&
+        event.item.type === "user_message" &&
+        event.item.messageId === messageId,
+    );
+    if (at < 0) return;
+    const kept = this.history.filter((event, k) => k < at || event.type !== "timeline");
+    this.history.splice(0, this.history.length, ...kept);
   }
 
   private publish(event: AgentStreamEvent): void {

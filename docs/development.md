@@ -26,12 +26,6 @@ outside the repo in `~/.config/dinobot/private-patterns.txt`).
 | `test/` | `node --test` suites and end-to-end scripts |
 | `demo/` | end-to-end demo kit (not part of the published repo) |
 
-## The Claude Agent SDK
-
-It is proprietary, so it is not in the tarball: a placeholder answers the daemon's import, and
-`dinobot claude-code install` fetches the real one from npm on the user's computer
-(integrity-checked).
-
 ## Tarball guard
 
 `build/private-guard.sh` refuses a tarball that names a private part anywhere (README files, docs and

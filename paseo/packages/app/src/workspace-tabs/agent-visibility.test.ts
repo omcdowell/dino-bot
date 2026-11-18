@@ -318,21 +318,11 @@ describe("workspace agent visibility", () => {
       buildWorkspaceTabSnapshot({
         agentVisibility,
         agentsHydrated: true,
-        terminalsHydrated: true,
-        knownTerminalIds: ["terminal-1", "script-terminal"],
-        standaloneTerminalIds: ["terminal-1"],
-        hasActivePendingTerminalCreate: false,
-        hasActivePendingDraftCreate: false,
       }),
     ).toEqual({
       agentsHydrated: true,
-      terminalsHydrated: true,
       activeAgentIds: agentVisibility.activeAgentIds,
       autoOpenAgentIds: agentVisibility.autoOpenAgentIds,
-      knownTerminalIds: ["terminal-1", "script-terminal"],
-      standaloneTerminalIds: ["terminal-1"],
-      hasActivePendingTerminalCreate: false,
-      hasActivePendingDraftCreate: false,
     });
   });
 

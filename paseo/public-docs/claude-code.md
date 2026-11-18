@@ -8,19 +8,7 @@ category: Providers
 
 # Claude Code
 
-Paseo runs Claude Code through the official `claude` CLI using the Claude Agent SDK.
-
-## Does Claude Code cost extra in Paseo?
-
-No. Claude Code usage in Paseo counts against your normal Claude plan limits. It does not require a separate pool of Agent SDK credits.
-
-You still need a Claude plan that includes Claude Code, and your plan's usual usage limits apply.
-
-## Getting started
-
-Install and sign in to the Claude Code CLI on the machine running Paseo. Paseo uses that existing installation and account when you start a Claude Code agent.
-
-If your Claude login expires, re-authenticate with the Claude Code CLI, then start a new Claude Code session in Paseo. Existing Paseo sessions keep the authentication they started with, so re-authenticating does not update a session that is already running.
+Paseo no longer runs Claude Code as a built-in agent provider. Run the standard `claude` CLI in the Paseo terminal instead; it uses your existing Claude plan and login.
 
 ## Use Claude Code in the Paseo terminal
 

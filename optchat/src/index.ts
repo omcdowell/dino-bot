@@ -26,6 +26,7 @@ import { showUsage } from './usage-page.ts';
 import { showSettings } from './settings-page.ts';
 import { errorText, SessionController } from './controller.ts';
 import room from './room/index.ts';
+import { restartGuard } from './restart-guard.ts';
 
 const binding = 'optchat.profile';
 /** How long a headless Pi waits for a busy profile at start. A launcher's probe Pi (Paseo's provider catalog) holds it for a few seconds. */
@@ -40,6 +41,8 @@ const launcherAgent = () => Boolean(process.env.PASEO_AGENT_ID?.trim());
 const ACTIONS = ['profile', 'settings', 'usage', 'instructions', 'browse', 'import'] as const;
 
 export default function optchat(pi: ExtensionAPI) {
+  // A bot's own session (PASEO_AGENT_ID) may not restart or reload DinoBot; bot-restart in a worker is the route.
+  restartGuard(pi);
   // A group chat room seat (OPTCHAT_ROOM, set by the bots plugin) opens no profile: see src/room/index.ts.
   if (process.env.OPTCHAT_ROOM) return room(pi);
   const session = new SessionController(pi);

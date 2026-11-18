@@ -191,19 +191,19 @@ describe("keyboard-action-dispatcher", () => {
     const oldHandle = vi.fn(() => true);
     const replacementHandle = vi.fn(() => true);
     const action: KeyboardActionDefinition = {
-      id: "workspace.tab.target.agent",
+      id: "workspace.tab.target.files",
       scope: "workspace",
     };
 
     const unregisterOld = dispatcher.registerHandler({
-      handlerId: "workspace-new-tab-menu:server:pane",
+      handlerId: "workspace-files-tab:server:pane",
       actions: [action.id],
       enabled: true,
       priority: 200,
       handle: oldHandle,
     });
     dispatcher.registerHandler({
-      handlerId: "workspace-new-tab-menu:server:pane",
+      handlerId: "workspace-files-tab:server:pane",
       actions: [action.id],
       enabled: true,
       priority: 200,

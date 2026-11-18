@@ -14,7 +14,7 @@ type Rec = Record<string, unknown>;
 export interface CcToolCall {
   name: string;
   input?: unknown;
-  /** The result text; absent while the tool runs. */
+  /** The result text; while the tool runs, its output so far (a Bash command's), if any. */
   output?: string;
   /** done: the tool has returned. */
   done: boolean;
@@ -33,7 +33,7 @@ const GREP_MODES = new Set(["content", "files_with_matches", "count"]);
 export function ccToolDetail(call: CcToolCall): ProviderToolCallDetail {
   const name = call.name.trim();
   const input = rec(call.input);
-  const output = call.done ? str(call.output) : undefined;
+  const output = str(call.output);
   const filePath = str(input.file_path) ?? str(input.filePath) ?? str(input.path);
   switch (name) {
     case "Bash": {

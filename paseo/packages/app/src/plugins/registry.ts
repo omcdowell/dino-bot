@@ -20,6 +20,12 @@ export class PluginRegistry {
   private readonly liveHosts = new Set<string>();
   /** The daemon client each installation was made with (a cached install: the host forwarder). */
   private readonly clients = new WeakMap<InstalledPlugin, DaemonClient>();
+  /**
+   * Persisted queries of plugins that dropped out of a host's catalog (failed to load, crashed,
+   * or not loaded yet after a daemon restart), by host then plugin id: the plugin starts from them
+   * when it comes back, instead of fetching everything again (avatar-reload, 2026-11-18).
+   */
+  private readonly parked = new Map<string, Map<string, DehydratedState>>();
 
   constructor(
     private readonly dependencies: {
@@ -51,7 +57,10 @@ export class PluginRegistry {
       audio: Pick<AudioEngine, "play">;
       /** "cache": from the device cache, before the host answered (plugin cache). */
       source?: "live" | "cache";
-      /** Persisted plugin queries to start from, by plugin id. */
+      /**
+       * Persisted plugin queries to start from, by plugin id. A replacement starts from what it
+       * replaces, and a plugin coming back from what it had when it dropped out, before these.
+       */
       queries?: ReadonlyMap<string, DehydratedState>;
     },
   ): boolean {
@@ -61,9 +70,12 @@ export class PluginRegistry {
       .filter((plugin) => plugin.timelineTransformers.length > 0)
       .map((plugin) => `${plugin.id}\0${plugin.clientBundle}`);
     const preserved = catalog.flatMap((entry) => {
+      // A reload (`replacePluginId`) of a plugin whose client bundle and requirements are
+      // unchanged keeps the live install: replacing it remounted every surface of the plugin
+      // (scroll, open sheets and in-flight queries lost) for a server-only change (avatar-reload,
+      // 2026-11-18). Its data is refetched from the restarted plugin below.
       const existing = previous.find(
         (plugin) =>
-          plugin.id !== options.replacePluginId &&
           plugin.id === entry.id &&
           plugin.clientBundle === entry.clientBundle &&
           plugin.requirements?.paseo === entry.requirements?.paseo &&
@@ -72,6 +84,10 @@ export class PluginRegistry {
       return existing ? [existing] : [];
     });
     for (const plugin of preserved) {
+      if (plugin.id === options.replacePluginId && plugin.source === "live") {
+        void plugin.queryClient.invalidateQueries();
+        continue;
+      }
       if (plugin.source !== "cache" || source !== "live") continue;
       // The live catalog confirms a cached install: it stays (no second evaluation, no remount),
       // its calls already follow the host's live client, and its cached data refreshes.
@@ -85,6 +101,7 @@ export class PluginRegistry {
     for (const plugin of removed) carried.set(plugin.id, dehydratePersisted(plugin.queryClient));
     // Cached installs stay on screen until their replacements are published (no gap); live ones
     // are torn down before their replacement is evaluated.
+    const parked = this.parked.get(serverId);
     const removedNow = removed.filter((plugin) => plugin.source !== "cache");
     if (removedNow.length > 0) {
       this.byHost.set(
@@ -99,7 +116,11 @@ export class PluginRegistry {
       let installation: InstalledPlugin | undefined;
       try {
         if (!entry.clientBundle) return [];
-        assertPluginCompatibility({ ...entry, version: this.dependencies.version, runtime: "app" });
+        assertPluginCompatibility({
+          ...entry,
+          version: this.dependencies.version,
+          runtime: "app",
+        });
         const existing = preserved.find(
           (plugin) => plugin.id === entry.id && plugin.clientBundle === entry.clientBundle,
         );
@@ -139,7 +160,8 @@ export class PluginRegistry {
           timelineRenderers: [],
         };
         this.clients.set(installation, client);
-        const seed = options.queries?.get(entry.id) ?? carried.get(entry.id);
+        const seed =
+          carried.get(entry.id) ?? parked?.get(entry.id) ?? options.queries?.get(entry.id);
         if (seed) hydrate(installation.queryClient, seed);
         installation.events?.setLive(this.liveHosts.has(serverId));
         const runtime = this.dependencies.createRuntime(installation, options.audio);
@@ -179,6 +201,7 @@ export class PluginRegistry {
       }
     }
     this.byHost.set(serverId, installed);
+    this.park(serverId, carried, installed);
     this.publish();
     for (const plugin of removed) if (plugin.source === "cache") this.dispose(plugin);
     const installedTimelineBundles = installed
@@ -188,6 +211,25 @@ export class PluginRegistry {
       previousTimelineBundles.length !== installedTimelineBundles.length ||
       previousTimelineBundles.some((bundle, index) => bundle !== installedTimelineBundles[index])
     );
+  }
+
+  /**
+   * Parks the persisted queries of removed plugins (`carried`, taken before they were disposed)
+   * that are not installed again; a plugin installed again is no longer parked.
+   */
+  private park(
+    serverId: string,
+    carried: ReadonlyMap<string, DehydratedState>,
+    installed: InstalledPlugin[],
+  ): void {
+    const byId = this.parked.get(serverId) ?? new Map<string, DehydratedState>();
+    for (const plugin of installed) byId.delete(plugin.id);
+    for (const [id, state] of carried) {
+      if (installed.some((item) => item.id === id)) continue;
+      if (state.queries.length > 0) byId.set(id, state);
+    }
+    if (byId.size > 0) this.parked.set(serverId, byId);
+    else this.parked.delete(serverId);
   }
 
   /**
@@ -223,6 +265,7 @@ export class PluginRegistry {
 
   removeHost(serverId: string): void {
     this.liveHosts.delete(serverId);
+    this.parked.delete(serverId);
     const installed = this.byHost.get(serverId);
     if (!installed) return;
     for (const plugin of installed) this.dispose(plugin);

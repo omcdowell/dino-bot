@@ -3,7 +3,6 @@ import { QueryClient, QueryObserver, skipToken } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import type { MutableDaemonConfig, SessionOutboundMessage } from "@getpaseo/protocol/messages";
 import { checkoutDiffQueryKey } from "@/git/query-keys";
-import { buildTerminalsQueryKey } from "@/screens/workspace/terminals/state";
 import { daemonConfigQueryKey } from "@/data/daemon-config";
 import { daemonPairingOfferQueryKey } from "@/data/daemon-pairing";
 import { providersSnapshotQueryKey } from "@/data/providers-snapshot";
@@ -11,7 +10,6 @@ import {
   checkoutDiffPushRoute,
   invalidateServerDataQueriesAfterReconnect,
   mountServerDataPushRouter,
-  workspaceTerminalsPushRoute,
 } from "@/data/push-router";
 
 type ProvidersSnapshotUpdateMessage = Extract<
@@ -24,13 +22,11 @@ type SubscribeCheckoutDiffResponseMessage = Extract<
   { type: "subscribe_checkout_diff_response" }
 >;
 type StatusMessage = Extract<SessionOutboundMessage, { type: "status" }>;
-type TerminalsChangedMessage = Extract<SessionOutboundMessage, { type: "terminals_changed" }>;
 type RouterMessage =
   | ProvidersSnapshotUpdateMessage
   | CheckoutDiffUpdateMessage
   | SubscribeCheckoutDiffResponseMessage
-  | StatusMessage
-  | TerminalsChangedMessage;
+  | StatusMessage;
 type RouterMessageType = RouterMessage["type"];
 type RouterHandler = (message: RouterMessage) => void;
 type RouterClient = Parameters<typeof mountServerDataPushRouter>[0]["client"];
@@ -55,15 +51,12 @@ function createFakeClient(config: { rejectCheckoutDiffSubscribe?: boolean } = {}
     subscriptionId: string;
   }>;
   unsubscribeCheckoutDiffCalls: string[];
-  subscribeTerminalCalls: Array<{ cwd: string; workspaceId?: string }>;
-  unsubscribeTerminalCalls: Array<{ cwd: string; workspaceId?: string }>;
 } {
   const handlers: Record<RouterMessageType, RouterHandler[]> = {
     providers_snapshot_update: [],
     checkout_diff_update: [],
     subscribe_checkout_diff_response: [],
     status: [],
-    terminals_changed: [],
   };
   const subscribeCheckoutDiffCalls: Array<{
     cwd: string;
@@ -71,8 +64,6 @@ function createFakeClient(config: { rejectCheckoutDiffSubscribe?: boolean } = {}
     subscriptionId: string;
   }> = [];
   const unsubscribeCheckoutDiffCalls: string[] = [];
-  const subscribeTerminalCalls: Array<{ cwd: string; workspaceId?: string }> = [];
-  const unsubscribeTerminalCalls: Array<{ cwd: string; workspaceId?: string }> = [];
 
   function on<K extends RouterMessageType>(
     type: K,
@@ -164,27 +155,10 @@ function createFakeClient(config: { rejectCheckoutDiffSubscribe?: boolean } = {}
           },
         };
       },
-      observeTerminals(input) {
-        const { signal: _signal, ...query } = input;
-        subscribeTerminalCalls.push(query);
-        return observe(
-          {
-            ...query,
-            subscriptionId: `terminal-${subscribeTerminalCalls.length}`,
-            requestId: "terminals",
-            terminals: [],
-          },
-          ["terminals_changed"],
-          () => unsubscribeTerminalCalls.push(query),
-          (message) => message.type === "terminals_changed" && message.payload.cwd === query.cwd,
-        );
-      },
     },
     emit,
     subscribeCheckoutDiffCalls,
     unsubscribeCheckoutDiffCalls,
-    subscribeTerminalCalls,
-    unsubscribeTerminalCalls,
   };
 }
 
@@ -430,64 +404,13 @@ describe("server data push router", () => {
     unmount();
   });
 
-  it("subscribes active terminal queries and filters terminal pushes by workspace", () => {
-    const queryClient = new QueryClient();
-    const fake = createFakeClient();
-    const serverId = "server-1";
-    const cwd = "/repo";
-    const workspaceId = "workspace-a";
-    const queryKey = buildTerminalsQueryKey(serverId, cwd, workspaceId);
-    const observer = new QueryObserver(queryClient, {
-      queryKey,
-      queryFn: skipToken,
-      enabled: true,
-      gcTime: Infinity,
-      staleTime: Infinity,
-      meta: workspaceTerminalsPushRoute({
-        enabled: true,
-        serverId,
-        cwd,
-        workspaceId,
-      }),
-    });
-    const unsubscribeObserver = observer.subscribe(() => undefined);
-    const unmount = mountServerDataPushRouter({ client: fake.client, queryClient, serverId });
-
-    expect(fake.subscribeTerminalCalls).toEqual([{ cwd, workspaceId }]);
-
-    fake.emit({
-      type: "terminals_changed",
-      payload: {
-        cwd,
-        terminals: [
-          { id: "terminal-a", name: "Main", workspaceId },
-          { id: "terminal-b", name: "Sibling", workspaceId: "workspace-b" },
-        ],
-      },
-    });
-
-    expect(queryClient.getQueryData(queryKey)).toEqual({
-      cwd,
-      terminals: [{ id: "terminal-a", name: "Main", workspaceId }],
-      requestId: expect.stringMatching(/^terminals-changed-/),
-    });
-
-    unsubscribeObserver();
-
-    expect(fake.unsubscribeTerminalCalls).toEqual([{ cwd, workspaceId }]);
-
-    unmount();
-  });
-
   it("keeps stable handles while invalidating caches after reconnect", () => {
     const queryClient = new QueryClient();
     const fake = createFakeClient();
     const serverId = "server-1";
     const cwd = "/repo";
-    const workspaceId = "workspace-a";
     const checkoutDiffKey = checkoutDiffQueryKey(serverId, cwd, "base", "main", true);
     const checkoutDiffSubscriptionId = `checkoutDiff:${JSON.stringify(checkoutDiffKey)}`;
-    const terminalKey = buildTerminalsQueryKey(serverId, cwd, workspaceId);
     const checkoutDiffObserver = new QueryObserver(queryClient, {
       queryKey: checkoutDiffKey,
       queryFn: skipToken,
@@ -502,21 +425,7 @@ describe("server data push router", () => {
         compare: { mode: "base", baseRef: "main", ignoreWhitespace: true },
       }),
     });
-    const terminalObserver = new QueryObserver(queryClient, {
-      queryKey: terminalKey,
-      queryFn: skipToken,
-      enabled: true,
-      gcTime: Infinity,
-      staleTime: Infinity,
-      meta: workspaceTerminalsPushRoute({
-        enabled: true,
-        serverId,
-        cwd,
-        workspaceId,
-      }),
-    });
     const unsubscribeCheckoutDiffObserver = checkoutDiffObserver.subscribe(() => undefined);
-    const unsubscribeTerminalObserver = terminalObserver.subscribe(() => undefined);
     const unmount = mountServerDataPushRouter({ client: fake.client, queryClient, serverId });
     const plainCheckoutDiffObserver = new QueryObserver(queryClient, {
       queryKey: checkoutDiffKey,
@@ -525,17 +434,9 @@ describe("server data push router", () => {
       gcTime: Infinity,
       staleTime: Infinity,
     });
-    const plainTerminalObserver = new QueryObserver(queryClient, {
-      queryKey: terminalKey,
-      queryFn: skipToken,
-      enabled: true,
-      gcTime: Infinity,
-      staleTime: Infinity,
-    });
     const unsubscribePlainCheckoutDiffObserver = plainCheckoutDiffObserver.subscribe(
       () => undefined,
     );
-    const unsubscribePlainTerminalObserver = plainTerminalObserver.subscribe(() => undefined);
 
     invalidateServerDataQueriesAfterReconnect({ queryClient, serverId });
 
@@ -546,96 +447,8 @@ describe("server data push router", () => {
         subscriptionId: "server-diff-1",
       },
     ]);
-    expect(fake.subscribeTerminalCalls).toEqual([{ cwd, workspaceId }]);
-
-    fake.emit({
-      type: "terminals_changed",
-      payload: {
-        cwd,
-        terminals: [
-          { id: "terminal-a", name: "Main", workspaceId },
-          { id: "terminal-b", name: "Sibling", workspaceId: "workspace-b" },
-        ],
-      },
-    });
-
-    expect(queryClient.getQueryData(terminalKey)).toEqual({
-      cwd,
-      terminals: [{ id: "terminal-a", name: "Main", workspaceId }],
-      requestId: expect.stringMatching(/^terminals-changed-/),
-    });
-
     unsubscribePlainCheckoutDiffObserver();
-    unsubscribePlainTerminalObserver();
     unsubscribeCheckoutDiffObserver();
-    unsubscribeTerminalObserver();
-    unmount();
-  });
-
-  it("routes terminal pushes after another observer attaches without push metadata", () => {
-    const queryClient = new QueryClient();
-    const fake = createFakeClient();
-    const serverId = "server-1";
-    const cwd = "/repo";
-    const workspaceId = "workspace-a";
-    const queryKey = buildTerminalsQueryKey(serverId, cwd, workspaceId);
-    const pushObserver = new QueryObserver(queryClient, {
-      queryKey,
-      queryFn: skipToken,
-      enabled: true,
-      gcTime: Infinity,
-      staleTime: Infinity,
-      meta: workspaceTerminalsPushRoute({
-        enabled: true,
-        serverId,
-        cwd,
-        workspaceId,
-      }),
-    });
-    const unsubscribePushObserver = pushObserver.subscribe(() => undefined);
-    const unmount = mountServerDataPushRouter({ client: fake.client, queryClient, serverId });
-    expect(fake.subscribeTerminalCalls).toEqual([{ cwd, workspaceId }]);
-
-    const plainObserver = new QueryObserver(queryClient, {
-      queryKey,
-      queryFn: skipToken,
-      enabled: true,
-      gcTime: Infinity,
-      staleTime: Infinity,
-    });
-    const unsubscribePlainObserver = plainObserver.subscribe(() => undefined);
-
-    fake.emit({
-      type: "terminals_changed",
-      payload: {
-        cwd,
-        terminals: [
-          {
-            id: "terminal-a",
-            name: "Main",
-            workspaceId,
-            activity: { state: "idle", attentionReason: "needs_input", changedAt: 1 },
-          },
-        ],
-      },
-    });
-
-    expect(queryClient.getQueryData(queryKey)).toEqual({
-      cwd,
-      terminals: [
-        {
-          id: "terminal-a",
-          name: "Main",
-          workspaceId,
-          activity: { state: "idle", attentionReason: "needs_input", changedAt: 1 },
-        },
-      ],
-      requestId: expect.stringMatching(/^terminals-changed-/),
-    });
-    expect(fake.unsubscribeTerminalCalls).toEqual([]);
-
-    unsubscribePlainObserver();
-    unsubscribePushObserver();
     unmount();
   });
 
@@ -647,14 +460,12 @@ describe("server data push router", () => {
     const daemonConfigKey = daemonConfigQueryKey(serverId);
     const pairingOfferKey = daemonPairingOfferQueryKey(serverId);
     const diffKey = checkoutDiffQueryKey(serverId, "/repo", "uncommitted", undefined, false);
-    const terminalKey = buildTerminalsQueryKey(serverId, "/repo", "workspace-a");
     const otherProviderKey = providersSnapshotQueryKey(otherServerId);
 
     queryClient.setQueryData(providerKey, { entries: [], generatedAt: "now", requestId: "p" });
     queryClient.setQueryData(daemonConfigKey, daemonConfig);
     queryClient.setQueryData(pairingOfferKey, { relayEnabled: false, url: "" });
     queryClient.setQueryData(diffKey, { cwd: "/repo", files: [], error: null, requestId: "d" });
-    queryClient.setQueryData(terminalKey, { cwd: "/repo", terminals: [], requestId: "t" });
     queryClient.setQueryData(otherProviderKey, {
       entries: [],
       generatedAt: "now",
@@ -667,7 +478,6 @@ describe("server data push router", () => {
     expect(queryClient.getQueryState(daemonConfigKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(pairingOfferKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(diffKey)?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(terminalKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(otherProviderKey)?.isInvalidated).toBe(false);
   });
 });

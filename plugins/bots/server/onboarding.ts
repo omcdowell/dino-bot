@@ -161,16 +161,20 @@ export class Onboarding {
     const current = this.settings.models;
     const none = { bots: null, compaction: null, workers: null };
     const h = await this.host();
-    if (!h) return { available: false, providers: [], subscription: null, models: [], suggested: none, current, error: null };
     const [pi, cc] = await Promise.all([
-      h.models({ refresh }).then(
-        (r) => ({ ok: true as const, r }),
-        (e: Error) => ({ ok: false as const, error: e.message }),
-      ),
+      h
+        ? h.models({ refresh }).then(
+            (r) => ({ ok: true as const, r }),
+            (e: Error) => ({ ok: false as const, error: e.message }),
+          )
+        : null,
       this.opts.claudeCode ? this.opts.claudeCode(refresh).catch(() => null) : Promise.resolve(null),
     ]);
-    const piPart = pi.ok ? pi.r : { providers: [], subscription: null, models: [], suggested: none as HostModels };
-    if (!cc || !cc.models.length) return { available: true, ...piPart, current, error: pi.ok ? null : pi.error };
+    // No DinoBot onboarding module (a plain Paseo host, or one adopted by hand without DINOBOT_HOME): no pi list, but
+    // Claude Code's models are still offered when it is signed in, so the screen is not a silent no-op.
+    if (!pi && (!cc || !cc.models.length)) return { available: false, providers: [], subscription: null, models: [], suggested: none, current, error: null };
+    const piPart = pi?.ok ? pi.r : { providers: [], subscription: null, models: [], suggested: none as HostModels };
+    if (!cc || !cc.models.length) return { available: true, ...piPart, current, error: pi?.ok ? null : (pi?.error ?? null) };
     const ccSuggest = ccSuggested(cc.plan);
     const suggested = {} as HostModels;
     for (const role of MODEL_ROLES) suggested[role] = piPart.suggested[role] ?? ccSuggest[role];
@@ -211,8 +215,9 @@ export class Onboarding {
       models = { ...this.settings.models, bots: parseModelPick({ provider, model: rest.join("/"), thinking: null }) };
     }
     if (models) {
-      if (h) {
-        const live = await this.models(false);
+      const live = await this.models(false);
+      // Checked against the live list whenever there is one (with DinoBot's module, or Claude Code's alone).
+      if (live.available) {
         if (live.error) throw new Error(live.error);
         for (const role of MODEL_ROLES) {
           const pick = models[role];

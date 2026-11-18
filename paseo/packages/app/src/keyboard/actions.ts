@@ -18,11 +18,6 @@ export type MessageInputKeyboardActionKind =
 
 export type KeyboardActionId =
   | "agent.interrupt"
-  | "agent.new"
-  | "workspace.tab.menu.open"
-  | "workspace.tab.target.agent"
-  | "workspace.tab.target.browser"
-  | "workspace.tab.target.changes"
   | "workspace.tab.target.files"
   | "workspace.tab.close.current"
   | "workspace.tab.navigate.index"
@@ -47,10 +42,6 @@ export type KeyboardActionId =
   | "command-center.toggle"
   | "command-center.files"
   | "shortcuts.dialog.toggle"
-  | "workspace.terminal.new"
-  | "workspace.new"
-  | "workspace.project.pick"
-  | "worktree.new"
   | "workspace.archive"
   | "workspace.pin"
   | "view.toggle.focus"

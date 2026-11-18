@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.1.15
+
+### Pi and Claude Code only
+
+- Bots and workers run on pi or Claude Code. The other coding agents the app could start (Codex,
+  OpenCode, OMP, the ACP agents and the Claude Agent SDK agent) are removed, with
+  `dinobot claude-code install` (it fetched that SDK). `dinobot claude-code install-cli` stays.
+- Old pages the app no longer used are removed.
+
+### Claude Code bots
+
+- A running Bash command's output shows in the chat while it runs.
+- `/skill:<name>` and `/compact` work as on a pi bot.
+- The app's session list, rewind and the `/optchat` profile tools work on a Claude Code bot's
+  OptChat profile.
+- A new chat opens with the bot's history.
+- A bot's model list is rebuilt when its engine or proxy changes; the model aliases keep their
+  effort levels.
+- A bot's restart guard stops it from restarting DinoBot from its own session; `bot-restart` is the
+  one command for restarts and reloads. Claude Code workers compact at 200k tokens.
+
+### Fixed
+
+- A reload of the bots plugin no longer remounts the bots page or downloads every avatar again; a
+  reload checks the new plugin before it stops the running one.
+- Images you send to a pi bot are kept, so the chat still shows them after an engine switch.
+- New chat follows a bot's engine switch instead of keeping the old chat's engine.
+- The pairing code carries one address, the tailnet IP (no MagicDNS name): with both, the app
+  switched between them under load and each switch reloaded the bots screen. An app built
+  from this release (desktop or iPhone) drops a saved name beside the IP by itself;
+  existing pairings keep working and need no new pairing.
+- Direct connections stay end-to-end encrypted, as before: DinoBot refuses an unencrypted
+  connection from another machine (an outdated app is told to update), and the app refuses to send
+  the password over a connection that has no key (it asks you to pair again).
+
 ## v0.1.14
 
 ### Claude Code bots work like pi bots

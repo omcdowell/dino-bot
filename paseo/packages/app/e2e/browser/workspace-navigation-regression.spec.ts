@@ -133,31 +133,6 @@ test.describe("Workspace navigation regression", () => {
     await expect(page.getByText("Add a project", { exact: true })).toHaveCount(0);
   });
 
-  test("shows the New launcher after returning from settings and closing the last agent draft tab", async ({
-    page,
-    withWorkspace,
-  }) => {
-    const workspace = await withWorkspace({ prefix: "workspace-settings-back-tab-" });
-
-    await workspace.navigateTo();
-    await clickNewChat(page);
-    await expect.poll(() => getVisibleDraftTabCount(page), { timeout: 30_000 }).toBe(1);
-
-    await openSettings(page);
-    await clickSettingsBackToWorkspace(page);
-    await expect(page).toHaveURL(/\/workspace\//, { timeout: 30_000 });
-    await expect.poll(() => getVisibleDraftTabCount(page), { timeout: 30_000 }).toBe(1);
-
-    await closeFirstVisibleDraftTab(page);
-
-    await expect.poll(() => getVisibleDraftTabCount(page), { timeout: 30_000 }).toBe(0);
-    await expect(
-      page
-        .getByTestId("workspace-new-tab-panel")
-        .getByRole("button", { name: "Agent", exact: true }),
-    ).toBeVisible();
-  });
-
   test("keeps the workspace rendered while reconnecting to the host", async ({ page }) => {
     const serverId = getServerId();
 

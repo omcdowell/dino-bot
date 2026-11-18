@@ -36,20 +36,20 @@ tool injection globally, then add `paseoTools` to the exact provider IDs you lau
   },
   "agents": {
     "providers": {
-      "codex-lead": {
-        "extends": "codex",
-        "label": "Codex Lead"
+      "pi-lead": {
+        "extends": "pi",
+        "label": "Pi Lead"
       },
-      "codex-worker": {
-        "extends": "codex",
-        "label": "Codex Worker",
+      "pi-worker": {
+        "extends": "pi",
+        "label": "Pi Worker",
         "paseoTools": {
           "disabledTools": ["create_agent", "send_agent_prompt", "kill_agent"]
         }
       },
-      "codex-isolated": {
-        "extends": "codex",
-        "label": "Codex Isolated",
+      "pi-isolated": {
+        "extends": "pi",
+        "label": "Pi Isolated",
         "paseoTools": {
           "enabled": false
         }

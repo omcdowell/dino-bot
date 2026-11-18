@@ -141,42 +141,4 @@ test.describe("Workspace pane mounting", () => {
       await workspace.cleanup();
     }
   });
-
-  test("workspace navigation keeps the terminal emulator mounted", async ({ page }) => {
-    test.setTimeout(90_000);
-    const serverId = getServerId();
-    const workspace = await seedWorkspace({ repoPrefix: "terminal-pane-retention-" });
-
-    try {
-      const agent = await createIdleAgent(workspace.client, {
-        cwd: workspace.repoPath,
-        workspaceId: workspace.workspaceId,
-        title: `terminal-pane-retention-${Date.now()}`,
-      });
-
-      await page.goto(buildHostAgentDetailRoute(serverId, agent.id, agent.workspaceId));
-      await waitForWorkspaceTabsVisible(page);
-      await clickNewTerminal(page);
-      await expectTerminalSurfaceVisible(page);
-      const terminalSurface = terminalSurfaceLocator(page);
-      const originalTerminal = await captureRenderedNode(terminalSurface);
-
-      await test.step("switching tabs preserves the terminal", async () => {
-        await page.getByTestId(`workspace-tab-agent_${agent.id}`).click();
-        await expectComposerVisible(page);
-        await expectNodeConnected(originalTerminal);
-
-        await clickFirstTerminalTab(page);
-        await expectSameRenderedNode(originalTerminal, terminalSurface);
-      });
-
-      await test.step("opening Settings preserves the terminal", async () => {
-        await openSettings(page);
-        await clickSettingsBackToWorkspace(page);
-        await expectSameRenderedNode(originalTerminal, terminalSurface);
-      });
-    } finally {
-      await workspace.cleanup();
-    }
-  });
 });

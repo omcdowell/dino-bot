@@ -1,6 +1,6 @@
 ---
 title: Custom providers
-description: Configure custom providers, alternative endpoints, profiles, custom binaries, and ACP agents in ~/.paseo/config.json.
+description: Configure custom providers, alternative endpoints, profiles and custom binaries in ~/.paseo/config.json.
 nav: Custom providers
 order: 22
 category: Providers
@@ -8,53 +8,65 @@ category: Providers
 
 # Custom providers
 
-Everything beyond the [supported providers](/docs/supported-providers) lives under `agents.providers` in `~/.paseo/config.json`. You can:
+Paseo supports configuring custom agent providers through `config.json` (located at `$PASEO_HOME/config.json`, typically `~/.paseo/config.json`). You can create profiles of the built-in Pi provider, set custom binaries, and disable providers. DinoBot deleted the ACP, Codex, OpenCode, OMP and Claude Agent SDK providers; config entries that name them (by ID or `extends`) are skipped with a warning.
 
-- **Extend** a first-class provider to point at a different API (Z.AI, Alibaba/Qwen, a proxy, a self-hosted endpoint).
-- **Add profiles**, multiple entries against the same underlying provider with different credentials or curated model lists.
-- **Override the binary**, run a nightly build, a wrapper script, or a Docker image instead of the installed CLI.
-- **Add ACP agents**, Gemini CLI, Hermes, or any agent speaking the Agent Client Protocol over stdio.
-- **Disable** a provider you don't use.
-
-Run `paseo reload` after editing the file. Provider changes apply to future launches without restarting the daemon.
-
-Provider IDs must be lowercase alphanumeric with hyphens (`/^[a-z][a-z0-9-]*$/`). A new custom provider needs `extends` (a first-class provider ID or `"acp"`) and a `label`.
-To override a bundled provider plugin, use its provider ID and omit `extends`. For
-[Muse Code](/docs/muse-code), set command or environment overrides under `agents.providers.muse`.
-
-The examples below are a quick tour. The full, up-to-date reference is on GitHub: [docs/custom-providers.md](https://github.com/getpaseo/paseo/blob/main/docs/custom-providers.md).
-
-## Provider options
-
-Set defaults in `agents.providers.<id>.options`:
+Provider definitions live under `agents.providers` in config.json:
 
 ```json
 {
+  "version": 1,
   "agents": {
     "providers": {
-      "pi": { "options": { "rpcTimeoutMs": 90000 } }
+      "provider-id": { ... }
     }
   }
 }
 ```
 
-Override defaults for one agent with SDK `config.options` (wire
-`providerOptions`). The provider validates and applies the resulting record.
-See [Provider options](/docs/sdk/provider-options) for the two layers, deep-merge
-rule, persistence behavior, and provider-specific examples.
+Provider IDs must be lowercase alphanumeric with hyphens (`/^[a-z][a-z0-9-]*$/`).
 
-## Extending a first-class provider
+Each provider catalog refresh waits up to 2 minutes. If a provider loads many plugins or a large
+agent catalog during startup, raise the limit in milliseconds:
+
+```json
+{
+  "agents": {
+    "catalogRefreshTimeoutMs": 180000
+  }
+}
+```
+
+The limit applies independently to every provider refresh and covers availability plus the entire
+catalog probe. `PASEO_PROVIDER_REFRESH_TIMEOUT_MS` sets it when the config field is absent.
+
+## Provider options
+
+Set provider defaults in `agents.providers.<id>.options`. At agent creation, use
+`providerOptions` on the wire or `config.options` in the SDK. Both are opaque
+`Record<string, unknown>` values: the provider owns validation and application.
+Providers without option handling ignore the record.
+
+The daemon deep-merges the agent's options over the provider defaults at each
+session launch or resume. Plain objects merge recursively; arrays, scalars, and
+`null` replace the base value. Only the agent's own options are persisted, so edits
+to provider defaults apply on the next launch or resume. A profile inherits its
+base provider's options unless it sets its own options record.
+
+---
+
+## Extending the built-in provider
+
+Use `extends` to create a new provider entry that inherits from `pi`. The new provider gets its own entry in the provider list, with its own label, environment, and model definitions.
 
 ```json
 {
   "agents": {
     "providers": {
-      "my-claude": {
-        "extends": "claude",
-        "label": "My Claude",
+      "pi-work": {
+        "extends": "pi",
+        "label": "Pi (Work)",
         "env": {
-          "ANTHROPIC_API_KEY": "sk-ant-...",
-          "ANTHROPIC_BASE_URL": "https://my-proxy.example.com/v1"
+          "PI_CODING_AGENT_DIR": "~/.pi-work/agent"
         }
       }
     }
@@ -62,155 +74,96 @@ rule, persistence behavior, and provider-specific examples.
 }
 ```
 
-## Z.AI (GLM) coding plan
+Required fields for custom providers:
 
-Z.AI exposes GLM models through an Anthropic-compatible endpoint. Point `ANTHROPIC_BASE_URL` at their API and use `ANTHROPIC_AUTH_TOKEN` for the key. Third-party endpoints don't support Anthropic's server-side tools, so disable `WebSearch`.
+- `extends` — the built-in provider to inherit from (`pi`)
+- `label` — display name in the UI
+
+---
+
+## Custom binary and Pi-compatible forks
+
+For providers that keep Pi's `--mode rpc` API but use another binary or write sessions somewhere else, extend `pi`, replace the command, and provide the JSONL session directory:
 
 ```json
 {
   "agents": {
     "providers": {
-      "zai": {
-        "extends": "claude",
-        "label": "ZAI",
-        "env": {
-          "ANTHROPIC_AUTH_TOKEN": "<your-zai-api-key>",
-          "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
-          "API_TIMEOUT_MS": "3000000"
-        },
-        "disallowedTools": ["WebSearch"],
-        "models": [
-          { "id": "glm-5-turbo", "label": "GLM 5 Turbo", "isDefault": true },
-          { "id": "glm-5.1", "label": "GLM 5.1" }
-        ]
+      "my-pi-fork": {
+        "extends": "pi",
+        "label": "My Pi Fork",
+        "command": ["my-pi-fork"],
+        "options": {
+          "sessionDir": "~/.my-pi-fork/sessions",
+          "rpcTimeoutMs": 60000
+        }
       }
     }
   }
 }
 ```
 
-## Alibaba Cloud (Qwen) coding plan
+`options.sessionDir` is import-only. Launching and resuming still go through the configured command, so this example resumes with `my-pi-fork --mode rpc --session <session-file>`. `options.rpcTimeoutMs` overrides the 60-second Pi control-plane RPC deadline.
 
-Alibaba's coding plan routes Claude Code to Qwen models via an Anthropic-compatible API. Subscription keys look like `sk-sp-...` and must be created in the Singapore region.
-
-```json
-{
-  "agents": {
-    "providers": {
-      "qwen": {
-        "extends": "claude",
-        "label": "Qwen (Alibaba)",
-        "env": {
-          "ANTHROPIC_AUTH_TOKEN": "sk-sp-<coding-plan-key>",
-          "ANTHROPIC_BASE_URL": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic"
-        },
-        "disallowedTools": ["WebSearch"],
-        "models": [
-          { "id": "qwen3.5-plus", "label": "Qwen 3.5 Plus", "isDefault": true },
-          { "id": "qwen3-coder-next", "label": "Qwen 3 Coder Next" }
-        ]
-      }
-    }
-  }
-}
-```
-
-## Multiple profiles
-
-Create as many entries as you want against the same first-class provider. Each one shows up as a separate option in the app with its own credentials and models.
-
-```json
-{
-  "agents": {
-    "providers": {
-      "claude-work": {
-        "extends": "claude",
-        "label": "Claude (Work)",
-        "env": { "ANTHROPIC_API_KEY": "sk-ant-work-..." }
-      },
-      "claude-personal": {
-        "extends": "claude",
-        "label": "Claude (Personal)",
-        "env": { "ANTHROPIC_API_KEY": "sk-ant-personal-..." }
-      }
-    }
-  }
-}
-```
-
-## Custom binary
-
-`command` is an array, first element is the binary, the rest are arguments. It fully replaces the default launch command for that provider.
-
-```json
-{
-  "agents": {
-    "providers": {
-      "claude": {
-        "command": ["/opt/claude-nightly/claude"]
-      }
-    }
-  }
-}
-```
-
-## ACP providers
-
-Any agent that speaks [ACP](https://agentclientprotocol.com) over stdio can be added with `extends: "acp"` and a `command`. Paseo spawns the process, sends an `initialize` JSON-RPC request, and the agent reports its capabilities, modes, and models at runtime.
-
-```json
-{
-  "agents": {
-    "providers": {
-      "gemini": {
-        "extends": "acp",
-        "label": "Google Gemini",
-        "command": ["gemini", "--acp"]
-      },
-      "hermes": {
-        "extends": "acp",
-        "label": "Hermes",
-        "command": ["hermes", "acp"]
-      }
-    }
-  }
-}
-```
-
-## Adding or relabeling models
-
-`models` replaces the model list entirely. `additionalModels` merges with runtime-discovered models (ACP) or with `models`, use it to add an extra entry or relabel a discovered one without redeclaring the full list. An entry with the same `id` as a discovered model updates it in place.
-
-```json
-{
-  "agents": {
-    "providers": {
-      "gemini": {
-        "extends": "acp",
-        "label": "Google Gemini",
-        "command": ["gemini", "--acp"],
-        "additionalModels": [
-          { "id": "experimental-model", "label": "Experimental", "isDefault": true },
-          { "id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro (preferred)" }
-        ]
-      }
-    }
-  }
-}
-```
+---
 
 ## Disabling a provider
 
+Set `enabled: false` to hide a provider from the provider list. The provider will not appear in the app or CLI.
+
 ```json
 {
   "agents": {
     "providers": {
-      "copilot": { "enabled": false }
+      "pi": { "enabled": false }
     }
   }
 }
 ```
 
-## Full reference
+This works for both built-in and custom providers. To re-enable, set `enabled: true` or remove the `enabled` field entirely.
 
-For the complete field reference (`extends`, `label`, `command`, `env`, `options`, `models`, `additionalModels`, `disallowedTools`, `paseoTools`, `enabled`, `order`), model and thinking-option schemas, and deeper examples for each plan, see [docs/custom-providers.md](https://github.com/getpaseo/paseo/blob/main/docs/custom-providers.md) on GitHub. See [Limit Paseo tools by provider](/docs/mcp#limit-paseo-tools-by-provider) for `paseoTools` configuration.
+---
+
+## Provider override reference
+
+Every entry under `agents.providers` accepts these fields:
+
+| Field              | Type                      | Required          | Description                                                        |
+| ------------------ | ------------------------- | ----------------- | ------------------------------------------------------------------ |
+| `extends`          | `string`                  | Yes (custom only) | Built-in provider ID to inherit from (`pi`)                        |
+| `label`            | `string`                  | Yes (custom only) | Display name in the UI                                             |
+| `description`      | `string`                  | No                | Short description shown in the UI                                  |
+| `command`          | `string[]`                | No                | Command to spawn the agent process                                 |
+| `env`              | `Record<string, string>`  | No                | Environment variables to set for the agent process                 |
+| `options`          | `Record<string, unknown>` | No                | Provider-specific options such as `supportsMcpServers: false`      |
+| `models`           | `ProviderProfileModel[]`  | No                | Static model list (overrides runtime discovery)                    |
+| `additionalModels` | `ProviderProfileModel[]`  | No                | Static model additions (merged with runtime discovery or `models`) |
+| `disallowedTools`  | `string[]`                | No                | Tool names to disable for this provider (e.g. `["WebSearch"]`)     |
+| `enabled`          | `boolean`                 | No                | Set to `false` to hide the provider (default: `true`)              |
+| `order`            | `number`                  | No                | Sort order in the provider list                                    |
+
+### Model definition
+
+Each entry in the `models` array:
+
+| Field             | Type               | Required | Description                           |
+| ----------------- | ------------------ | -------- | ------------------------------------- |
+| `id`              | `string`           | Yes      | Model identifier sent to the provider |
+| `label`           | `string`           | Yes      | Display name in the UI                |
+| `description`     | `string`           | No       | Short description                     |
+| `isDefault`       | `boolean`          | No       | Mark as the default model selection   |
+| `thinkingOptions` | `ThinkingOption[]` | No       | Available thinking/reasoning levels   |
+
+### Thinking option
+
+| Field         | Type      | Required | Description                         |
+| ------------- | --------- | -------- | ----------------------------------- |
+| `id`          | `string`  | Yes      | Thinking option identifier          |
+| `label`       | `string`  | Yes      | Display name                        |
+| `description` | `string`  | No       | Short description                   |
+| `isDefault`   | `boolean` | No       | Mark as the default thinking option |
+
+### Valid `extends` values
+
+Built-in providers: `pi`

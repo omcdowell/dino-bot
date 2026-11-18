@@ -47,8 +47,8 @@ export function getTailnetIp(
 }
 
 /**
- * Endpoints for a direct (v3) pairing offer, best first (rel-bench §3.3): names the installer
- * knows (`PASEO_DIRECT_ENDPOINTS`, e.g. the MagicDNS name), the tailnet IP, `<host>.local`, the
+ * Endpoints for a direct (v3) pairing offer, best first (rel-bench §3.3): extras the installer
+ * knows (`PASEO_DIRECT_ENDPOINTS`, the tailnet IP), the tailnet IP, `<host>.local`, the
  * LAN IP, then localhost. A daemon bound to one address offers that address (plus extras) only.
  */
 export function buildDirectOfferEndpoints(args: {
@@ -89,6 +89,30 @@ export function isTailnetEndpoint(endpoint: string): boolean {
   if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255))
     return false;
   return parts[0] === 100 && parts[1]! >= 64 && parts[1]! <= 127;
+}
+
+function endpointHostPort(endpoint: string): { host: string; port: string } | null {
+  const match = /^(.*):(\d+)$/.exec(endpoint.trim());
+  if (!match) return null;
+  return { host: match[1]!.replace(/^\[|\]$/g, "").toLowerCase(), port: match[2]! };
+}
+
+/**
+ * One route per host (IO1): drops a MagicDNS name (*.ts.net) when the list also holds a tailnet
+ * IP on the same port. Both reach the same daemon; offering both made the phone switch between
+ * them under load, and every switch made a new client (bots screen remount, lost dictation).
+ * A name with no tailnet IP beside it is kept (the only way in).
+ */
+export function dropShadowedMagicDnsEndpoints(endpoints: string[]): string[] {
+  const ipPorts = new Set<string>();
+  for (const endpoint of endpoints) {
+    const hp = endpointHostPort(endpoint);
+    if (hp && !hp.host.endsWith(".ts.net") && isTailnetEndpoint(endpoint)) ipPorts.add(hp.port);
+  }
+  return endpoints.filter((endpoint) => {
+    const hp = endpointHostPort(endpoint);
+    return !(hp && hp.host.endsWith(".ts.net") && ipPorts.has(hp.port));
+  });
 }
 
 export function createDirectConnectionOffer(args: {

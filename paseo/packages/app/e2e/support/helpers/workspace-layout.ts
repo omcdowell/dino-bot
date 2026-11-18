@@ -7,7 +7,7 @@ import {
 } from "../../../src/workspace-tabs/model";
 import { getServerId } from "./server-id";
 
-/** Seed the reported hidden Explorer-only layout with 2,250 saved agent draft tabs. */
+/** Seed the reported hidden Explorer-only layout with 2,250 saved agent tabs. */
 export async function seedCorruptedWorkspaceLayout(page: Page, workspaceId: string): Promise<void> {
   const raw = await page.evaluate(() => localStorage.getItem("workspace-layout-state"));
   if (raw === null) throw new Error("Explorer fixture: workspace layout was not persisted");
@@ -25,12 +25,12 @@ export async function seedCorruptedWorkspaceLayout(page: Page, workspaceId: stri
   }
   const tabs: WorkspaceTab[] = [
     { tabId: "files", target: { kind: "files" }, createdAt: 1 },
-    { tabId: "changes_tree", target: { kind: "changes_tree" }, createdAt: 1 },
+    { tabId: "network_status", target: { kind: "network_status" }, createdAt: 1 },
     ...Array.from(
       { length: 2250 },
       (_, index): WorkspaceTab => ({
-        tabId: `draft_saved_${index}`,
-        target: { kind: "draft", draftId: `draft_saved_${index}` },
+        tabId: `agent_saved_${index}`,
+        target: { kind: "agent", agentId: `saved_${index}` },
         createdAt: index + 2,
       }),
     ),

@@ -2,11 +2,10 @@ import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { QrCode, Link2, ClipboardPaste, Terminal } from "lucide-react-native";
+import { QrCode, Link2, ClipboardPaste } from "lucide-react-native";
 import { AdaptiveModalSheet, type SheetHeader } from "./adaptive-modal-sheet";
 import { isFdroidBuild } from "@/constants/build-profile";
 import { isNative } from "@/constants/platform";
-import { isElectronRuntime } from "@/desktop/host";
 import { RELEASE_POLICY } from "@/constants/flavour";
 import type { Theme } from "@/styles/theme";
 
@@ -16,7 +15,6 @@ const PASTE_LINK_TAILNET_DESCRIPTION = "From your computer's setup. Connects thr
 const ThemedQrCode = withUnistyles(QrCode);
 const ThemedLink2 = withUnistyles(Link2);
 const ThemedClipboardPaste = withUnistyles(ClipboardPaste);
-const ThemedTerminal = withUnistyles(Terminal);
 const foregroundIconMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 
 const styles = StyleSheet.create((theme) => ({
@@ -49,7 +47,6 @@ export interface AddHostMethodModalProps {
   visible: boolean;
   onClose: () => void;
   onDirectConnection: () => void;
-  onRemoteSsh: () => void;
   onScanQr: () => void;
   onPasteLink: () => void;
 }
@@ -58,7 +55,6 @@ export function AddHostMethodModal({
   visible,
   onClose,
   onDirectConnection,
-  onRemoteSsh,
   onScanQr,
   onPasteLink,
 }: AddHostMethodModalProps) {
@@ -72,10 +68,6 @@ export function AddHostMethodModal({
   const handleScan = useCallback(() => {
     onScanQr();
   }, [onScanQr]);
-
-  const handleRemoteSsh = useCallback(() => {
-    onRemoteSsh();
-  }, [onRemoteSsh]);
 
   const handlePaste = useCallback(() => {
     onPasteLink();
@@ -106,24 +98,6 @@ export function AddHostMethodModal({
           </View>
         </Pressable>
       )}
-
-      {isElectronRuntime() && RELEASE_POLICY.desktopRemoteSsh ? (
-        <Pressable
-          style={styles.option}
-          onPress={handleRemoteSsh}
-          accessibilityRole="button"
-          accessibilityLabel={t("pairing.connectionMethods.remoteSsh.title")}
-          testID="add-host-method-remote-ssh"
-        >
-          <ThemedTerminal size={18} uniProps={foregroundIconMapping} />
-          <View style={styles.optionBody}>
-            <Text style={styles.optionText}>{t("pairing.connectionMethods.remoteSsh.title")}</Text>
-            <Text style={styles.optionSubtext}>
-              {t("pairing.connectionMethods.remoteSsh.description")}
-            </Text>
-          </View>
-        </Pressable>
-      ) : null}
 
       {isNative && !isFdroidBuild ? (
         <Pressable

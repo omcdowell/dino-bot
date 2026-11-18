@@ -9,7 +9,8 @@ import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import type { ProviderEvent } from "@getpaseo/plugin/server/provider";
 import { CcHost } from "../server/cc/engine";
-import { createCcProvider, promptText } from "../server/cc/provider";
+import { createCcProvider, IMAGE_NOT_KEPT, piImageText, promptText } from "../server/cc/provider";
+import { userText } from "pi-optchat/src/run-log.ts";
 // @ts-expect-error plain JS mods, loaded by Claude Code
 import { register as registerView } from "../claude-code/view/hooks/register.js";
 
@@ -152,6 +153,39 @@ describe("cc provider: images on the timeline", () => {
         ["user_message", "[image: /gone.png (read the file to see it)]", undefined],
       ],
     );
+  });
+
+  it("a reopened chat shows an image sent while the bot ran on pi, and a note for one pi did not keep", async () => {
+    const { root, host, conn, events, profileDir } = await botProvider("p4");
+    // What pi-optchat now logs for a pi user message with an image (and Pi's resize note).
+    const kept = userText(
+      [
+        { type: "text", text: "on pi\n\n[Image: original 3024x4032, displayed at 1500x2000. Multiply coordinates by 2.02 to map to original image.]" },
+        { type: "image", data: PNG, mimeType: "image/png" },
+      ],
+      join(profileDir, "images"),
+    );
+    const placeholder = "[image attachment: available in Pi session; text memory does not preserve image bytes]";
+    const engine = await host.engine("kit", profileDir, { env: {}, botDir: join(root, "kit") });
+    await engine.handle("POST", "/append", new URLSearchParams(), {
+      messages: [
+        { kind: "user", text: kept },
+        { kind: "user", text: `older\n\n[Image: original 3024x4032, displayed at 1500x2000. Multiply coordinates by 2.02 to map to original image.]\n${placeholder}` },
+        { kind: "user", text: `\n${placeholder}\n${placeholder}` },
+      ],
+    });
+    await conn.send({ type: "session.open", requestId: "r1", sessionId: "s1", history: "replay", config: { cwd: join(root, "kit"), env: {}, mcpServers: {}, settings: {}, persist: true } });
+    await tick(50);
+    const items = events.flatMap((e) => (e.type === "timeline.item" ? [e.item as any] : []));
+    assert.deepEqual(
+      items.map((i) => [i.type, i.text, i.images]),
+      [
+        ["user_message", "on pi", [{ data: PNG, mimeType: "image/png" }]],
+        ["user_message", `older\n${IMAGE_NOT_KEPT}`, undefined],
+        ["user_message", `${IMAGE_NOT_KEPT}\n${IMAGE_NOT_KEPT}`, undefined],
+      ],
+    );
+    assert.equal(piImageText("[Image: a note the person typed]"), "[Image: a note the person typed]");
   });
 
   it("a reopened chat shows the sent images and the tool rows together", async () => {

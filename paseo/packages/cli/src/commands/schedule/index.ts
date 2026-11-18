@@ -26,12 +26,9 @@ export function createScheduleCommand(): Command {
       .addOption(new Option("--target <target>", "Legacy schedule target").hideHelp())
       .option(
         "--provider <provider>",
-        "Agent provider, or provider/model (e.g. codex or codex/gpt-5.4)",
+        "Agent provider, or provider/model (e.g. pi or pi/openai-codex/gpt-5.4)",
       )
-      .option(
-        "--mode <mode>",
-        "Provider-specific mode (e.g. claude bypassPermissions, opencode build)",
-      )
+      .option("--mode <mode>", "Provider-specific mode (e.g. claude bypassPermissions)")
       .option("--thinking <id>", "Thinking option ID for new-agent runs")
       .option("--cwd <path>", "Working directory (default: current; required with --host)")
       .option("--run-now", "Fire one immediate run on creation")

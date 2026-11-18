@@ -39,7 +39,6 @@ describe("resolveUpdateCalloutDescriptor", () => {
     expect(descriptor?.showGiftIcon).toBe(true);
     expect(descriptor?.body).toEqual({ kind: "available", versionLabel: "v1.2.3" });
     expect(descriptor?.actions).toEqual([
-      { role: "changelog", label: "What's new" },
       { role: "install", label: "Install & restart", variant: "primary", disabled: false },
     ]);
     expect(descriptor?.dismissalKey).toBe("desktop-update:available:1.2.3");
@@ -70,7 +69,6 @@ describe("resolveUpdateCalloutDescriptor", () => {
     expect(descriptor?.showGiftIcon).toBe(false);
     expect(descriptor?.variant).toBe("default");
     expect(descriptor?.actions).toEqual([
-      { role: "changelog", label: "What's new" },
       { role: "install", label: "Installing...", variant: "primary", disabled: true },
     ]);
     expect(descriptor?.dismissalKey).toBe("desktop-update:installing:1.2.3");
@@ -85,10 +83,7 @@ describe("resolveUpdateCalloutDescriptor", () => {
     expect(descriptor?.body).toEqual({ kind: "error", message: "Download failed" });
     expect(descriptor?.variant).toBe("error");
     expect(descriptor?.showGiftIcon).toBe(false);
-    expect(descriptor?.actions).toEqual([
-      { role: "changelog", label: "What's new" },
-      { role: "retry", label: "Retry", variant: "primary" },
-    ]);
+    expect(descriptor?.actions).toEqual([{ role: "retry", label: "Retry", variant: "primary" }]);
     expect(descriptor?.dismissalKey).toBe("desktop-update:error:unknown");
   });
 
@@ -113,7 +108,6 @@ describe("resolveUpdateCalloutDescriptor", () => {
 
       expect(descriptor?.title).toBe("有可用更新");
       expect(descriptor?.actions).toEqual([
-        { role: "changelog", label: "更新内容" },
         { role: "install", label: "安装并重启", variant: "primary", disabled: false },
       ]);
     } finally {

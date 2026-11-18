@@ -183,6 +183,92 @@ function toolImages(v, out = [], depth = 0) {
   return out
 }
 
+// A foreground Bash call's output while it runs, as pi bots show it (pi's tool_execution_update). Claude Code writes the
+// output of every shell command to <tmp>/claude-<uid>/<project>/<session id>/tasks/<task id>.output as it comes and
+// deletes the file when the command returns; no mod hook reports it. So while the call runs, the file that appeared
+// in the session's tasks folder is read every OPTCHAT_TOOL_POLL_MS (default 1000) and its tail goes to the engine.
+const LIVE_MAX_BYTES = 512 * 1024
+let tasksDirOf = { sid: null, dir: null }
+const claimed = new Set()
+async function tasksDir($) {
+  const sid = await $.session.id()
+  if (!sid) return null
+  if (tasksDirOf.sid === sid && tasksDirOf.dir) return tasksDirOf.dir
+  const bases = [...new Set([await $.env.get('CLAUDE_CODE_TMPDIR'), await $.env.get('TMPDIR'), '/tmp'].filter(Boolean))]
+  for (const base of bases) {
+    let roots = []
+    try {
+      roots = (await $.fs.list(base)).filter((x) => x.kind === 'dir' && /^claude-\d*$/.test(x.name))
+    } catch {}
+    for (const root of roots) {
+      let projects = []
+      try {
+        projects = (await $.fs.list(`${base}/${root.name}`)).filter((x) => x.kind === 'dir')
+      } catch {}
+      for (const p of projects) {
+        const dir = `${base}/${root.name}/${p.name}/${sid}/tasks`
+        if (await $.fs.exists(dir).catch(() => false)) return (tasksDirOf = { sid, dir }).dir
+      }
+    }
+  }
+  return null
+}
+const outputs = async ($, dir) => {
+  try {
+    return (await $.fs.list(dir)).filter((x) => x.kind === 'file' && x.name.endsWith('.output'))
+  } catch {
+    return []
+  }
+}
+
+/** Runs the call (`run`), posting its output so far while it runs; resolves to the call's result. */
+async function withLiveOutput($, e, id, args, run) {
+  const ms = Number(await $.env.get('OPTCHAT_TOOL_POLL_MS')) || 1000
+  // The command started a moment ago at most: the files there already are other commands' (background tasks).
+  const dir = await tasksDir($).catch(() => null)
+  const before = new Set(dir ? (await outputs($, dir)).map((x) => x.name) : [])
+  let done = false
+  let inflight = Promise.resolve()
+  let mine = null
+  let size = -1
+  const loop = (async () => {
+    while (!done) {
+      await new Promise((r) => setTimeout(r, ms))
+      if (done) break
+      const d = dir ?? (await tasksDir($).catch(() => null))
+      if (!d) continue
+      const files = await outputs($, d)
+      if (!mine) {
+        const f = files.find((x) => !before.has(x.name) && !claimed.has(`${d}/${x.name}`))
+        if (!f) continue
+        mine = `${d}/${f.name}`
+        claimed.add(mine)
+      }
+      const st = files.find((x) => `${d}/${x.name}` === mine)
+      if (!st || typeof st.size !== 'number' || st.size === size) continue
+      size = st.size
+      let output
+      if (size > LIVE_MAX_BYTES) output = `[${size} bytes of output so far]`
+      else {
+        const text = await $.fs.read(mine).catch(() => null)
+        if (typeof text !== 'string' || !text) continue
+        output = text.length > 4000 ? '…' + text.slice(-4000) : text
+      }
+      if (done) break
+      inflight = post($, '/event', { type: 'tool', phase: 'running', id, name: e.tool, input: args, output })
+      await inflight
+    }
+  })().catch(() => {})
+  try {
+    return await run()
+  } finally {
+    done = true
+    if (mine) claimed.delete(mine)
+    await inflight
+    void loop
+  }
+}
+
 const THINK_MS = 250
 let viewShown = false
 export function register(on) {
@@ -205,6 +291,8 @@ export function register(on) {
       } catch (err) {
         r = { deny: `OptChat memory unavailable: ${err}` }
       }
+    } else if (!e.agentId && tool === 'Bash' && args.run_in_background !== true) {
+      r = await withLiveOutput($, e, id, args, () => next(e))
     } else {
       r = await next(e)
     }

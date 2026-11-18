@@ -6,8 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { createTestLogger } from "../../../test-utils/test-logger.js";
 import { isPlatform } from "../../../test-utils/platform.js";
-import { CodexAppServerAgentClient } from "./codex-app-server-agent.js";
-import { OpenCodeAgentClient } from "./opencode-agent.js";
+import { PiRpcAgentClient } from "./pi/agent.js";
 
 const originalEnv = {
   PATH: process.env.PATH,
@@ -51,20 +50,11 @@ afterEach(() => {
 });
 
 describe.skipIf(isPlatform("win32"))("provider-availability POSIX-only", () => {
-  test("Codex reports available when the default command resolves from PATH", async () => {
-    const binDir = makeTempDir("provider-availability-codex-");
+  test("Pi reports available when the default command resolves from PATH", async () => {
+    const binDir = makeTempDir("provider-availability-pi-");
     isolatePathTo(binDir);
-    writeProviderShim(binDir, "codex");
-    const client = new CodexAppServerAgentClient(createTestLogger());
-
-    await expect(client.isAvailable()).resolves.toBe(true);
-  });
-
-  test("OpenCode reports available when the default command resolves from PATH", async () => {
-    const binDir = makeTempDir("provider-availability-opencode-");
-    isolatePathTo(binDir);
-    writeProviderShim(binDir, "opencode");
-    const client = new OpenCodeAgentClient(createTestLogger());
+    writeProviderShim(binDir, "pi");
+    const client = new PiRpcAgentClient({ logger: createTestLogger() });
 
     await expect(client.isAvailable()).resolves.toBe(true);
   });

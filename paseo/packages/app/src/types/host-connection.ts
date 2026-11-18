@@ -296,6 +296,43 @@ function hasProfileChanged(input: {
   );
 }
 
+function directEndpointParts(endpoint: string): { host: string; port: string } | null {
+  const match = /^(.*):(\d+)$/.exec(endpoint.trim());
+  if (!match) return null;
+  return { host: match[1]!.replace(/^\[|\]$/g, "").toLowerCase(), port: match[2]! };
+}
+
+function isTailnetIpv4(host: string): boolean {
+  const parts = host.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+    return false;
+  }
+  return parts[0] === 100 && parts[1]! >= 64 && parts[1]! <= 127;
+}
+
+/**
+ * One route per host (IO1): drops a direct MagicDNS connection (*.ts.net) when the same host also
+ * has a direct tailnet-IP connection (100.64.0.0/10) on the same port. Both reach the same daemon,
+ * and with both saved the runtime switched between them under load; every switch made a new
+ * client (plugin re-evaluation, bots screen remount, lost dictation). A name with no tailnet IP
+ * beside it is kept: it is the only way in.
+ */
+export function dropShadowedMagicDnsConnections<T extends HostConnection>(connections: T[]): T[] {
+  const ipPorts = new Set<string>();
+  for (const connection of connections) {
+    if (connection.type !== "directTcp") continue;
+    const parts = directEndpointParts(connection.endpoint);
+    if (parts && isTailnetIpv4(parts.host)) ipPorts.add(parts.port);
+  }
+  if (ipPorts.size === 0) return connections;
+  const kept = connections.filter((connection) => {
+    if (connection.type !== "directTcp") return true;
+    const parts = directEndpointParts(connection.endpoint);
+    return !(parts && parts.host.endsWith(".ts.net") && ipPorts.has(parts.port));
+  });
+  return kept.length === connections.length ? connections : kept;
+}
+
 export function upsertHostConnectionInProfiles(input: {
   profiles: HostProfile[];
   serverId: string;
@@ -344,17 +381,24 @@ export function upsertHostConnectionInProfiles(input: {
 
   const matchedProfiles = matchingIndexes.map((index) => existing[index]);
   const prev = matchedProfiles.find((daemon) => daemon.serverId === serverId) ?? matchedProfiles[0];
-  const nextConnections = upsertHostConnectionById(
-    matchedProfiles.flatMap((daemon) => daemon.connections),
-    normalizedConnection,
+  const nextConnections = dropShadowedMagicDnsConnections(
+    upsertHostConnectionById(
+      matchedProfiles.flatMap((daemon) => daemon.connections),
+      normalizedConnection,
+    ),
   );
   const nextLifecycle = prev.lifecycle;
   const nextLabel = prev.label === prev.serverId ? derivedLabel : prev.label;
-  const nextPreferredConnectionId =
+  let nextPreferredConnectionId: string | null = normalizedConnection.id;
+  if (
     prev.preferredConnectionId &&
     nextConnections.some((connection) => connection.id === prev.preferredConnectionId)
-      ? prev.preferredConnectionId
-      : normalizedConnection.id;
+  ) {
+    nextPreferredConnectionId = prev.preferredConnectionId;
+  } else if (!nextConnections.some((connection) => connection.id === normalizedConnection.id)) {
+    // The upserted route was dropped (a MagicDNS name beside the tailnet IP).
+    nextPreferredConnectionId = nextConnections[0]?.id ?? null;
+  }
   const nextCreatedAt = matchedProfiles.reduce(
     (earliest, daemon) => (daemon.createdAt < earliest ? daemon.createdAt : earliest),
     prev.createdAt,
@@ -440,7 +484,8 @@ export function connectionFromListen(listen: string): HostConnection | null {
 
 /**
  * The direct connections a v3 (relay-free) offer describes, in the offer's order (best first).
- * Bad endpoints are skipped; duplicates collapse.
+ * Bad endpoints are skipped; duplicates collapse; a MagicDNS name beside a tailnet IP is dropped
+ * (one route per host, dropShadowedMagicDnsConnections).
  */
 export function directConnectionsFromOffer(
   offer: DirectConnectionOffer,
@@ -466,7 +511,7 @@ export function directConnectionsFromOffer(
       daemonPublicKeyB64: offer.daemonPublicKeyB64.trim(),
     });
   }
-  return out;
+  return dropShadowedMagicDnsConnections(out);
 }
 
 export function relayConnectionFromOffer(offer: ConnectionOffer): RelayHostConnection {
@@ -640,9 +685,12 @@ export function normalizeStoredHostProfile(entry: unknown): HostProfile | null {
   const password =
     record.password ?? (legacyPassword?.type === "directTcp" ? legacyPassword.password : undefined);
 
-  const connections = record.connections
-    .map((connection) => normalizeStoredConnection(connection))
-    .filter((connection): connection is HostConnection => connection !== null);
+  // One route per host: a phone paired before IO1 holds the MagicDNS name and the tailnet IP.
+  const connections = dropShadowedMagicDnsConnections(
+    record.connections
+      .map((connection) => normalizeStoredConnection(connection))
+      .filter((connection): connection is HostConnection => connection !== null),
+  );
   if (connections.length === 0) {
     return null;
   }

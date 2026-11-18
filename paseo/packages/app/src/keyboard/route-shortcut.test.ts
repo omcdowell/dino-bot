@@ -28,17 +28,9 @@ function makeCtx(overrides: Partial<ShortcutRoutingContext> = {}): ShortcutRouti
 describe("routeKeyboardShortcut — dispatch passthroughs", () => {
   it.each([
     ["agent.interrupt", { id: "agent.interrupt", scope: "global" }],
-    ["workspace.tab.menu.open", { id: "workspace.tab.menu.open", scope: "workspace" }],
-    ["workspace.tab.target.agent", { id: "workspace.tab.target.agent", scope: "workspace" }],
-    ["workspace.tab.target.browser", { id: "workspace.tab.target.browser", scope: "workspace" }],
-    ["workspace.tab.target.changes", { id: "workspace.tab.target.changes", scope: "workspace" }],
     ["workspace.tab.target.files", { id: "workspace.tab.target.files", scope: "workspace" }],
-    ["workspace.new", { id: "workspace.new", scope: "sidebar" }],
-    ["workspace.project.pick", { id: "workspace.project.pick", scope: "workspace" }],
     ["workspace.archive", { id: "workspace.archive", scope: "sidebar" }],
     ["workspace.pin", { id: "workspace.pin", scope: "sidebar" }],
-    ["worktree.new", { id: "worktree.new", scope: "sidebar" }],
-    ["workspace.terminal.new", { id: "workspace.terminal.new", scope: "workspace" }],
     ["workspace.tab.close.current", { id: "workspace.tab.close-current", scope: "workspace" }],
     ["sidebar.toggle.right", { id: "sidebar.toggle.right", scope: "sidebar" }],
     ["workspace.pane.split.right", { id: "workspace.pane.split.right", scope: "workspace" }],
@@ -367,12 +359,6 @@ describe("routeKeyboardShortcut — callbacks and pickers", () => {
       name,
     });
   });
-
-  it("agent.new → open-project-picker", () => {
-    expect(
-      routeKeyboardShortcut({ action: "agent.new", payload: null }, makeCtx()),
-    ).toEqual<ShortcutAction>({ kind: "open-project-picker" });
-  });
 });
 
 describe("routeKeyboardShortcut — toggle dialogs", () => {
@@ -382,16 +368,13 @@ describe("routeKeyboardShortcut — toggle dialogs", () => {
     ).toEqual<ShortcutAction>({ kind: "command-center-toggle", nextOpen: true, scope: "files" });
   });
 
-  it("leaves the file-search shortcut to the project-picker host outside a workspace", () => {
+  it("ignores the file-search shortcut outside a workspace", () => {
     expect(
       routeKeyboardShortcut(
         { action: "command-center.files", payload: null },
         makeCtx({ pathname: "/settings" }),
       ),
-    ).toEqual<ShortcutAction>({
-      kind: "dispatch",
-      action: { id: "workspace.project.pick", scope: "workspace" },
-    });
+    ).toEqual<ShortcutAction>({ kind: "none" });
   });
 
   it("opens the command center when closed", () => {

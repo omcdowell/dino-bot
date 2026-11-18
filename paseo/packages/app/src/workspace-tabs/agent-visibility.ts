@@ -50,21 +50,11 @@ export function deriveWorkspaceAgentVisibility(input: {
 export function buildWorkspaceTabSnapshot(input: {
   agentVisibility: WorkspaceAgentVisibility;
   agentsHydrated: boolean;
-  terminalsHydrated: boolean;
-  knownTerminalIds: Iterable<string>;
-  standaloneTerminalIds: Iterable<string>;
-  hasActivePendingTerminalCreate: boolean;
-  hasActivePendingDraftCreate: boolean;
 }): WorkspaceTabSnapshot {
   return {
     agentsHydrated: input.agentsHydrated,
-    terminalsHydrated: input.terminalsHydrated,
     activeAgentIds: input.agentVisibility.activeAgentIds,
     autoOpenAgentIds: input.agentVisibility.autoOpenAgentIds,
-    knownTerminalIds: input.knownTerminalIds,
-    standaloneTerminalIds: input.standaloneTerminalIds,
-    hasActivePendingTerminalCreate: input.hasActivePendingTerminalCreate,
-    hasActivePendingDraftCreate: input.hasActivePendingDraftCreate,
   };
 }
 

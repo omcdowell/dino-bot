@@ -16,10 +16,10 @@ To try the workflow, [run parallel tasks in separate worktrees](/docs/parallel-d
 
 A provider is the contract between Paseo and one external agent CLI: how to launch it, how to stream its output, how to send input back, what modes it supports. The actual binary lives on your machine and runs as a normal subprocess.
 
-## Two tiers
+## Two ways
 
-- **Native support**, Paseo ships a bundled adapter for the major agents (Claude Code, Codex, OpenCode, Pi, [Antigravity](/docs/supported-providers#antigravity), [Muse Code](/docs/muse-code)). Auto-discovered when the underlying CLI is installed, with mode metadata and voice support where applicable.
-- **ACP catalog**, any agent speaking the [Agent Client Protocol](https://agentclientprotocol.com) is supported through a generic adapter. Paseo ships a curated catalog of one-click installs (Cursor, Gemini, GitHub Copilot, Hermes, Kimi, Qwen Code, and 25+ more), and you can add any other ACP agent yourself.
+- **Native support**, Paseo ships a bundled adapter for [Pi](https://pi.dev). Auto-discovered when the `pi` CLI is installed.
+- **Provider plugins**, other agents can be added as [provider plugins](/docs/plugins/providers). Claude Code runs in the Paseo terminal.
 
 Either way, **you install the underlying CLI**. Paseo runs it.
 

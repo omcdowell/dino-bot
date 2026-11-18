@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -25,8 +25,6 @@ function createInstallEnv(root: string) {
   return {
     env: {
       CLAUDE_CONFIG_DIR: join(root, "claude"),
-      CODEX_HOME: join(root, "codex"),
-      OPENCODE_CONFIG_DIR: join(root, "opencode"),
     },
     homeDir: join(root, "home"),
   };
@@ -35,8 +33,6 @@ function createInstallEnv(root: string) {
 function hookPaths(root: string) {
   return {
     claude: join(root, "claude", "settings.json"),
-    codex: join(root, "codex", "hooks.json"),
-    opencode: join(root, "opencode", "plugins", "paseo-terminal-activity.js"),
   };
 }
 
@@ -64,8 +60,6 @@ describe("applyTerminalAgentHookSetting", () => {
 
     const paths = hookPaths(root);
     expect(existsSync(paths.claude)).toBe(false);
-    expect(existsSync(paths.codex)).toBe(false);
-    expect(existsSync(paths.opencode)).toBe(false);
   });
 
   it("installs agent hooks when the setting is enabled", () => {
@@ -76,8 +70,6 @@ describe("applyTerminalAgentHookSetting", () => {
 
     const paths = hookPaths(root);
     expect(existsSync(paths.claude)).toBe(true);
-    expect(existsSync(paths.codex)).toBe(true);
-    expect(existsSync(paths.opencode)).toBe(true);
   });
 
   it("installs on enable and removes hooks on disable when toggled live", () => {
@@ -86,13 +78,12 @@ describe("applyTerminalAgentHookSetting", () => {
     const paths = hookPaths(root);
 
     applyTerminalAgentHookSetting({ store, install: createInstallEnv(root) });
-    expect(existsSync(paths.opencode)).toBe(false);
+    expect(existsSync(paths.claude)).toBe(false);
 
     store.patch({ enableTerminalAgentHooks: true });
-    expect(existsSync(paths.codex)).toBe(true);
-    expect(existsSync(paths.opencode)).toBe(true);
+    expect(readFileSync(paths.claude, "utf8")).toContain("paseo");
 
     store.patch({ enableTerminalAgentHooks: false });
-    expect(existsSync(paths.opencode)).toBe(false);
+    expect(readFileSync(paths.claude, "utf8")).not.toContain("paseo");
   });
 });

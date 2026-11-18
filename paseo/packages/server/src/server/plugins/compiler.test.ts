@@ -153,18 +153,17 @@ describe("plugin runtime entries", () => {
     await expect(compilePlugin(entries)).rejects.toThrow("client-only module");
   });
 
-  it.each([
-    "@getpaseo/plugin/server",
-    "@getpaseo/plugin/server/provider",
-    "@getpaseo/plugin/server/acp",
-  ])("rejects %s from client code", async (specifier) => {
-    const entries = await createSplitPlugin();
-    await writeFile(
-      entries.client,
-      `import * as value from "${specifier}"; export default function contribute() { return value; }`,
-    );
-    await expect(compilePlugin(entries)).rejects.toThrow("server-only module");
-  });
+  it.each(["@getpaseo/plugin/server", "@getpaseo/plugin/server/provider"])(
+    "rejects %s from client code",
+    async (specifier) => {
+      const entries = await createSplitPlugin();
+      await writeFile(
+        entries.client,
+        `import * as value from "${specifier}"; export default function contribute() { return value; }`,
+      );
+      await expect(compilePlugin(entries)).rejects.toThrow("server-only module");
+    },
+  );
 
   it.each([
     "react",

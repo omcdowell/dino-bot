@@ -15,8 +15,8 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("direct (v3) pairing", () => {
   it("turns offer endpoints into direct connections in order, without duplicates", () => {
+    // The MagicDNS name beside the tailnet IP is dropped (one route per host, IO1).
     expect(directConnectionsFromOffer(offer).map((c) => c.id)).toEqual([
-      "direct:box.ts.net:6767",
       "direct:100.64.0.7:6767",
       "direct:192.168.1.20:6767",
     ]);
@@ -42,7 +42,7 @@ describe("direct (v3) pairing", () => {
     });
     expect(won.connection.endpoint).toBe("100.64.0.7:6767");
     await wait(40);
-    expect(closed.sort()).toEqual(["192.168.1.20:6767", "box.ts.net:6767"]);
+    expect(closed.sort()).toEqual(["192.168.1.20:6767"]);
   });
 
   it("ignores an endpoint that answers as another server", async () => {

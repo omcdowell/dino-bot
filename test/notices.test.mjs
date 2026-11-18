@@ -76,12 +76,6 @@ describe("build/notices.mjs", () => {
     assert.match(r.stderr, /mystery@1\.0\.0 UNKNOWN/);
   });
 
-  it("accepts the Claude Agent SDK placeholder", () => {
-    const s = fakeStage();
-    pkg(s.stage, "daemon/node_modules/@anthropic-ai/claude-agent-sdk", { name: "@anthropic-ai/claude-agent-sdk", version: "0.0.0-dinobot-stub", license: "Apache-2.0" });
-    assert.equal(run(s).status, 0);
-  });
-
   it("refuses a part without its LICENSE file", () => {
     const s = fakeStage();
     mkdirSync(join(s.stage, "herdr"));

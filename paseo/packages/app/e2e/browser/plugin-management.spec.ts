@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { TestInfo } from "@playwright/test";
-import { buildOpenProjectRoute } from "@/utils/host-routes";
 import { expect, test as base, type Page } from "../support/fixtures";
 import { gotoAppShell, openSettings } from "../support/helpers/app";
 import { daemonWsRoutePattern } from "../support/helpers/daemon-port";
@@ -167,7 +166,7 @@ async function openPluginSettings(page: Page): Promise<void> {
 
 async function openCompactPluginSettings(page: Page): Promise<void> {
   const serverId = getServerId();
-  await openCompactSettings(page, buildOpenProjectRoute());
+  await openCompactSettings(page, "/");
   await openHostSection(page, serverId, "plugins");
   await expect(page.getByRole("textbox", { name: "Plugin source", exact: true })).toBeVisible();
 }

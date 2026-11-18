@@ -16,7 +16,7 @@ export function createProviderCommand(): Command {
     provider
       .command("models")
       .description("List models for a provider")
-      .argument("<provider>", "Provider name (claude, codex, opencode)")
+      .argument("<provider>", "Provider name (claude, pi)")
       .option("--thinking", "Include thinking option IDs for each model"),
   ).action(withOutput(runModelsCommand));
 
