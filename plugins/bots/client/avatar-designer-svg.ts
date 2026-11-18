@@ -8,15 +8,40 @@
  *
  * Pure: runs under `tsx --test`.
  */
-import { composeAccessorySvg, composeAvatarSvg, eyeOptionsFor, type AvatarPack } from "../shared/avatar";
-import { toAvatarJson, type Look } from "./avatar-designer-state";
+import { avatarViewBox, composeAccessorySvg, composeAvatarSvg, eyeOptionsFor, frameToView, packIndex, viewToFrame, type AvatarPack } from "../shared/avatar";
+import { layerBox, toAvatarJson, type LayerBox, type Look } from "./avatar-designer-state";
 
 export type Tile = { id: string; name: string; xml: string };
 
-/** The stage, drawn from the look as Save writes it (4-decimal avatar.json), so what the
- *  phone shows is exactly what the server renders. */
-export function designerSvgs(pack: AvatarPack, look: Look): { full: string } {
-  return { full: composeAvatarSvg(toAvatarJson(look, pack, 0), pack) };
+/** The shown square [x, y, size] in character units (shared/avatar/centre.ts avatarViewBox). */
+export type StageView = readonly [number, number, number];
+
+/** The stage, drawn from the look as Save writes it (4-decimal avatar.json), so what the phone shows is exactly what
+ *  the server renders, centred the same way (AC1). `frozen`: keep this view instead (during a drag, so the picture
+ *  does not slide under the finger; it settles on release, before any save). */
+export function designerSvgs(pack: AvatarPack, look: Look, frozen?: StageView | null): { full: string; view: StageView } {
+  const json = toAvatarJson(look, pack, 0);
+  const view = frozen ?? avatarViewBox(pack, json);
+  return { full: composeAvatarSvg(json, pack, { viewBox: view }), view };
+}
+
+/** A point on the stage (0-1 of the shown square) in avatar.json units (0-1 of the pack frame). */
+export function stageToFrame(pack: AvatarPack, character: string, view: StageView, u: number, v: number): [number, number] {
+  return viewToFrame(packIndex(pack).character.get(character)!, view, u, v);
+}
+
+/** Avatar.json lengths per stage length (the shown square is `view[2]`, the frame `geo.frame[2]`). */
+export function stageScale(pack: AvatarPack, character: string, view: StageView): number {
+  return view[2] / packIndex(pack).character.get(character)!.geo.frame[2];
+}
+
+/** layerBox in stage units (0-1 of the shown square). */
+export function stageLayerBox(pack: AvatarPack, look: Look, view: StageView, i: number): LayerBox | null {
+  const b = layerBox(pack, look, i);
+  if (!b) return null;
+  const [cx, cy] = frameToView(packIndex(pack).character.get(look.character)!, view, b.cx, b.cy);
+  const k = stageScale(pack, look.character, view);
+  return { cx, cy, w: b.w / k, h: b.h / k, rotation: b.rotation };
 }
 
 const caches = new WeakMap<AvatarPack, { chars: Map<string, Tile[]>; eyes: Map<string, Tile[]>; accs?: Tile[] }>();

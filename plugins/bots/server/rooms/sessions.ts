@@ -8,7 +8,10 @@ import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, relative, resolve, isAbsolute } from "node:path";
-import { chatConfig, type ChatConfig } from "../bots";
+import { botChatConfig, CC_CHAT_PROVIDER, chatConfig, type ChatConfig } from "../bots";
+import { OPTCHAT_PROVIDER } from "../../shared/rpc";
+import { CC_ALIASES, CcModels, type CcModel } from "../cc/models";
+import { defaultPiAgentDir, piSignIns } from "../manage";
 import { settingsPath } from "../settings";
 import { KEEP_LIVE_LABEL } from "../../shared/rpc";
 import { ensureRoomDir, readJson, roomDir, SESSIONS_FILE, writeJson } from "./ledger";
@@ -99,6 +102,43 @@ export interface SessionsOptions {
   maxInputTokens?: number;
   minAvailableBytes?: number;
   pendingGraceMs?: number;
+  /** Providers pi is signed in to (manage.ts piSignIns): a bot on Claude Code needs "anthropic" for its seat. */
+  piSignIns?: () => string[];
+  /** A Claude Code bot's model list (cc/models.ts), to turn an alias (opus) into the model id pi runs. */
+  ccModels?: (cwd: string) => Promise<CcModel[]>;
+}
+
+let sharedCcModels: CcModels | null = null;
+const isCc = (provider: string) => provider === CC_CHAT_PROVIDER || provider.startsWith(`${CC_CHAT_PROVIDER}/`);
+
+/**
+ * A room seat's model. Room mode is pi-optchat's, so every seat runs on pi. A bot on Claude Code (its .bot.json chat,
+ * else the host's) sits there on its own Claude model through pi's Anthropic sign-in (an alias resolved to the newest
+ * id of its family); a computer whose pi is not signed in to Anthropic cannot seat it, and says so. Other bots: the
+ * host's bot model, as before.
+ */
+export async function seatConfig(
+  bot: string,
+  botCwd: string,
+  paseo: Pick<RoomsPaseo, "config">,
+  opts: Pick<SessionsOptions, "piSignIns" | "ccModels"> = {},
+): Promise<ChatConfig> {
+  const own = await botChatConfig(botCwd);
+  const config = own && isCc(own.provider) ? own : await chatConfig(paseo);
+  if (!isCc(config.provider)) return config;
+  const model = config.provider.slice(CC_CHAT_PROVIDER.length + 1);
+  // Claude Code's own default model (none chosen): pi's own default too.
+  if (!model) return { provider: OPTCHAT_PROVIDER };
+  if (!(opts.piSignIns ?? (() => piSignIns(defaultPiAgentDir())))().includes("anthropic"))
+    throw new Error(`${bot} runs on Claude Code; a room seat runs on pi (room mode), and pi on this computer is not signed in to Anthropic (pi: /login anthropic)`);
+  let id = model;
+  if (CC_ALIASES.some((a) => a.id === model)) {
+    const list = await (opts.ccModels ?? ((cwd: string) => (sharedCcModels ??= new CcModels()).list(cwd)))(botCwd);
+    id = list.find((m) => m.id.startsWith(`claude-${model}-`))?.id ?? "";
+    if (!id) throw new Error(`${bot} runs on Claude Code's "${model}"; no Claude model list says which model that is, so its room seat cannot start (choose a full model id for ${bot})`);
+  }
+  const effort = config.thinkingOptionId === "max" ? "xhigh" : config.thinkingOptionId;
+  return { provider: `${OPTCHAT_PROVIDER}/anthropic/${id}`, ...(effort ? { thinkingOptionId: effort } : {}) };
 }
 
 export async function procMemAvailable(path = "/proc/meminfo"): Promise<number | null> {
@@ -360,6 +400,7 @@ export class RoomSessions {
         count -= 1;
       }
 
+      const config = await seatConfig(bot, join(this.options.botsRoot, bot), paseo, this.options);
       const next = take();
       if (!next) return { kind: "empty" };
       const cwd = this.dir(group);
@@ -367,7 +408,7 @@ export class RoomSessions {
       ensureRoomDir(cwd);
       const workspace = await paseo.workspaces.open(cwd);
       const agent = await workspace.agents.create({
-        config: await chatConfig(paseo),
+        config,
         title: `${target.botName} · ${target.groupName}`,
         labels: { [ROOM_LABEL]: group, [ROOM_MEMBER_LABEL]: bot, [KEEP_LIVE_LABEL]: "0" },
         env: this.roomEnv(group, bot),

@@ -4,7 +4,8 @@
 // rooms) and types each item into this TUI with `herdr agent prompt` while the session is idle (server/cc/deliver.ts).
 // This mod submits nothing: a mod's $.prompt.submit is held after a Stop until the person types, typed text is not.
 // Its prompt.submit hook is the ack: it reports every typed prompt (POST /turn typed), and the engine matches it to
-// the item it typed. A new session says /hello and the engine types again what the old one had in flight.
+// the item it typed. A new session says /hello: the engine types again what the old one had typed and not seen, and
+// logs a message whose turn died with it as unanswered (as pi-optchat recovers it).
 //
 // Compactor: the engine's memory needs one-line summaries. It queues them as jobs; this mod runs each with
 // $.model.complete, through this session's own client and login (the user's Claude plan), and posts the line back.
@@ -134,15 +135,32 @@ export function register(on) {
   // Every prompt starts a turn: the engine holds the inbox until it is done. A typed one is the ack of the item the
   // engine typed, or else (typed by a person in the terminal) a turn the app shows as such. So is one Claude Code
   // submits itself, e.g. a background task's <task-notification> (origin kind `task-notification`): its origin goes
-  // along, so the app shows it as the task's row, not as the person's words.
+  // along, so the app shows it as the task's row, not as the person's words. A prompt Claude Code puts into the
+  // running turn (e.turnId: a notice of a background task that ended mid-turn, text typed over the turn) starts no
+  // turn: `into` says so, and that turn's one turn.complete ends it.
   on('prompt.submit', async ($, e, next) => {
     if (!e.command) {
       const origin = e.origin && typeof e.origin.kind === 'string' ? e.origin.kind : undefined
       try {
-        await engine($, 'POST', '/turn', { running: true, typed: true, text: e.text, ...(origin ? { origin } : {}) })
+        await engine($, 'POST', '/turn', { running: true, typed: true, into: !!e.turnId, text: e.text, ...(origin ? { origin } : {}) })
       } catch {}
     }
     return next(e)
+  })
+
+  // The chat's model and effort (the app's picker) for each main-loop step: a switch applies from the next step, as
+  // for a bot on pi, with no restart. The engine unset or unreachable: the step runs as Claude Code set it.
+  on('turn.step', async function* ($, e, next) {
+    if (e.agentId) return yield* next(e)
+    // Not `run`: Claude Code refuses a hooks module that assigns to the name of a function it hands $ (run, above).
+    let want = {}
+    try {
+      want = (await engine($, 'GET', '/run')).json || {}
+    } catch {}
+    const change = {}
+    if (typeof want.model === 'string' && want.model && want.model !== e.model) change.model = want.model
+    if (typeof want.effort === 'string' && want.effort && want.effort !== e.effort) change.effort = want.effort
+    return yield* next({ ...e, ...change })
   })
 
   // Claude Code's figures after each main-thread turn (and when a rate-limit window moves).
@@ -166,7 +184,14 @@ export function register(on) {
     addTokens(e.usage)
     if (!e.agentId) {
       try {
-        await engine($, 'POST', '/turn', { running: false, answered: !e.isAborted && e.reason === 'answer', reason: e.reason || null })
+        // A refusal or an API error ends the turn unanswered: what the API said goes along (the chat shows it).
+        const why =
+          e.reason === 'refusal' && e.refusal
+            ? { refusal: e.refusal }
+            : e.reason === 'error' && typeof e.answer === 'string' && e.answer.trim()
+              ? { error: e.answer.trim().slice(0, 1000) }
+              : {}
+        await engine($, 'POST', '/turn', { running: false, answered: !e.isAborted && e.reason === 'answer', reason: e.reason || null, ...why })
       } catch {}
     }
     return r

@@ -9,7 +9,7 @@ import { after, describe, it } from "node:test";
 import { CcEngine, CcHost, compactorModel, type CcJob } from "../server/cc/engine";
 import { CcLauncher, ccModsDir, ccProxyFor, envScript } from "../server/cc/launch";
 import { createCcProvider, promptText, resolveBot } from "../server/cc/provider";
-import type { ProviderEvent } from "@getpaseo/plugin/server/provider";
+import { requireProviderCapabilities, type ProviderEvent } from "@getpaseo/plugin/server/provider";
 
 const TMP = mkdtempSync(join(tmpdir(), "cc-engine-"));
 const open: CcEngine[] = [];
@@ -92,7 +92,7 @@ describe("cc engine", () => {
     assert.match((s.json as any).text, /hello there/);
   });
 
-  it("a restarted TUI (hello) gets back what was in flight; a busy profile is refused", async () => {
+  it("a restarted TUI (hello): the message its turn died with is logged as unanswered, not typed again; a busy profile is refused", async () => {
     const dir = join(TMP, "p2");
     const tui = typing();
     const e = await CcEngine.open("kit2", dir, { delivery: tui, tickMs: 5 });
@@ -103,9 +103,10 @@ describe("cc engine", () => {
     assert.equal(e.cancel("x1"), false); // in its turn: not dropped
     e.setDelivery(undefined);
     await e.handle("POST", "/hello", new URLSearchParams(), {});
-    assert.equal(((await e.handle("GET", "/status", new URLSearchParams(), {})).json as any).inbox, 1);
+    assert.equal(((await e.handle("GET", "/status", new URLSearchParams(), {})).json as any).inbox, 0);
+    assert.equal(e.memory.root.at(-1)!.receipt, "x1");
     await assert.rejects(CcEngine.open("kit2", dir), /already running/);
-    assert.equal(e.cancel("x1"), true);
+    assert.equal(e.cancel("x1"), false);
     assert.equal(e.queued, 0);
   });
 
@@ -218,6 +219,67 @@ describe("cc provider", () => {
         ["c-tu1", "completed", { type: "shell", command: "ls", output: "a b", exitCode: 0 }],
       ],
     );
+    await conn.close();
+    await host.close();
+  });
+
+  it("a message steered while a turn runs is taken for that turn (prompt.steer), then typed once the TUI is free", async () => {
+    const root = join(TMP, "bots-steer");
+    mkdirSync(join(root, "nemo"), { recursive: true });
+    writeFileSync(join(root, "nemo", ".optchat-profile"), "nemo\n");
+    const host = new CcHost(join(root, ".cc"));
+    const tui = typing();
+    const launcher = { ensure: async () => {}, interrupt: async () => {}, running: async () => true, delivery: () => tui };
+    const provider = createCcProvider({ host, launcher: launcher as any, botsRoot: root, optchatHome: join(TMP, "oc") });
+    // Paseo offers every capability; the provider must keep prompt.steer, or Paseo refuses a steer before it gets here.
+    const conn = await provider.connect({ versions: [1], capabilities: ["prompt.message", "prompt.image", "prompt.steer", "session.persistence", "session.configure"] });
+    // Paseo's own check ("Could not send now: Provider does not support prompt.steer" on the app).
+    const steer = { clientMessageId: "x", delivery: "steer" as const, input: { type: "message" as const, content: [{ type: "text" as const, text: "x" }] } };
+    assert.doesNotThrow(() => requireProviderCapabilities(conn.capabilities, { type: "session.prompt", sessionId: "s1", prompt: steer }));
+    const events: ProviderEvent[] = [];
+    conn.onEvent((e) => events.push(e));
+    await conn.send({ type: "session.open", requestId: "r1", sessionId: "s1", history: "skip", config: { cwd: join(root, "nemo"), env: {}, mcpServers: {}, settings: {}, persist: true } });
+    await tick(50);
+    const engine = host.engines.get("nemo")!;
+    const msg = (id: string, text: string, delivery: "auto" | "steer") =>
+      conn.send({ type: "session.prompt", sessionId: "s1", prompt: { clientMessageId: id, delivery, input: { type: "message", content: [{ type: "text", text }] } } });
+    const result = (id: string) => events.find((e) => e.type === "session.prompt_result" && e.clientMessageId === id) as any;
+
+    // No turn runs: nothing to steer into. Paseo then sends it as a turn of its own.
+    await msg("early", "too early", "steer");
+    await tick(20);
+    assert.equal(result("early").result.type, "failed");
+    assert.equal(engine.queued, 0);
+
+    await msg("c1", "long job", "auto");
+    await until(() => tui.typed.length === 1);
+    await engine.handle("POST", "/turn", new URLSearchParams(), { running: true, typed: true, text: "long job", origin: "composer" });
+    const from = events.length;
+    // Sent while c1 runs: accepted for c1 (Paseo checks the turn id), not a turn of its own.
+    await msg("c2", "also this", "steer");
+    await tick(20);
+    assert.deepEqual(result("c2").result, { type: "steer", turnId: "c1" });
+    assert.equal(engine.itemText("c2"), "also this"); // in the inbox
+    assert.equal(tui.typed.length, 1); // never typed into a running turn
+    await engine.handle("POST", "/turn", new URLSearchParams(), { running: false, answered: true });
+    await engine.handle("POST", "/append", new URLSearchParams(), { messages: [{ kind: "user", text: "long job" }, { kind: "talk", text: "Working on it." }] });
+    // The TUI is free: the steered text is typed and runs as the next turn, shown once.
+    await until(() => tui.typed.length === 2);
+    assert.equal(tui.typed[1], "also this");
+    await engine.handle("POST", "/turn", new URLSearchParams(), { running: true, typed: true, text: "also this", origin: "composer" });
+    await engine.handle("POST", "/event", new URLSearchParams(), { type: "step", answer: "Done both." });
+    await engine.handle("POST", "/turn", new URLSearchParams(), { running: false, answered: true });
+    const shown = events.slice(from).map((e) =>
+      e.type === "timeline.item" ? `${e.item.type}:${(e.item as any).text}` : e.type === "session.turn" ? `turn:${e.turnId}:${e.state}` : e.type,
+    );
+    assert.deepEqual(shown, [
+      "user_message:also this",
+      "session.prompt_result",
+      "turn:c1:completed",
+      "turn:c2:started",
+      "assistant_message:Done both.",
+      "turn:c2:completed",
+    ]);
     await conn.close();
     await host.close();
   });
@@ -367,7 +429,7 @@ exit 0
     const start = calls.split("\n").find((l) => l.startsWith("agent start"))!;
     assert.match(start, /^agent start cc-kit --kind claude --pane w1:p1 --timeout 60000 -- --model sonnet --effort high /);
     for (const m of ["view", "trigger", "inbox"]) assert.match(start, new RegExp(`--plugin-dir \\S+/claude-code/${m}( |$)`));
-    assert.match(start, /--tools Read,Edit,Write,Bash,Grep,Glob,zoom,date,search_memory /);
+    assert.match(start, /--tools Read,Edit,Write,Bash,Grep,Glob,WebSearch,WebFetch,zoom,date,search_memory /);
     assert.match(start, /--disable-slash-commands/);
     // No worker skills in the session plugin; first-run screens marked done.
     assert.equal(spawnSync("ls", [join(ccdir, "plugin", "skills")], { encoding: "utf8" }).stdout.trim(), "");

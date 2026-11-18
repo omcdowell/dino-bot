@@ -1,11 +1,11 @@
 {
   "name": "DinoBot",
   "id": "dinobot",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "installUrl": "https://omcdowell.github.io/dino-bot/install",
   "downloadBaseUrl": "https://github.com/omcdowell/dino-bot/releases/latest/download",
   "releaseRepo": "omcdowell/dino-bot",
   "_note": "THE one place for the product's names. name: shown to users. id: command, ~/.<id> dir, service and tarball names (dinobot, owner decision 27 Oct). version: the release (tag v<version>; release.yml checks they match; MANIFEST.json and doctor show it). No iOS bundle id here: whoever builds the iPhone app uses their own Apple account and sets it at build time (docs/live-activities.md). installUrl: the one-line command's script (owner decision: not shortened). downloadBaseUrl: tarballs (GitHub Releases of releaseRepo; install.sh and `update` download from it). releaseRepo: the GitHub repo that builds, signs and publishes releases. install.sh carries stamped copies of name, id and downloadBaseUrl; build/build-tarball.sh restamps them and test/wave2.test.mjs fails on drift.",
-  "pairingQr": "ticket+password",
-  "_pairingQrNote": "pairingQr (QR2): what the pairing QR / `pair --link` carries. \"ticket+password\" (now): a one-use 10-minute pairing ticket AND the daemon password, so apps without ticket support still pair (the password stays in the code). \"ticket\": the ticket only, never the password; switch to it (one release) once the TestFlight build that understands tickets is approved. DINOBOT_PAIRING_QR overrides it on one computer."
+  "pairingQr": "ticket",
+  "_pairingQrNote": "pairingQr (QR2): what the pairing QR / `pair --link` carries. \"ticket\" (now): a one-use 10-minute pairing ticket only, never the daemon password. App builds older than 12 do not understand tickets and cannot pair by QR. \"ticket+password\": the ticket AND the password, for older apps; DINOBOT_PAIRING_QR=ticket+password overrides it on one computer."
 }

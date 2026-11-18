@@ -79,7 +79,7 @@ export class BotsPush {
         if (!this.stopped && this.now() <= this.leaseUntil) this.schedule();
       });
     }, this.options.checkMs ?? PUSH_CHECK_MS);
-    this.timer.unref?.();
+    (this.timer as { unref?: () => void }).unref?.();
   }
 
   private now(): number {

@@ -34,9 +34,18 @@ export const AVATAR_PNG_SIZE: AvatarSize = 512;
 /** Pictures whose renders stay on disk: the current one and the one before. */
 export const KEEP_RENDERS = 2;
 
-/** Content hash of the picture (sha256 of the canonical JSON, 16 base64url chars): same picture, same hash. */
+/**
+ * How a design is drawn, mixed into its hash: the same avatar.json drawn another way is another picture. Phones keep
+ * avatars by hash forever (client/avatar-cache.ts), so a change to the drawing must change the hash.
+ * 1: the pack frame as is. 2: centred by visual weight (shared/avatar/centre.ts, AC1).
+ */
+export const AVATAR_RENDER_VERSION: number = 2;
+
+/** Content hash of the picture (sha256 of the canonical JSON and AVATAR_RENDER_VERSION, 16 base64url chars): same
+ *  picture, same hash. */
 export function avatarJsonHash(avatar: AvatarJson): string {
-  return createHash("sha256").update(canonicalAvatarJson(avatar)).digest("base64url").slice(0, 16);
+  const salt = AVATAR_RENDER_VERSION === 1 ? "" : `\nrender:${AVATAR_RENDER_VERSION}`;
+  return createHash("sha256").update(canonicalAvatarJson(avatar) + salt).digest("base64url").slice(0, 16);
 }
 
 export function renderFileName(hash: string, size: AvatarSize): string {

@@ -17,7 +17,13 @@ export interface CcModel {
   id: string;
   label: string;
   description?: string;
+  /** The effort levels the model takes (Models API capabilities); absent when not known. */
+  thinkingOptions?: Array<{ id: string; label: string }>;
 }
+
+/** Claude Code's effort levels, in order. */
+export const CC_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+export const effortOption = (id: string) => ({ id, label: id[0]!.toUpperCase() + id.slice(1) });
 
 /** Claude Code's model aliases (each resolves to the newest model of its family), kept at the top of the list. */
 export const CC_ALIASES: readonly CcModel[] = [
@@ -78,6 +84,16 @@ interface ApiModel {
   id: string;
   display_name?: string;
   created_at?: string;
+  /** `effort`: `{ supported, low: { supported }, … }` per level. */
+  capabilities?: { effort?: { supported?: boolean } & Record<string, unknown> } | null;
+}
+
+/** The effort levels a model takes, as the Models API lists them; undefined when it says nothing. */
+function efforts(m: ApiModel): CcModel["thinkingOptions"] {
+  const e = m.capabilities?.effort;
+  if (!e || typeof e !== "object") return undefined;
+  if (e.supported !== true) return [];
+  return CC_EFFORTS.filter((l) => (e[l] as { supported?: unknown } | undefined)?.supported === true).map(effortOption);
 }
 
 /** Every model `<base>/v1/models` lists (all pages), newest first. Throws on an HTTP error or an odd answer. */
@@ -112,11 +128,17 @@ export async function fetchModels(source: ModelSource, fetchFn: Fetch = fetch as
 /** The picker's list: the aliases, then the full ids (deduplicated) labelled with their display names. */
 export function pickerModels(api: readonly ApiModel[]): CcModel[] {
   const seen = new Set(CC_ALIASES.map((m) => m.id));
-  const list: CcModel[] = CC_ALIASES.map((m) => ({ ...m }));
+  // An alias takes the effort levels of its family's newest model (the API lists newest first).
+  const list: CcModel[] = CC_ALIASES.map((m) => {
+    const newest = api.find((a) => a.id.startsWith(`claude-${m.id}-`));
+    const t = newest && efforts(newest);
+    return { ...m, ...(t ? { thinkingOptions: t } : {}) };
+  });
   for (const m of api) {
     if (seen.has(m.id)) continue;
     seen.add(m.id);
-    list.push({ id: m.id, label: m.display_name?.trim() || m.id, description: m.id });
+    const t = efforts(m);
+    list.push({ id: m.id, label: m.display_name?.trim() || m.id, description: m.id, ...(t ? { thinkingOptions: t } : {}) });
   }
   return list;
 }

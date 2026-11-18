@@ -3,7 +3,7 @@
  *
  * The bot's TUI (the inbox mod) reports Claude Code's own figures (`$.session.usage()` / `session.measure`): the
  * context window and its fill, the session's cost as /cost totals it, the rate-limit windows, and the tokens of its
- * turns. Claude Code's figures start at 0 in every TUI process (a relaunch on a new model, a crash, a daemon
+ * turns. Claude Code's figures start at 0 in every TUI process (a crash, a closed tab started again, a daemon
  * restart), so each process is a "run" and the ledger adds what each run grew by to the chat (the Paseo session)
  * that showed it, as pi's session stats do for a pi bot's chat.
  *

@@ -187,6 +187,9 @@ function recency(agent: AgentLike): string {
   return agent.lastActivityAt ?? agent.updatedAt ?? "";
 }
 
+/** An OptChat chat: on pi (optchat) or on Claude Code (optchat-cc). */
+const isOptChat = (provider: string | null | undefined) => provider === OPTCHAT_PROVIDER || provider === CC_CHAT_PROVIDER;
+
 /** The bot's current chat among `agents`: a labelled chat first, else an OptChat agent started by hand in its folder. */
 export function chatFor(bot: Pick<Bot, "id" | "cwd">, agents: AgentLike[]): AgentLike | null {
   const active = agents.filter((agent) => !agent.archivedAt);
@@ -194,7 +197,7 @@ export function chatFor(bot: Pick<Bot, "id" | "cwd">, agents: AgentLike[]): Agen
   const candidates = labelled.length
     ? labelled
     : active.filter(
-        (agent) => !agent.labels?.[BOT_LABEL] && agent.cwd === bot.cwd && agent.provider === OPTCHAT_PROVIDER,
+        (agent) => !agent.labels?.[BOT_LABEL] && agent.cwd === bot.cwd && isOptChat(agent.provider),
       );
   return [...candidates].sort((a, b) => recency(b).localeCompare(recency(a)))[0] ?? null;
 }
@@ -203,7 +206,7 @@ export function chatFor(bot: Pick<Bot, "id" | "cwd">, agents: AgentLike[]): Agen
 export function botOfAgent(agent: AgentLike, bots: Array<Pick<Bot, "id" | "cwd">>): string | null {
   const label = agent.labels?.[BOT_LABEL];
   if (label) return bots.some((bot) => bot.id === label) ? label : null;
-  if (agent.provider !== OPTCHAT_PROVIDER) return null;
+  if (!isOptChat(agent.provider)) return null;
   return bots.find((bot) => bot.cwd === agent.cwd)?.id ?? null;
 }
 

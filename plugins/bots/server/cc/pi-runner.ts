@@ -120,7 +120,7 @@ export function spawnPiRunner(opts: PiRunnerOptions = {}): PiRunner {
         child.kill("SIGTERM");
         finish(() => resolve({ error: `pi timed out after ${Math.round((opts.timeoutMs ?? TIMEOUT_MS) / 1000)} s` }));
       }, opts.timeoutMs ?? TIMEOUT_MS);
-      timer.unref?.();
+      (timer as { unref?: () => void }).unref?.();
       signal.addEventListener("abort", abort, { once: true });
       child.stdout!.setEncoding("utf8").on("data", (d: string) => (out += d));
       child.stderr!.setEncoding("utf8").on("data", (d: string) => {

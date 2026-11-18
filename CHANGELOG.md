@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.1.14
+
+### Claude Code bots work like pi bots
+
+- The answer streams into the chat as it is written.
+- A turn Claude Code ends on an API error (retries used up, the context limit) or a refusal shows
+  as failed, with Claude Code's own words, not as a cancel.
+- A prompt waiting in the bot's terminal (a permission question) shows in the chat as a permission
+  card and sends an attention push; it clears when the bot moves on.
+- Stopped and failed turns are kept in the bot's memory, as on pi; memory warnings show in the
+  chat; the bot's profile is checkpointed in git; an imported memory is opened as on pi; the Tool
+  digest setting is honoured.
+- A model or effort switch applies from the turn's next step, with no restart.
+- A reopened chat shows its tool calls and the images you sent; images a tool returns (a
+  screenshot, a picture it read) show in the chat.
+- A message sent mid-turn is taken (queued and typed when the bot is free); Stop while your message
+  is being typed stops that turn; a daemon restart mid-turn no longer types a message twice; a bot
+  whose Claude Code restarts mid-turn fails that turn with a clear reason.
+- Claude Code bots can search and fetch the web (WebSearch, WebFetch).
+- The new-bot sheet offers pi or Claude Code. In a room, a Claude Code bot's seat runs on pi with the
+  bot's own Claude model, or says clearly that pi needs an Anthropic sign-in.
+- After updating, a Claude Code bot picks up its new mods the next time its Claude Code starts.
+
+### Offline sending
+
+- A message sent while the app is not connected to your computer yet waits in the chat (a clock
+  icon) and is sent when the connection is back.
+
+### Fixed
+
+- The chat header reuses the avatar copies the bots list already has, so a bot's picture shows at
+  once; designed avatars are centred.
+- Pairing by QR code uses a one-use ticket only; the password is no longer in the QR code. Builds
+  older than 12 cannot pair by QR (pair with the link, or set `DINOBOT_PAIRING_QR=ticket+password`
+  on that computer).
+
 ## v0.1.13
 
 ### Restarts

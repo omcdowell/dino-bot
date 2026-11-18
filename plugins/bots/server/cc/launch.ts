@@ -155,31 +155,6 @@ export class CcLauncher {
     return work.finally(() => this.starting.delete(bot));
   }
 
-  /**
-   * Starts the TUI again (for a new model or effort: claude takes them as --model/--effort at start): closes its herdr
-   * tab if it runs, then starts it as ensure does. The chat's memory is OptChat's, so nothing is lost but the TUI's
-   * own session (a start always opens a fresh one).
-   */
-  restart(bot: string, opts: { cwd: string; stateDir: string; env: Record<string, string | undefined>; model?: string; effort?: string }): Promise<void> {
-    const pending = this.starting.get(bot);
-    const work = (async () => {
-      await pending?.catch(() => {});
-      const r = await this.herdr(["agent", "get", `cc-${bot}`]);
-      if (r.code === 0) {
-        let tab = "";
-        try {
-          const j = JSON.parse(r.stdout) as { result?: { agent?: { tab_id?: unknown } } };
-          tab = typeof j.result?.agent?.tab_id === "string" ? j.result.agent.tab_id : "";
-        } catch {}
-        if (!tab) throw new Error(`cannot find the herdr tab of cc-${bot} to start it again`);
-        await this.herdr(["tab", "close", tab]);
-        for (let i = 0; i < 50 && (await this.running(bot)); i++) await new Promise((res) => setTimeout(res, 100));
-      }
-    })();
-    this.starting.set(bot, work);
-    return work.finally(() => this.starting.delete(bot)).then(() => this.ensure(bot, opts));
-  }
-
   /** Esc in the TUI: stops the running turn. */
   async interrupt(bot: string): Promise<void> {
     await this.herdr(["agent", "send-keys", `cc-${bot}`, "escape"]);

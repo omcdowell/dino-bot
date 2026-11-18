@@ -229,7 +229,7 @@ export class BusyFeed {
     if (this.timer !== null) (this.deps.clearTimer ?? clearTimeout)(this.timer as ReturnType<typeof setTimeout>);
     const set = this.deps.setTimer ?? ((fn: () => void, delay: number) => {
       const t = setTimeout(fn, delay);
-      t.unref?.();
+      (t as { unref?: () => void }).unref?.();
       return t;
     });
     this.timer = set(() => {

@@ -1,6 +1,6 @@
 // OptChat for a DinoBot bot on Claude Code (UniiChat shape): every turn is
 //   [tools][OptChat system prompt][<chat>view</chat>][new message]; nothing else is carried over.
-// After each answered turn the trigger mod (../trigger) calls $.session.compact(). This mod's session.compact hook
+// After each turn the trigger mod (../trigger) calls $.session.compact(). This mod's session.compact hook
 // logs the turn's messages into the bot's OptChat memory (the bots plugin's engine, pi-optchat's Memory), waits until
 // they are summarised (the inbox mod runs the compactions on this session), and answers the compaction with the view.
 // It also gives the session OptChat's system prompt, the memory tools (zoom, date, search_memory), short tool texts,
@@ -77,7 +77,8 @@ function notificationEcho(text) {
 }
 
 // SessionMessage[] -> OptChat log entries (kinds as pi-optchat: user, talk, tool, echo). Skipped: the messages the
-// last compaction handed back (view + previous exchange) and any an `auto` compaction mid-turn logged already.
+// last compaction handed back (view + previous exchange) and any an `auto` compaction mid-turn logged already. A call
+// and its result carry the call's id, name, input and result, for the engine's tool digest (the profile's setting).
 let carried = 0
 const loggedHandles = new Set()
 function toEntries(all) {
@@ -90,7 +91,8 @@ function toEntries(all) {
     if (m.role === 'user') {
       for (const r of m.toolResults ?? []) {
         const name = toolOf.get(r.tool_use_id)
-        out.push({ kind: 'echo', text: (name ? `${name}: ` : '') + (r.isError ? '[error] ' : '') + (r.text ?? JSON.stringify(r.result ?? '')) })
+        const result = r.text ?? JSON.stringify(r.result ?? '')
+        out.push({ kind: 'echo', text: (name ? `${name}: ` : '') + (r.isError ? '[error] ' : '') + result, name: name || '', call: r.tool_use_id, result, isError: !!r.isError })
       }
       const text = afterView(stripReminders(m.text || ''))
       const echo = text && notificationEcho(text)
@@ -98,7 +100,7 @@ function toEntries(all) {
       else if (text) out.push({ kind: 'user', text })
     } else {
       if (m.text?.trim()) out.push({ kind: 'talk', text: m.text.trim() })
-      for (const u of m.toolUses ?? []) out.push({ kind: 'tool', text: `${u.tool} ${JSON.stringify(u.input)}` })
+      for (const u of m.toolUses ?? []) out.push({ kind: 'tool', text: `${u.tool} ${JSON.stringify(u.input)}`, name: u.tool, input: u.input, call: u.tool_use_id })
     }
   }
   return out
@@ -156,6 +158,31 @@ const short = (v) => {
   return s.length > 4000 ? s.slice(0, 4000) + '…' : s
 }
 
+// The images a tool returned, as bytes for the engine (the app stores them as it does pi's): a Read of an image
+// ({ type: 'image', file: { base64, type } }), an MCP tool's blocks ({ type: 'image', data, mimeType }, or the
+// Messages API's { type: 'image', source: { data, media_type } }), Bash's image output (a data URL in stdout).
+function toolImages(v, out = [], depth = 0) {
+  if (!v || typeof v !== 'object' || depth > 4 || out.length >= 8) return out
+  if (Array.isArray(v)) {
+    for (const x of v) toolImages(x, out, depth + 1)
+    return out
+  }
+  const str = (s) => (typeof s === 'string' && s ? s : undefined)
+  const image = (data, mimeType) => out.push(mimeType ? { data, mimeType } : { data })
+  if (v.type === 'image') {
+    if (str(v.file?.base64)) image(v.file.base64, str(v.file.type))
+    else if (str(v.source?.data)) image(v.source.data, str(v.source.media_type))
+    else if (str(v.data)) image(v.data, str(v.mimeType) ?? str(v.media_type))
+    return out
+  }
+  if (v.isImage === true && /^data:image\/[^;,]+;base64,/.test(str(v.stdout)?.trim() ?? '')) {
+    image(v.stdout.trim())
+    return out
+  }
+  for (const x of Object.values(v)) toolImages(x, out, depth + 1)
+  return out
+}
+
 const THINK_MS = 250
 let viewShown = false
 export function register(on) {
@@ -183,7 +210,8 @@ export function register(on) {
     }
     if (!e.agentId) {
       const failed = r.deny !== undefined || r.isError === true
-      await post($, '/event', { type: 'tool', phase: 'done', id, name: tool, input: args, output: short(r.deny ?? r.text ?? r.result), isError: failed })
+      const images = failed ? [] : toolImages(r.result)
+      await post($, '/event', { type: 'tool', phase: 'done', id, name: tool, input: args, output: short(r.deny ?? r.text ?? r.result), isError: failed, ...(images.length ? { images } : {}) })
     }
     return r
   })
@@ -235,10 +263,20 @@ export function register(on) {
 
   // The step's thinking goes to the engine as it streams (the whole block so far, at most every THINK_MS, and once
   // more when the block ends), then its answer. Empty thinking (Claude Code asked for none shown) sends nothing.
+  // The answer streams the same way (`partial`: the answer so far, trimmed) while it is one text block; the step's
+  // whole answer goes when it ends.
   on('turn.step', async function* ($, e, next) {
     if (e.agentId) return yield* next(e)
     const thinking = new Map() // block index -> { text, sent, at }
     let chain = Promise.resolve()
+    const answer = { index: null, text: '', sent: '', at: Date.now(), off: false }
+    const flushAnswer = () => {
+      const text = answer.text.trim()
+      if (answer.off || !text || text === answer.sent) return
+      answer.sent = text
+      answer.at = Date.now()
+      chain = chain.then(() => post($, '/event', { type: 'step', answer: text, partial: true }))
+    }
     const flush = (index) => {
       const b = thinking.get(index)
       if (!b || b.sent === b.text.length || !b.text.trim()) return
@@ -264,6 +302,13 @@ export function register(on) {
           b.text += c.text
           thinking.set(c.index, b)
           if (Date.now() - b.at >= THINK_MS) flush(c.index)
+        } else if (c && c.kind === 'text' && typeof c.text === 'string') {
+          for (const i of thinking.keys()) flush(i)
+          // A second text block: how the step joins them is Claude Code's, so the rest waits for the whole answer.
+          if (answer.index !== null && answer.index !== c.index) answer.off = true
+          answer.index = c.index
+          answer.text += c.text
+          if (Date.now() - answer.at >= THINK_MS) flushAnswer()
         } else if (c && c.kind !== 'engine') for (const i of thinking.keys()) flush(i)
         yield c
       }
@@ -273,7 +318,7 @@ export function register(on) {
     }
     for (const i of thinking.keys()) flush(i)
     await chain
-    if (result.answer && result.answer.trim()) await post($, '/event', { type: 'step', answer: result.answer })
+    if (result.answer && result.answer.trim()) await post($, '/event', { type: 'step', answer: answer.sent ? result.answer.trim() : result.answer })
     return result
   })
 

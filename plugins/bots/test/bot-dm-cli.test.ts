@@ -234,6 +234,16 @@ test("unlabelled bot chats resolve by folder, as recipient and as sender", async
   assert.equal(w.outs.at(-1).from, "scrat");
 });
 
+test("unlabelled Claude Code bot chats resolve by folder too, as recipient and as sender", async () => {
+  const w = world();
+  const scrat = w.agents.find((a) => a.id === "agent-scrat")!;
+  scrat.provider = "optchat-cc";
+  assert.equal((await w.as(FC, ["scrat", "--text", "hi"])).exit, 0);
+  assert.equal(w.sent[0].agentId, "agent-scrat");
+  assert.equal((await w.as("scrat", [FC, "--text", "unprompted info"])).exit, 0);
+  assert.equal(w.outs.at(-1).from, "scrat");
+});
+
 test("tmp bots outside the bots root keep their ledger in their own folder", async () => {
   const w = world();
   assert.equal((await w.as("tmp-bot", ["bitzer", "--text", "hello"])).exit, 0);

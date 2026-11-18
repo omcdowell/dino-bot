@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { BotsService, chatConfig, DEFAULT_CHAT_CONFIG, discoverBots, keepLiveChanges, withFeatured, type AgentLike, type BotsPaseo } from "../server/bots";
+import { botOfAgent, BotsService, chatConfig, DEFAULT_CHAT_CONFIG, discoverBots, keepLiveChanges, withFeatured, type AgentLike, type BotsPaseo } from "../server/bots";
 
 function botsRoot(spec: Record<string, { profile?: string; meta?: object }>) {
   const root = mkdtempSync(join(tmpdir(), "bots-"));
@@ -145,6 +145,14 @@ test("open adopts an OptChat chat started by hand in the bot's folder, but not a
     ],
   });
   assert.deepEqual(await new BotsService(root).open("flint", paseo), { agentId: "manual", created: false });
+});
+
+test("open adopts an unlabelled Claude Code bot chat in the bot's folder too", async () => {
+  const root = botsRoot({ yoda: { profile: "yoda" } });
+  const cwd = join(root, "yoda");
+  const { paseo } = fakePaseo({ agents: [{ id: "cc", cwd, provider: "optchat-cc", labels: {}, lastActivityAt: "2026-10-07T00:00:00Z" }] });
+  assert.deepEqual(await new BotsService(root).open("yoda", paseo), { agentId: "cc", created: false });
+  assert.equal(botOfAgent({ id: "cc", cwd, provider: "optchat-cc", labels: {} } as AgentLike, [{ id: "yoda", cwd }]), "yoda");
 });
 
 test("open creates a labelled chat in the bot folder when none exists, using the bot agent profile", async () => {

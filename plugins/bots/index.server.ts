@@ -334,7 +334,7 @@ export default function contribute(server: PluginServerContext) {
   });
   void slots.tick();
   const slotTimer = setInterval(() => void slots.tick(), TICK_MS);
-  slotTimer.unref?.();
+  (slotTimer as { unref?: () => void }).unref?.();
 
   // Group chat rooms (server/rooms): room sessions are separate Paseo agents in
   // ~/.local/state/bot-rooms/<group>/, labelled room=<group>, never bot=<bot>.
@@ -541,7 +541,7 @@ export default function contribute(server: PluginServerContext) {
     await rooms.turnEnded(roomsSdk(paseo), event).catch(() => {});
   });
   const roomsTimer = setInterval(() => void rooms.tick().catch(() => {}), ROOMS_CHECK_MS);
-  roomsTimer.unref?.();
+  (roomsTimer as { unref?: () => void }).unref?.();
 
   return () => {
     void ccHost.close();

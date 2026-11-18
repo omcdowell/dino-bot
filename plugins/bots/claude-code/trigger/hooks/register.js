@@ -1,10 +1,10 @@
-// OptChat for a DinoBot bot on Claude Code: after each answered main-loop turn, compact. $.session.compact() runs every
-// hook but the calling mod's own, so this lives apart from the view mod (../view), whose session.compact hook answers
-// it with the memory view.
+// OptChat for a DinoBot bot on Claude Code: after each main-loop turn (answered, stopped or failed: pi-optchat logs every
+// run), compact. $.session.compact() runs every hook but the calling mod's own, so this lives apart from the view mod
+// (../view), whose session.compact hook answers it with the memory view.
 export function register(on) {
   on('turn.complete', async ($, e, next) => {
     const r = await next(e)
-    if (e.agentId || e.isAborted || e.reason !== 'answer') return r
+    if (e.agentId) return r
     $.clock.after(300, async () => {
       try {
         const res = await $.session.compact()

@@ -196,6 +196,42 @@ test("nothing goes while offline; the online edge sends it", async () => {
   expect(daemon.calls).toHaveLength(1);
 });
 
+test("OQ1: sent before the host ever connected (no client yet), they go in order, once each, on connect", async () => {
+  sender.dispose();
+  let client: FakeDaemon | null = null;
+  online = false;
+  sender = makeSender({ getClient: () => client });
+  await write("first");
+  await write("second");
+  await settle();
+  expect(useOutboxStore.getState().records.map((record) => record.state)).toEqual([
+    "outbox",
+    "outbox",
+  ]);
+
+  client = daemon;
+  online = true;
+  sender.hostOnline("srv");
+  sender.hostOnline("srv");
+  sender.kick();
+  await settle();
+  expect(daemon.calls.map((call) => call.text)).toEqual(["first"]);
+
+  daemon.calls[0].received();
+  daemon.calls[0].resolve({});
+  await settle();
+  expect(daemon.calls.map((call) => call.text)).toEqual(["first", "second"]);
+  daemon.calls[1].reject(new Error("agent_not_found"));
+  await settle();
+  sender.kick();
+  await settle();
+
+  expect(daemon.calls.map((call) => call.messageId)).toEqual(["id-first", "id-second"]);
+  expect(getOutboxRecord("id-first")?.state).toBe("taken");
+  // Rejected after reconnect: failed state, text kept for Resend/Edit.
+  expect(getOutboxRecord("id-second")).toMatchObject({ state: "failed", text: "second" });
+});
+
 test("transport failures retry for ever with the same ID and payload, backing off", async () => {
   await write("again");
   await settle();

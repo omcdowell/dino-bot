@@ -498,12 +498,23 @@ export type ProviderToolCallDetail =
   | { type: "plan"; text: string }
   | { type: "unknown"; input: JsonValue; output: JsonValue };
 
+/**
+ * An image on a timeline item, as bytes (base64, or a data URL). Paseo stores it in its chat image
+ * store, as it does a built-in provider's, and the timeline carries a reference.
+ */
+export interface ProviderTimelineImage {
+  data: string;
+  mimeType?: string;
+}
+
 type ProviderToolCallItem = ProviderTimelineIdentity & {
   type: "tool_call";
   callId: string;
   name: string;
   detail: ProviderToolCallDetail;
   metadata?: Readonly<Record<string, JsonValue>>;
+  /** Images the tool returned (a screenshot, a Read of a PNG). */
+  images?: ProviderTimelineImage[];
 } & (
     | { status: "running" | "completed" | "canceled"; error: null }
     | { status: "failed"; error: JsonValue }
@@ -515,6 +526,8 @@ export type ProviderTimelineItem =
       text: string;
       messageId?: string;
       clientMessageId?: string;
+      /** Images the person sent with it (history replay; a live prompt's are Paseo's own). */
+      images?: ProviderTimelineImage[];
     })
   | (ProviderTimelineIdentity & { type: "assistant_message"; text: string; messageId?: string })
   | (ProviderTimelineIdentity & { type: "reasoning"; text: string })
@@ -1177,6 +1190,9 @@ const toolCallDetailSchema: z.ZodType<ProviderToolCallDetail> = z.discriminatedU
   z.object({ type: z.literal("plan"), text: z.string() }).strip(),
   z.object({ type: z.literal("unknown"), input: z.json(), output: z.json() }).strip(),
 ]);
+const timelineImageSchema = z
+  .object({ data: z.string().min(1), mimeType: z.string().optional() })
+  .strip();
 const timelineIdentityShape = { id: idSchema, revertToken: z.json().optional() };
 const toolCallBaseShape = {
   ...timelineIdentityShape,
@@ -1185,6 +1201,7 @@ const toolCallBaseShape = {
   name: z.string(),
   detail: toolCallDetailSchema,
   metadata: jsonObjectSchema.optional(),
+  images: z.array(timelineImageSchema).optional(),
 };
 const timelineItemSchema: z.ZodType<ProviderTimelineItem> = z.union([
   z
@@ -1194,6 +1211,7 @@ const timelineItemSchema: z.ZodType<ProviderTimelineItem> = z.union([
       text: z.string(),
       messageId: z.string().optional(),
       clientMessageId: z.string().optional(),
+      images: z.array(timelineImageSchema).optional(),
     })
     .strip(),
   z

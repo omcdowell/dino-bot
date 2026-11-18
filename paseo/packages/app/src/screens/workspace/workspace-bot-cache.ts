@@ -12,6 +12,14 @@
  * When the host is connected the header refreshes itself (`fetchWorkspaceBot`). An avatar whose
  * hash the device already has is not fetched again; a new one is written into the plugin's cache
  * under the plugin's key, so the home and the next cold start have it too.
+ *
+ * avatar-cache-cc (2026-11-17: a bot's avatar sometimes took a second to load when its chat
+ * opened): the home keeps avatars under variant keys, `[…, hash, 64 | 128 | 512]` (one PNG
+ * size) or `[…, hash, "json"]` (avatar.json drawn as SVG, no PNG). The header looked only at
+ * `[…, hash]`, so it fetched the full 512 px PNG again for bots the home already had, and for a bot
+ * drawn from avatar.json it had no picture until two round trips were done. It now takes any PNG
+ * copy of the current hash, and fetches only the size it draws (HEADER_AVATAR_PX), kept under the
+ * plugin's key for that size.
  */
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { findWorkspaceBot, parseBotsList, type WorkspaceBot } from "./mobile-floating-header-model";
@@ -37,7 +45,40 @@ const avatarDataUri = (data: unknown): string | null =>
     ? imageUri((data as { dataUri?: unknown }).dataUri)
     : null;
 
-const avatarKey = (botId: string, hash: string): QueryKey => [...BOTS_AVATAR_KEY_ROOT, botId, hash];
+const avatarKey = (botId: string, hash: string, size?: number): QueryKey =>
+  size === undefined
+    ? [...BOTS_AVATAR_KEY_ROOT, botId, hash]
+    : [...BOTS_AVATAR_KEY_ROOT, botId, hash, size];
+
+/**
+ * The PNG size the header asks for: its avatar is 32 pt (workspace-mobile-header.tsx), drawn from
+ * a 64 px PNG at up to 2x, as the plugin's avatarPngSize(32) picks.
+ */
+export const HEADER_AVATAR_PX = 64;
+
+/**
+ * The device's PNG of this avatar version under any of the plugin's keys for it (full image or a
+ * size; an SVG-only copy has none): the smallest at least HEADER_AVATAR_PX, else the largest.
+ */
+function hashAvatar(queryClient: QueryClient, botId: string, hash: string): string | null {
+  let best: { px: number; uri: string } | null = null;
+  for (const query of queryClient
+    .getQueryCache()
+    .findAll({ queryKey: [...BOTS_AVATAR_KEY_ROOT, botId, hash] })) {
+    const data = query.state.data;
+    const uri = avatarDataUri(data);
+    if (!uri) continue;
+    const size = (data as { size?: unknown }).size;
+    const px = typeof size === "number" ? size : Number.POSITIVE_INFINITY;
+    const better =
+      !best ||
+      (px >= HEADER_AVATAR_PX
+        ? best.px < HEADER_AVATAR_PX || px < best.px
+        : best.px < HEADER_AVATAR_PX && px > best.px);
+    if (better) best = { px, uri };
+  }
+  return best?.uri ?? null;
+}
 
 /**
  * The device's avatar for this bot: the copy under `hash` when given and present, else the newest
@@ -49,7 +90,7 @@ export function cachedBotAvatar(
   hash: string | null,
 ): string | null {
   if (hash) {
-    const exact = avatarDataUri(queryClient.getQueryData(avatarKey(botId, hash)));
+    const exact = hashAvatar(queryClient, botId, hash);
     if (exact) return exact;
   }
   let best: { at: number; uri: string } | null = null;
@@ -98,20 +139,27 @@ export function sameIdentity(
 }
 
 /**
- * Keeps a fetched avatar in the plugin's cache as the plugin would (persisted, never collected)
- * and drops this bot's older copies, so the device keeps one avatar per bot.
+ * Keeps a fetched avatar in the plugin's cache as the plugin would (persisted, never collected;
+ * under `[…, hash, size]` when the host sent that size, else `[…, hash]` for the full image) and
+ * drops this bot's older copies, so the device keeps one avatar version per bot.
  */
 export function storeBotAvatar(
   queryClient: QueryClient,
   botId: string,
   hash: string,
   dataUri: string,
+  size?: number,
 ): void {
-  const queryKey = avatarKey(botId, hash);
-  queryClient
-    .getQueryCache()
-    .build(queryClient, { queryKey, meta: { persist: true }, gcTime: Infinity });
-  queryClient.setQueryData(queryKey, { dataUri, hash });
+  const queryKey = avatarKey(botId, hash, size);
+  queryClient.getQueryCache().build(queryClient, {
+    queryKey,
+    meta: { persist: true },
+    gcTime: Infinity,
+  });
+  queryClient.setQueryData(
+    queryKey,
+    size === undefined ? { dataUri, hash } : { dataUri, hash, size },
+  );
   queryClient.removeQueries({
     queryKey: [...BOTS_AVATAR_KEY_ROOT, botId],
     // A copy the home has on screen stays; the home prunes it once its own list has the new hash.
@@ -141,14 +189,17 @@ export async function fetchWorkspaceBot(input: {
   if (!bot) return null;
   if (!bot.hasAvatar) return { bot, avatarUri: null };
   if (pluginQueryClient && bot.avatarHash) {
-    const have = avatarDataUri(pluginQueryClient.getQueryData(avatarKey(bot.id, bot.avatarHash)));
+    const have = hashAvatar(pluginQueryClient, bot.id, bot.avatarHash);
     if (have) return { bot, avatarUri: have };
   }
-  let answer: { dataUri?: unknown; hash?: unknown } | null;
+  let answer: { dataUri?: unknown; hash?: unknown; size?: unknown } | null;
   try {
-    answer = (await client.invokePluginRpc(BOTS_PLUGIN_ID, BOTS_AVATAR_METHOD, {
-      botId: bot.id,
-    })) as { dataUri?: unknown; hash?: unknown } | null;
+    // A host that sends hashes takes `size` (one that ignores it sends the full image, no `size`).
+    answer = (await client.invokePluginRpc(
+      BOTS_PLUGIN_ID,
+      BOTS_AVATAR_METHOD,
+      bot.avatarHash ? { botId: bot.id, size: HEADER_AVATAR_PX } : { botId: bot.id },
+    )) as { dataUri?: unknown; hash?: unknown; size?: unknown } | null;
   } catch {
     // Offline mid-refresh: keep the avatar the device has rather than flash the fallback icon.
     return {
@@ -159,6 +210,7 @@ export async function fetchWorkspaceBot(input: {
   const uri = imageUri(answer?.dataUri);
   if (!uri) return { bot, avatarUri: null };
   const hash = typeof answer?.hash === "string" && answer.hash ? answer.hash : bot.avatarHash;
-  if (pluginQueryClient && hash) storeBotAvatar(pluginQueryClient, bot.id, hash, uri);
+  const size = typeof answer?.size === "number" ? answer.size : undefined;
+  if (pluginQueryClient && hash) storeBotAvatar(pluginQueryClient, bot.id, hash, uri, size);
   return { bot, avatarUri: uri };
 }

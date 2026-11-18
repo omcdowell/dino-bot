@@ -164,12 +164,15 @@ describe("claude-code mods: a background task's notification", () => {
     await submit($, { text: NOTE, origin: { kind: "task-notification" } }, next);
     await submit($, { text: "hi", origin: { kind: "composer" } }, next);
     await submit($, { text: "hi" }, next);
+    // Into the running turn (Claude Code names it: turnId): no turn of its own.
+    await submit($, { text: NOTE, origin: { kind: "task-notification" }, turnId: "tu-1" }, next);
     assert.deepEqual(
       calls.map((c) => [c.path, c.body]),
       [
-        ["/turn", { running: true, typed: true, text: NOTE, origin: "task-notification" }],
-        ["/turn", { running: true, typed: true, text: "hi", origin: "composer" }],
-        ["/turn", { running: true, typed: true, text: "hi" }],
+        ["/turn", { running: true, typed: true, into: false, text: NOTE, origin: "task-notification" }],
+        ["/turn", { running: true, typed: true, into: false, text: "hi", origin: "composer" }],
+        ["/turn", { running: true, typed: true, into: false, text: "hi" }],
+        ["/turn", { running: true, typed: true, into: true, text: NOTE, origin: "task-notification" }],
       ],
     );
   });
@@ -193,7 +196,8 @@ describe("claude-code mods: a background task's notification", () => {
       async (e: unknown) => e,
     );
     const append = calls.find((c) => c.path === "/append")!;
-    assert.deepEqual(append.body.messages, [
+    // Kind and text (calls and results carry their call for the tool digest too: cc-memory.test.ts).
+    assert.deepEqual(append.body.messages.map(({ kind, text }: any) => ({ kind, text })), [
       {
         kind: "echo",
         text: 'Background task bznd0x0c1 (call toolu_018xXMXFCfR3UpiqyeCQzCr2) completed: Background command "Locate the workers skill" completed (exit code 0). Output file: /home/u/tmp/tasks/bznd0x0c1.output',

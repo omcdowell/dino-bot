@@ -18,7 +18,9 @@ import {
 import { fetchWorkspaceBot, readCachedWorkspaceBot } from "./workspace-bot-cache";
 
 const host = vi.hoisted(() => ({
-  client: null as null | { invokePluginRpc: (...args: unknown[]) => Promise<unknown> },
+  client: null as null | {
+    invokePluginRpc: (...args: unknown[]) => Promise<unknown>;
+  },
   connected: false,
   pluginQueryClient: null as QueryClient | null,
 }));
@@ -119,7 +121,11 @@ describe("useWorkspaceBot", () => {
     host.pluginQueryClient = seededPluginClient();
     const { result } = renderHook(
       () =>
-        useWorkspaceBot({ serverId: "host-a", workspaceDirectory: `${EMMET_DIR}/`, enabled: true }),
+        useWorkspaceBot({
+          serverId: "host-a",
+          workspaceDirectory: `${EMMET_DIR}/`,
+          enabled: true,
+        }),
       { wrapper },
     );
     expect(result.current?.bot.name).toBe("Emmet");
@@ -131,7 +137,12 @@ describe("useWorkspaceBot", () => {
     host.client = rpcClient({ list: listAnswer("Emmet B", "old") });
     host.connected = true;
     const { result, rerender } = renderHook(
-      () => useWorkspaceBot({ serverId: "host-a", workspaceDirectory: EMMET_DIR, enabled: true }),
+      () =>
+        useWorkspaceBot({
+          serverId: "host-a",
+          workspaceDirectory: EMMET_DIR,
+          enabled: true,
+        }),
       { wrapper },
     );
     await waitFor(() => expect(result.current?.bot.name).toBe("Emmet B"));
@@ -151,7 +162,12 @@ describe("useWorkspaceBot", () => {
     host.client = rpc;
     host.connected = true;
     const { result } = renderHook(
-      () => useWorkspaceBot({ serverId: "host-a", workspaceDirectory: EMMET_DIR, enabled: true }),
+      () =>
+        useWorkspaceBot({
+          serverId: "host-a",
+          workspaceDirectory: EMMET_DIR,
+          enabled: true,
+        }),
       { wrapper },
     );
     expect(result.current?.bot.name).toBe("Emmet");
@@ -173,7 +189,12 @@ describe("useWorkspaceBot", () => {
     const pluginQueryClient = seededPluginClient();
     host.pluginQueryClient = pluginQueryClient;
     const { result } = renderHook(
-      () => useWorkspaceBot({ serverId: "host-a", workspaceDirectory: EMMET_DIR, enabled: true }),
+      () =>
+        useWorkspaceBot({
+          serverId: "host-a",
+          workspaceDirectory: EMMET_DIR,
+          enabled: true,
+        }),
       { wrapper },
     );
     act(() => {
@@ -195,7 +216,12 @@ describe("useWorkspaceBot", () => {
     );
     expect(other.result.current).toBeNull();
     const disabled = renderHook(
-      () => useWorkspaceBot({ serverId: "host-a", workspaceDirectory: EMMET_DIR, enabled: false }),
+      () =>
+        useWorkspaceBot({
+          serverId: "host-a",
+          workspaceDirectory: EMMET_DIR,
+          enabled: false,
+        }),
       { wrapper },
     );
     expect(disabled.result.current).toBeNull();
@@ -255,6 +281,113 @@ describe("workspace bot cache", () => {
     });
     expect(identity?.avatarUri).toBe(OLD_PNG);
     expect(rpc.calls).toEqual(["bots.list"]);
+  });
+
+  // avatar-cache-cc (the owner, 2026-11-17: a bot's avatar sometimes took a second to load when
+  // its chat opened). The home keeps each avatar under a variant key — a PNG size
+  // (`[…, hash, 64 | 128 | 512]`) or, for a bot designed in the avatar designer, its avatar.json
+  // drawn as SVG (`[…, hash, "json"]`, no PNG). The header looked only at `[…, hash]`, so it
+  // fetched the full 512 px PNG again for every bot, and for a designed bot it had no
+  // picture at all until both round trips were done.
+  it("uses a PNG the home keeps under a size variant of the same hash, with no avatar call", async () => {
+    const client = createPluginQueryClient();
+    client
+      .getQueryCache()
+      .build(client, { queryKey: ["bots", "list"], meta: { persist: true } })
+      .setData(listAnswer("Emmet", "h1"));
+    client
+      .getQueryCache()
+      .build(client, {
+        queryKey: ["bots", "avatar", "emmet-brickowski", "h1", 128],
+        meta: { persist: true },
+      })
+      .setData({ dataUri: NEW_PNG, hash: "h1", size: 128 });
+    const rpc = rpcClient({ list: listAnswer("Emmet", "h1") });
+    const identity = await fetchWorkspaceBot({
+      client: rpc,
+      workspaceDirectory: EMMET_DIR,
+      pluginQueryClient: client,
+    });
+    expect(identity?.avatarUri).toBe(NEW_PNG);
+    expect(rpc.calls).toEqual(["bots.list"]);
+  });
+
+  it("fetches the header's size for a bot the home draws from avatar.json, and keeps it for next time", async () => {
+    const client = createPluginQueryClient();
+    client
+      .getQueryCache()
+      .build(client, { queryKey: ["bots", "list"], meta: { persist: true } })
+      .setData(listAnswer("Emmet", "design"));
+    // What the home keeps for a designed avatar: the JSON drawn as SVG, no PNG.
+    client
+      .getQueryCache()
+      .build(client, {
+        queryKey: ["bots", "avatar", "emmet-brickowski", "design", "json"],
+        meta: { persist: true },
+      })
+      .setData({
+        dataUri: null,
+        hash: "design",
+        svg: "<svg/>",
+        packVersion: 1,
+      });
+    const inputs: unknown[] = [];
+    const rpc = {
+      invokePluginRpc: async (_plugin: unknown, method: unknown, input: unknown) => {
+        if (method === "bots.list") return listAnswer("Emmet", "design");
+        inputs.push(input);
+        return { dataUri: NEW_PNG, hash: "design", size: 64 };
+      },
+    };
+    const first = await fetchWorkspaceBot({
+      client: rpc,
+      workspaceDirectory: EMMET_DIR,
+      pluginQueryClient: client,
+    });
+    expect(first?.avatarUri).toBe(NEW_PNG);
+    // The header is 32 pt: the 64 px PNG, not the full 512 px avatar.png.
+    expect(inputs).toEqual([{ botId: "emmet-brickowski", size: 64 }]);
+    // Kept under the plugin's key for that size (the home reads it as a 64 px copy).
+    expect(client.getQueryData(["bots", "avatar", "emmet-brickowski", "design", 64])).toEqual({
+      dataUri: NEW_PNG,
+      hash: "design",
+      size: 64,
+    });
+    // The SVG copy the home draws stays.
+    expect(
+      client.getQueryData(["bots", "avatar", "emmet-brickowski", "design", "json"]),
+    ).toBeTruthy();
+    // Next open (or cold start): drawn from the device at once, no avatar call.
+    expect(readCachedWorkspaceBot(client, EMMET_DIR)?.avatarUri).toBe(NEW_PNG);
+    await fetchWorkspaceBot({
+      client: rpc,
+      workspaceDirectory: EMMET_DIR,
+      pluginQueryClient: client,
+    });
+    expect(inputs).toHaveLength(1);
+  });
+
+  it("prefers the current hash's PNG over a newer copy of an older avatar", () => {
+    const client = createPluginQueryClient();
+    client
+      .getQueryCache()
+      .build(client, { queryKey: ["bots", "list"], meta: { persist: true } })
+      .setData(listAnswer("Emmet", "new"));
+    client
+      .getQueryCache()
+      .build(client, {
+        queryKey: ["bots", "avatar", "emmet-brickowski", "new", 512],
+        meta: { persist: true },
+      })
+      .setData({ dataUri: NEW_PNG, hash: "new", size: 512 });
+    client
+      .getQueryCache()
+      .build(client, {
+        queryKey: ["bots", "avatar", "emmet-brickowski", "old"],
+        meta: { persist: true },
+      })
+      .setData({ dataUri: OLD_PNG, hash: "old" });
+    expect(readCachedWorkspaceBot(client, EMMET_DIR)?.avatarUri).toBe(NEW_PNG);
   });
 
   it("keeps the cached avatar when the avatar call fails", async () => {

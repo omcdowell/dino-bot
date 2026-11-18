@@ -7,6 +7,7 @@ import { AVATAR_PACK_V1, AVATAR_PACK_V1_JSON } from "./pack-v1";
 export * from "./pack";
 export * from "./schema";
 export * from "./compose";
+export * from "./centre";
 export * from "./defaults";
 export { AVATAR_PACK_V1, AVATAR_PACK_V1_JSON };
 

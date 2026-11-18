@@ -16,4 +16,6 @@ regexes = [
   # paseo/packages/relay/src/crypto.test.ts (upstream): published X25519 low-order points
   '''e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800''',
   '''5f9c95bca3508c24b1d0b1559c83ef5b04445cc4581c8e86d8224eddd09f1157''',
+  # paseo/packages/protocol/src/__fixtures__/compact-v2-db1-messages.json: a lab project's key (a path hash; 18 Nov)
+  '''prj_9cd0542d4a85bd2b''',
 ]

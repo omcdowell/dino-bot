@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { gzipSync } from "node:zlib";
 import { Resvg } from "@resvg/resvg-js";
 import {
+  avatarViewBox,
   AVATAR_PACK,
   AVATAR_PACK_JSON,
   AVATAR_PACK_VERSION,
@@ -120,8 +121,11 @@ test("compose: pure and deterministic; a square viewBox on the avatar square; la
   const svg = composeAvatarSvg(base, AVATAR_PACK);
   assert.equal(composeAvatarSvg(base, AVATAR_PACK), svg);
   const c = packIndex(AVATAR_PACK).character.get("emmet-boxfish")!;
+  // AC1: the square is centred by visual weight (avatarViewBox); an explicit viewBox (the pack frame) is honoured.
+  const [vx, vy, vs] = avatarViewBox(AVATAR_PACK, base);
+  assert.ok(svg.startsWith(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vx.toFixed(1)} ${vy.toFixed(1)} ${vs.toFixed(1)} ${vs.toFixed(1)}"`));
   const [fx, fy, fw] = c.geo.frame;
-  assert.ok(svg.startsWith(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${fx.toFixed(1)} ${fy.toFixed(1)} ${fw.toFixed(1)} ${fw.toFixed(1)}"`));
+  assert.ok(composeAvatarSvg(base, AVATAR_PACK, { viewBox: [fx, fy, fw] }).startsWith(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${fx.toFixed(1)} ${fy.toFixed(1)} ${fw.toFixed(1)} ${fw.toFixed(1)}"`));
   assert.ok(svg.endsWith("</svg>"));
   assert.ok(!/class=|<rect class="hit"/.test(svg), "no designer UI");
   assert.equal((svg.match(/<g transform=/g) || []).length, 1);

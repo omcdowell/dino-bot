@@ -24,17 +24,18 @@ const endpoints = ["box.tail1.ts.net:6767", "100.64.0.7:6767"];
 const decode = (url) => JSON.parse(Buffer.from(url.split("#offer=")[1], "base64url").toString("utf8"));
 
 describe("pairing code contents (QR2)", () => {
-  it("product.json starts in the transition mode; DINOBOT_PAIRING_QR switches one computer", () => {
+  it("product.json is ticket-only; DINOBOT_PAIRING_QR=ticket+password switches one computer back", () => {
     const product = JSON.parse(readFileSync(new URL("../lib/product.json", import.meta.url), "utf8"));
-    assert.equal(product.pairingQr, "ticket+password");
-    assert.equal(pairingQrMode({}), "ticket+password");
+    assert.equal(product.pairingQr, "ticket");
+    assert.equal(pairingQrMode({}), "ticket");
+    assert.equal(pairingQrMode({ DINOBOT_PAIRING_QR: "ticket+password" }), "ticket+password");
     assert.equal(pairingQrMode({ DINOBOT_PAIRING_QR: "ticket" }), "ticket");
     assert.equal(pairingQrMode({ DINOBOT_PAIRING_QR: "nonsense" }), "ticket+password");
   });
 
-  it("transition: a fresh ticket plus the password (apps without tickets still pair)", async () => {
+  it("ticket+password override: a fresh ticket plus the password (apps without tickets still pair)", async () => {
     const home = tmp();
-    const r = await pairingOffer("/nowhere", home, { identity, endpoints, password: "pw", env: {}, mint: async (h) => mintPairingTicket(h) });
+    const r = await pairingOffer("/nowhere", home, { identity, endpoints, password: "pw", env: { DINOBOT_PAIRING_QR: "ticket+password" }, mint: async (h) => mintPairingTicket(h) });
     assert.equal(r.mode, "ticket+password");
     const back = decode(offerUrl(r.offer));
     assert.match(back.pairingTicket, /^ppt1\./);

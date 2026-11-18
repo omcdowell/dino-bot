@@ -184,6 +184,7 @@ describe("delivery: typed behind the idle gate, acked by the hook", () => {
     assert.deepEqual(tui.typed, []);
     tui.st = "working"; // the engine thinks the turn ended, herdr still sees it working
     await tui.finish(false);
+    await tui.compact("<task-notification>x</task-notification>"); // the trigger mod's compaction, after every turn
     tui.st = "working";
     await tick(60);
     assert.deepEqual(tui.typed, []);
@@ -328,38 +329,42 @@ describe("delivery: typed behind the idle gate, acked by the hook", () => {
   });
 });
 
+/** A bot chat on Claude Code: the provider, its engine and a FakeTui; `turns` lists the session.turn events. */
+async function chat() {
+  const root = join(TMP, `bots-${++n}`);
+  mkdirSync(join(root, "kit"), { recursive: true });
+  writeFileSync(join(root, "kit", ".optchat-profile"), "kit\n");
+  const host = new CcHost(join(root, ".cc"));
+  const tui = new FakeTui();
+  const keys: string[] = [];
+  const launcher = {
+    ensure: async () => {},
+    running: async () => true,
+    interrupt: async () => {
+      keys.push("escape");
+      tui.st = "idle"; // Esc stops the turn; the trigger mod's turn.complete (aborted) follows
+      await tui.engine.handle("POST", "/turn", q, { running: false, answered: false, reason: "aborted" });
+      // The trigger mod compacts the stopped turn too (logged as pi logs every run): the inbox waits for it.
+      await tui.engine.handle("POST", "/append", q, { messages: [{ kind: "talk", text: "(stopped)" }] });
+    },
+    delivery: () => tui,
+  };
+  const provider = createCcProvider({ host, launcher: launcher as any, botsRoot: root, optchatHome: join(TMP, `oc-${n}`) });
+  const conn = await provider.connect({ versions: [1], capabilities: ["prompt.message", "prompt.image", "session.persistence"] });
+  const events: ProviderEvent[] = [];
+  conn.onEvent((ev) => events.push(ev));
+  await conn.send({ type: "session.open", requestId: "r1", sessionId: "s1", history: "skip", config: { cwd: join(root, "kit"), env: {}, mcpServers: {}, settings: {}, persist: true } });
+  await tick(50);
+  const engine = host.engines.get("kit")!;
+  tui.engine = engine;
+  // Fast ticks for the test: the engine's pump is also called on enqueue.
+  const send = (id: string, text: string) =>
+    conn.send({ type: "session.prompt", sessionId: "s1", prompt: { clientMessageId: id, delivery: "auto", input: { type: "message", content: [{ type: "text", text }] } } });
+  const turns = () => events.flatMap((ev) => (ev.type === "session.turn" ? [`${ev.turnId}:${ev.state}`] : []));
+  return { conn, host, tui, keys, engine, send, turns, events };
+}
+
 describe("delivery after Stop (as for a bot on pi: bot DMs and room tasks still go)", () => {
-  async function chat() {
-    const root = join(TMP, `bots-${++n}`);
-    mkdirSync(join(root, "kit"), { recursive: true });
-    writeFileSync(join(root, "kit", ".optchat-profile"), "kit\n");
-    const host = new CcHost(join(root, ".cc"));
-    const tui = new FakeTui();
-    const keys: string[] = [];
-    const launcher = {
-      ensure: async () => {},
-      running: async () => true,
-      interrupt: async () => {
-        keys.push("escape");
-        tui.st = "idle"; // Esc stops the turn; the trigger mod's turn.complete (aborted) follows
-        await tui.engine.handle("POST", "/turn", q, { running: false, answered: false, reason: "aborted" });
-      },
-      delivery: () => tui,
-    };
-    const provider = createCcProvider({ host, launcher: launcher as any, botsRoot: root, optchatHome: join(TMP, `oc-${n}`) });
-    const conn = await provider.connect({ versions: [1], capabilities: ["prompt.message", "prompt.image", "session.persistence"] });
-    const events: ProviderEvent[] = [];
-    conn.onEvent((ev) => events.push(ev));
-    await conn.send({ type: "session.open", requestId: "r1", sessionId: "s1", history: "skip", config: { cwd: join(root, "kit"), env: {}, mcpServers: {}, settings: {}, persist: true } });
-    await tick(50);
-    const engine = host.engines.get("kit")!;
-    tui.engine = engine;
-    // Fast ticks for the test: the engine's pump is also called on enqueue.
-    const send = (id: string, text: string) =>
-      conn.send({ type: "session.prompt", sessionId: "s1", prompt: { clientMessageId: id, delivery: "auto", input: { type: "message", content: [{ type: "text", text }] } } });
-    const turns = () => events.flatMap((ev) => (ev.type === "session.turn" ? [`${ev.turnId}:${ev.state}`] : []));
-    return { conn, host, tui, keys, engine, send, turns, events };
-  }
 
   it("Stop: Esc for the running turn, the owner's waiting message dropped, a waiting bot DM typed next (the bot wakes)", async () => {
     const { conn, host, tui, keys, send, turns } = await chat();
@@ -410,6 +415,42 @@ describe("delivery after Stop (as for a bot on pi: bot DMs and room tasks still 
     await until(() => events.some((ev) => ev.type === "session.turn" && ev.turnId === "f1" && ev.state === "failed"), 15_000);
     assert.equal(tui.typed.length, 3);
     assert.ok(events.some((ev) => ev.type === "session.notice" && ev.notice.title === "Message not delivered"));
+    await conn.close();
+    await host.close();
+  });
+});
+
+describe("a prompt Claude Code puts into the running turn (a background task's notice)", () => {
+  // Claude Code 2.1.323, reproduced: a background Bash call that ends while the turn runs raises prompt.submit with
+  // the running turn's turnId (a queued_command in the transcript), and that turn ends with one turn.complete.
+  const NOTE = "<task-notification>\n<task-id>bh9b1bmn8</task-id>\n<status>completed</status>\n<summary>Background command \"sleep 4\" completed (exit code 0)</summary>\n</task-notification>";
+
+  for (const [name, into] of [
+    ["the inbox mod says so (into)", { into: true }],
+    ["an older inbox mod (no into): the engine's own running turn says so", {}],
+  ] as const)
+    it(`${name}: a row in that turn, no turn of its own; the person's turn completes at the turn's end`, async () => {
+      const { conn, host, tui, engine, send, turns, events } = await chat();
+      await send("c1", "run the build and tell me");
+      await until(() => turns().includes("c1:started") && engine.running);
+      await engine.handle("POST", "/turn", q, { running: true, typed: true, text: NOTE, origin: "task-notification", ...into });
+      await tui.finish();
+      await tick(20);
+      assert.deepEqual(turns(), ["c1:started", "c1:completed"]);
+      assert.ok(events.some((ev) => ev.type === "timeline.item" && ev.item.type === "tool_call" && (ev.item as any).name === "task_notification"));
+      assert.equal(engine.running, false);
+      await conn.close();
+      await host.close();
+    });
+
+  it("a notice that starts a turn of its own (the TUI idle, into: false) still runs as its own turn", async () => {
+    const { conn, host, tui, engine, turns } = await chat();
+    await engine.handle("POST", "/turn", q, { running: true, typed: true, text: NOTE, origin: "task-notification", into: false });
+    await tui.finish();
+    await tick(20);
+    assert.equal(turns().length, 2);
+    assert.match(turns()[0]!, /^t-.*:started$/);
+    assert.match(turns()[1]!, /^t-.*:completed$/);
     await conn.close();
     await host.close();
   });

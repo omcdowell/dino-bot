@@ -1,10 +1,10 @@
 import { existsSync, readFileSync, rmSync, cpSync, mkdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { Memory, bytes, COMPACTOR_ERRORS, type Entry, type Compressor } from '../memory.ts';
-import { atomicWrite } from '../profiles.ts';
+import { Memory, atomicWrite, bytes, COMPACTOR_ERRORS, type Entry, type Compressor } from '../memory.ts';
 import { record } from '../cache.ts';
 import type { ImportedEntry } from './sources.ts';
+import { generationPath, memoryDirectory } from './active.ts';
 
 export type ImportMode = 'append' | 'rebuild';
 export interface ImportJob {
@@ -27,19 +27,7 @@ export const importReady = (dir: string) => {
   const ready: unknown = JSON.parse(readFileSync(readyFile(dir), 'utf8'));
   return record(ready) && ready.id === job.id ? job : undefined;
 };
-function generationPath(dir: string, name: string) {
-  if (name !== '.' && !/^memories\/[a-f0-9-]{36}$/.test(name)) throw new Error('Invalid memory generation path.');
-  return join(dir, name);
-}
-export function memoryDirectory(dir: string): string {
-  const file = join(dir, 'active-memory.json');
-  if (!existsSync(file)) return dir;
-  const name: unknown = JSON.parse(readFileSync(file, 'utf8'));
-  if (typeof name !== 'string') throw new Error('Invalid active memory pointer.');
-  const path = generationPath(dir, name);
-  if (!existsSync(join(path, 'main'))) throw new Error('Active memory generation is missing.');
-  return path;
-}
+export { memoryDirectory };
 export function pendingImport(dir: string): ImportJob | undefined {
   if (!existsSync(pendingFile(dir))) return undefined;
   const j: unknown = JSON.parse(readFileSync(pendingFile(dir), 'utf8'));

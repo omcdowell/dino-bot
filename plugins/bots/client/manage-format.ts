@@ -248,3 +248,16 @@ export function isDarkSurface(color: string): boolean {
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16) / 255);
   return 0.2126 * r! + 0.7152 * g! + 0.0722 * b! < 0.5;
 }
+
+/** What a new bot's chat can run on: OptChat on pi, or on Claude Code (the app's model picker lists each one's models). */
+export const BOT_ENGINES = [
+  { provider: "optchat", label: "pi" },
+  { provider: "optchat-cc", label: "Claude Code" },
+] as const;
+export type BotEngine = (typeof BOT_ENGINES)[number]["provider"];
+
+/** The new bot's `chat` (its .bot.json): the engine and the model picked on it; undefined when none was picked. */
+export function newBotChat(provider: BotEngine, model: { modelId: string; thinkingId: string | null } | null): { provider: string; thinkingOptionId?: string } | undefined {
+  if (!model?.modelId) return undefined;
+  return { provider: `${provider}/${model.modelId}`, ...(model.thinkingId ? { thinkingOptionId: model.thinkingId } : {}) };
+}

@@ -83,7 +83,7 @@ export function httpPush(env: NodeJS.ProcessEnv, fetchImpl: typeof fetch = fetch
       const res = await fetchImpl(`${ep.url}${path}`, {
         ...init,
         headers: { authorization: `Bearer ${ep.token}`, "content-type": "application/json" },
-        signal: abort.signal,
+        signal: abort.signal as RequestInit["signal"],
       });
       let body: any = null;
       try {

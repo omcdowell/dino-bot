@@ -118,9 +118,19 @@ and rooms. Only the engine differs.
   for every Claude Code bot. The TUI then gets only that route as `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`, with
   its own config folder (`~/bots/.cc/<bot>/claude-config`, no login in it), so the proxy, not a Claude login, is
   used. The proxy must hold the login. Unset (the default), nothing changes.
+- **Tools.** Read, Edit, Write, Bash, Grep, Glob, WebSearch, WebFetch and OptChat's `zoom`/`date`/`search_memory`.
+  No AskUserQuestion (it would hold the TUI): the bot asks in its reply. A permission prompt or question held in the
+  bot's terminal shows as a card in the app (with a push); it is answered in the terminal.
+- **Rooms.** Room mode is pi-optchat's, so a Claude Code bot's room seat runs on pi, on the bot's own Claude model
+  through pi's Anthropic sign-in. Without that sign-in the room says the bot could not answer, and why.
+- **Prompt.** The system prompt is OptChat's only (the view mod drops Claude Code's own sections). Unlike a pi bot, no
+  AGENTS.md/CLAUDE.md from the folder or its parents and no pi package skills are added; the prompt lists the bots
+  plugin's skills, the bot's own and the policy's globals (`server/cc/skills.ts`).
 - **Limits.**
   - Team and Enterprise logins switch Claude Code mods off, so OptChat cannot run there.
-  - The app shows a turn per step (no token streaming).
+  - Answer text and thinking stream; a tool's output shows when it ends (Claude Code mods have no progress hook).
+  - No slash commands (`/skill:x` goes as text; the bot reads the skill from its list) and no rewind or session list.
+  - A reopened chat's history shows messages and tool calls, not thinking.
   - Images typed into the TUI are not kept (those sent from the app are).
 
 ## Odd corners

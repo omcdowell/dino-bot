@@ -8,6 +8,7 @@
  */
 import type { AvatarPack, PackBox, PackCharacter } from "./pack";
 import { packIndex } from "./pack";
+import { avatarViewBox } from "./centre";
 import type { AvatarAccessory, AvatarJson } from "./schema";
 
 /** The parts of avatar.json the picture depends on. */
@@ -19,6 +20,9 @@ export interface ComposeOptions {
   view?: "full" | "face" | "naked";
   /** Adds width/height attributes (px). Without it the SVG scales to its container. */
   size?: number;
+  /** "full" view only: the viewBox [x, y, size] in character units. Default: avatarViewBox (centred by visual
+   *  weight, centre.ts). The designer passes the one it froze during a drag. */
+  viewBox?: readonly [number, number, number];
 }
 
 interface Box { x: number; y: number; w: number; h: number; cx: number; cy: number }
@@ -162,8 +166,8 @@ export function composeAvatarSvg(avatar: AvatarLook, pack: AvatarPack, opts: Com
     const a = box(c.geo.naked), s = Math.max(a.w, a.h) * 1.08;
     vb = [a.cx - s / 2, a.cy - s / 2, s, s];
   } else {
-    const [fx, fy, fw] = c.geo.frame;
-    vb = [fx, fy, fw, fw];
+    const [x, y, s] = opts.viewBox ?? avatarViewBox(pack, avatar);
+    vb = [x, y, s, s];
     accs = avatar.accessories.map((a) => accGroup(pack, c, a)).join("");
   }
   return svgOpen(vb, opts.size) + body + det + eyes + accs + "</svg>";

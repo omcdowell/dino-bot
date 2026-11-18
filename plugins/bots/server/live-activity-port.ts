@@ -31,7 +31,7 @@ export function postLiveActivity(env: NodeJS.ProcessEnv, fetchImpl: typeof fetch
           method: "POST",
           headers: { authorization: `Bearer ${at.token}`, "content-type": "application/json" },
           body: JSON.stringify({ sender: "bots", bots }),
-          signal: abort.signal,
+          signal: abort.signal as RequestInit["signal"],
         });
         if (!res.ok) warnOnce(`paseo-apns answered HTTP ${res.status}`);
         else warned = false;

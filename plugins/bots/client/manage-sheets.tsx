@@ -34,7 +34,7 @@ import { avatarFor, toGroup } from "./group-data";
 import { avatarStack } from "./group-format";
 import type { RoomSummary } from "./group-types";
 import type { ArchivedItem } from "./manage-format";
-import { leadHint, toggleLead, toggleMember } from "./manage-format";
+import { BOT_ENGINES, leadHint, newBotChat, toggleLead, toggleMember, type BotEngine } from "./manage-format";
 import type { HostExtras } from "./manage-data";
 import { accentFill, accentOn, accentText } from "./accent";
 import { AVATAR_PACK, type AvatarJson } from "../shared/avatar";
@@ -379,6 +379,7 @@ export function BotSheet({
   const [template, setTemplate] = useState<TemplateId>("blank");
   const [purpose, setPurpose] = useState("");
   const [chatModel, setChatModel] = useState<{ modelId: string; thinkingId: string | null } | null>(null);
+  const [chatEngine, setChatEngine] = useState<BotEngine>("optchat");
   const [intro, setIntro] = useState(true);
   const [advanced, setAdvanced] = useState(false);
   // Avatar designer (AV3): open, a new bot's designed look (queued after Create), the host's avatar.json.
@@ -403,6 +404,7 @@ export function BotSheet({
     setTemplate(suggestedTemplate(botCount));
     setPurpose("");
     setChatModel(null);
+    setChatEngine("optchat");
     setIntro(true);
     setAdvanced(false);
     setAgents("");
@@ -477,14 +479,13 @@ export function BotSheet({
         toast.show(`${name.trim()} saved`, { variant: "success" });
       } else {
         // Empty AGENTS.md: the host builds it from template + purpose (and adds the bot-dm block).
+        const chat = newBotChat(chatEngine, chatModel);
         const created = await create({
           name: name.trim(),
           agentsMd: advanced ? agents : "",
           template,
           ...(purpose.trim() ? { purpose: purpose.trim() } : {}),
-          ...(chatModel?.modelId
-            ? { chat: { provider: `optchat/${chatModel.modelId}`, ...(chatModel.thinkingId ? { thinkingOptionId: chatModel.thinkingId } : {}) } }
-            : {}),
+          ...(chat ? { chat } : {}),
           intro,
           ...(avatar ? { avatar } : {}),
         });
@@ -607,10 +608,39 @@ export function BotSheet({
             {extras.ModelPickerField ? (
               <>
                 <Label c={c}>Model</Label>
+                <View testID="bots-sheet-engines" style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
+                  {BOT_ENGINES.map((e) => {
+                    const on = e.provider === chatEngine;
+                    return (
+                      <Pressable
+                        key={e.provider}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: on }}
+                        testID={`bots-sheet-engine-${e.provider}`}
+                        onPress={() => {
+                          if (on) return;
+                          setChatEngine(e.provider);
+                          setChatModel(null);
+                        }}
+                        style={{
+                          paddingHorizontal: 14,
+                          paddingVertical: 8,
+                          borderRadius: 999,
+                          borderWidth: 1,
+                          borderColor: on ? accentFill(c) : c.border,
+                          backgroundColor: on ? accentFill(c) : c.surface2,
+                        }}
+                      >
+                        <Text style={{ fontSize: 15, fontWeight: on ? "600" : "400", color: on ? accentOn(c) : c.foreground }}>{e.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
                 <View style={{ backgroundColor: c.surface2, borderWidth: 1, borderColor: c.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 6 }}>
                   <extras.ModelPickerField
+                    key={chatEngine}
                     serverId={serverId}
-                    provider="optchat"
+                    provider={chatEngine}
                     modelId={chatModel?.modelId ?? ""}
                     thinkingId={chatModel?.thinkingId ?? null}
                     thinkingLabel="Thinking"

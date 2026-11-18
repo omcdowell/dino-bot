@@ -836,6 +836,84 @@ async function withObservedProvider(
   }
 }
 
+// A 1x1 PNG.
+const PNG_1X1 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+test("images reach the timeline as for built-in providers: the prompt's on the user message, a tool's on its call", async () => {
+  const logger = createTestLogger();
+  const harness = createProviderHarness({
+    capabilities: [...CAPABILITIES, "prompt.image"],
+    async handleInput(input, emit) {
+      if (input.type !== "session.prompt") return false;
+      const { sessionId } = input;
+      const clientMessageId = input.prompt.clientMessageId;
+      // As the Claude Code bot provider does: its echo names the image by path.
+      emit({
+        type: "timeline.item",
+        sessionId,
+        item: { type: "user_message", id: "u-1", text: "look\n[image: /x.png]", clientMessageId },
+      });
+      emit({
+        type: "session.prompt_result",
+        sessionId,
+        clientMessageId,
+        result: { type: "turn", turnId: "turn-1" },
+      });
+      emit({ type: "session.turn", sessionId, turnId: "turn-1", state: "started" });
+      emit({
+        type: "timeline.item",
+        sessionId,
+        item: {
+          type: "tool_call",
+          id: "c-1",
+          callId: "call-1",
+          name: "Read",
+          detail: { type: "read", filePath: "/shot.png" },
+          status: "completed",
+          error: null,
+          images: [{ data: PNG_1X1, mimeType: "image/png" }],
+        },
+      });
+      emit({ type: "session.turn", sessionId, turnId: "turn-1", state: "completed" });
+      return true;
+    },
+  });
+  const plugins = new PluginAgentClientRegistry(logger);
+  plugins.replace([harness.registration]);
+  const registry = buildProviderRegistry(logger, { pluginProviders: plugins.definitions() });
+  const manager = new AgentManager({
+    logger,
+    clients: { "plugin-direct": registry["plugin-direct"].createClient(logger) },
+    providerDefinitions: { "plugin-direct": registry["plugin-direct"] },
+  });
+  const cwd = mkdtempSync(join(tmpdir(), "plugin-images-"));
+  const agent = await manager.createAgent({ provider: "plugin-direct", cwd }, undefined, {
+    workspaceId: undefined,
+  });
+  try {
+    await manager.runAgent(
+      agent.id,
+      [
+        { type: "text", text: "look" },
+        { type: "image", data: PNG_1X1, mimeType: "image/png" },
+      ],
+      { clientMessageId: "m-1" },
+    );
+    const timeline = manager.getTimeline(agent.id);
+    const image = expect.objectContaining({ id: expect.stringMatching(/^[0-9a-f]{64}$/), mimeType: "image/png" });
+    expect(timeline.filter((item) => item.type === "user_message")).toEqual([
+      expect.objectContaining({ text: "look", images: [image] }),
+    ]);
+    const call = timeline.find((item) => item.type === "tool_call");
+    expect(call).toMatchObject({ callId: "call-1", status: "completed", images: [image] });
+    expect(JSON.stringify(call)).not.toContain(PNG_1X1);
+  } finally {
+    await agent.session?.close();
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("commits notices emitted during session open as the initial timeline with stable history timestamps", async () => {
   await withObservedProvider(
     {

@@ -67,6 +67,7 @@ import {
 import type { RegisteredProviderDefinition } from "./provider-registry.js";
 import { runProviderTurn } from "./providers/provider-runner.js";
 import { StaleProviderSessionError } from "./stale-provider-session-error.js";
+import { storeChatImages } from "./chat-images/store.js";
 
 interface Deferred<Value> {
   promise: Promise<Value>;
@@ -1706,8 +1707,14 @@ function mapTimelineItem(
   revertTokens?: Map<string, ProviderTimelineItem["revertToken"]>,
 ): AgentTimelineItem | null {
   const previous = snapshots.get(item.id);
-  snapshots.set(item.id, item);
-  const { id, revertToken, ...withoutIdentity } = item;
+  // Images go to the chat image store (as a built-in provider's do); rows and snapshots keep references.
+  const { images: imageBlocks, ...withoutImages } = item as ProviderTimelineItem & {
+    images?: Array<{ data: string; mimeType?: string }>;
+  };
+  snapshots.set(item.id, withoutImages as ProviderTimelineItem);
+  const images = imageBlocks?.length ? storeChatImages(imageBlocks) : [];
+  const withImages = images.length > 0 ? { images } : {};
+  const { id, revertToken, ...withoutIdentity } = withoutImages as ProviderTimelineItem;
   if (revertToken !== undefined && revertTokens) {
     revertTokens.set(id, revertToken);
     if (item.type === "user_message" || item.type === "assistant_message") {
@@ -1732,6 +1739,7 @@ function mapTimelineItem(
       text: item.text,
       messageId: item.messageId ?? id,
       clientMessageId: item.clientMessageId,
+      ...withImages,
     };
   }
   if (item.type === "plugin") {
@@ -1744,7 +1752,7 @@ function mapTimelineItem(
       data: item.data,
     };
   }
-  return withoutIdentity as AgentTimelineItem;
+  return { ...withoutIdentity, ...withImages } as AgentTimelineItem;
 }
 
 function persistenceHandle(

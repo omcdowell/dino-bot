@@ -65,13 +65,14 @@ fs.writeFileSync(file + ".tmp", JSON.stringify(j, null, 2), { mode: 0o600 });
 fs.renameSync(file + ".tmp", file);
 ' || echo "start-bot: could not mark Claude Code onboarding done" >&2
 
-# launch-cc.sh's inputs. No worker skills; OptChat's tools (zoom, date, search_memory come from the view mod); the
+# launch-cc.sh's inputs. No worker skills; web search and fetch (as pi bots' pi-web-access); OptChat's tools (zoom,
+# date, search_memory come from the view mod); no AskUserQuestion (it would hold the TUI: the bot asks in its reply); the
 # three mods; no slash commands or skills in the prompt.
 SESSION_ID=$(node -e 'process.stdout.write(require("crypto").randomUUID())')
 BRIEF="$CCDIR/bot.md"
 MODEL=
 WORKER_SKILLS=none
-CC_WORKER_TOOLS=${CC_WORKER_TOOLS:-Read,Edit,Write,Bash,Grep,Glob,zoom,date,search_memory}
+CC_WORKER_TOOLS=${CC_WORKER_TOOLS:-Read,Edit,Write,Bash,Grep,Glob,WebSearch,WebFetch,zoom,date,search_memory}
 CC_PLUGIN_DIRS="$HERE/view:$HERE/trigger:$HERE/inbox"
 CC_EXTRA_ARGS=--disable-slash-commands
 # The plan login only (no ANTHROPIC_* in the pane), unless the owner chose a proxy (CC_PROXY=1, set above).

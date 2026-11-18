@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { RoomSessions, procMemAvailable, type SessionsOptions } from "../server/rooms/sessions";
 import { fakePaseo, fixture } from "./rooms-fakes";
@@ -272,5 +272,36 @@ test("room env names the settings file pi-optchat reads rooms.fullTools from (op
   } finally {
     t.cleanup();
     if (saved !== undefined) process.env.PASEO_BOTS_SETTINGS = saved;
+  }
+});
+
+test("a bot on Claude Code sits in a room on pi with its own Claude model (an alias resolved to the newest id)", async () => {
+  const models = async () => [{ id: "opus", label: "Opus" }, { id: "claude-opus-5-5", label: "Opus 5.5" }, { id: "claude-opus-5", label: "Opus 5" }];
+  const s = setup({ piSignIns: () => ["anthropic"], ccModels: models });
+  try {
+    writeFileSync(join(s.botsRoot, "wallace", ".bot.json"), JSON.stringify({ chat: { provider: "optchat-cc/opus", thinkingOptionId: "max" } }));
+    writeFileSync(join(s.botsRoot, "scrat", ".bot.json"), JSON.stringify({ chat: { provider: "optchat-cc/claude-sonnet-5", thinkingOptionId: "low" } }));
+    await s.sessions.deliver(s.fake.paseo, s.target("wallace"), s.take());
+    await s.sessions.deliver(s.fake.paseo, s.target("scrat"), s.take());
+    await s.sessions.deliver(s.fake.paseo, s.target("peggy"), s.take());
+    assert.deepEqual(
+      s.fake.created.map((c) => c.config),
+      [{ provider: "optchat/anthropic/claude-opus-5-5", thinkingOptionId: "xhigh" }, { provider: "optchat/anthropic/claude-sonnet-5", thinkingOptionId: "low" }, { provider: "optchat" }],
+      "a bot on pi keeps the host's room model",
+    );
+  } finally {
+    s.cleanup();
+  }
+});
+
+test("a bot on Claude Code on a computer whose pi has no Anthropic sign-in: a clear error, no seat", async () => {
+  const s = setup({ piSignIns: () => [], ccModels: async () => [] });
+  try {
+    writeFileSync(join(s.botsRoot, "wallace", ".bot.json"), JSON.stringify({ chat: { provider: "optchat-cc/claude-opus-5-5" } }));
+    await assert.rejects(s.sessions.deliver(s.fake.paseo, s.target("wallace"), s.take()), /runs on Claude Code.*pi.*not signed in to Anthropic/);
+    assert.equal(s.fake.created.length, 0);
+    assert.equal(s.takes(), 0, "the queue stays");
+  } finally {
+    s.cleanup();
   }
 });

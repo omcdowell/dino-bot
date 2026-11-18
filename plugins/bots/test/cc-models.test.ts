@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { ProviderEvent } from "@getpaseo/plugin/server/provider";
 import { CcHost } from "../server/cc/engine";
-import { CcLauncher } from "../server/cc/launch";
 import { ANTHROPIC_API, CC_ALIASES, CcModels, fetchModels, modelSource, pickerModels, withModel } from "../server/cc/models";
 import { createCcProvider, firstProxiedBot } from "../server/cc/provider";
 
@@ -139,13 +138,12 @@ describe("cc provider: models", () => {
     assert.equal(firstProxiedBot(join(TMP, "nowhere")), undefined);
   });
 
-  it("offers the live list in the catalog and the session; a picked full id restarts the TUI with --model <id>, after the turn", async () => {
+  it("offers the live list in the catalog and the session; a picked model applies from the next step, with no restart", async () => {
     const { root, cwd } = botDir("kit", { cc: { baseUrl: "http://gw/kit" } });
     const host = new CcHost(join(root, ".cc"));
     const launched: string[] = [];
     const launcher = {
       ensure: async (bot: string, o: { model?: string }) => void launched.push(`ensure ${bot} ${o.model ?? "-"}`),
-      restart: async (bot: string, o: { model?: string; effort?: string }) => void launched.push(`restart ${bot} ${o.model ?? "-"} ${o.effort ?? "-"}`),
       interrupt: async () => {},
       running: async () => true,
       // The engine types into the TUI (server/cc/deliver.ts): here always idle, typing accepted.
@@ -177,44 +175,27 @@ describe("cc provider: models", () => {
     assert.equal(cfg.config.models!.at(-1)!.id, "claude-opus-4-1");
     assert.deepEqual(launched, ["ensure kit claude-opus-4-1"]);
 
-    // Idle: a new model restarts the TUI on it now.
+    // The TUI's model per step (the inbox mod's turn.step hook asks /run): the session's, at once, no restart.
+    const engine = host.engines.get("kit")!;
+    const run = async () => (await engine.handle("GET", "/run", new URLSearchParams(), {})).json;
+    assert.deepEqual(await run(), { model: "claude-opus-4-1", effort: "medium" });
     await conn.send({ type: "session.configure", requestId: "r2", sessionId: "s1", changes: { model: "claude-fable-5-2" } });
     await tick();
     assert.ok(events.some((e) => e.type === "request.completed" && e.requestId === "r2"));
-    assert.deepEqual(launched.slice(1), ["restart kit claude-fable-5-2 medium"]);
+    assert.deepEqual(await run(), { model: "claude-fable-5-2", effort: "medium" });
 
-    // Mid-turn: the restart waits for the turn's end.
+    // Mid-turn: the turn's next step runs on it (as a pi bot's setModel).
     await conn.send({ type: "session.prompt", sessionId: "s1", prompt: { clientMessageId: "t1", delivery: "auto", input: { type: "message", content: [{ type: "text", text: "hi" }] } } });
-    await tick();
-    const engine = host.engines.get("kit")!;
     await tick(50);
-    // The inbox mod's hook acks the typed prompt: t1's turn runs.
     await engine.handle("POST", "/turn", new URLSearchParams(), { running: true, typed: true, text: "hi", origin: "composer" });
-    await conn.send({ type: "session.configure", requestId: "r3", sessionId: "s1", changes: { model: "opus" } });
+    await conn.send({ type: "session.configure", requestId: "r3", sessionId: "s1", changes: { model: "opus", thinkingOption: "high" } });
     await tick();
-    assert.equal(launched.filter((l) => l.startsWith("restart")).length, 1);
+    assert.deepEqual(await run(), { model: "opus", effort: "high" });
     await engine.handle("POST", "/turn", new URLSearchParams(), { running: false, answered: true });
     await tick();
-    assert.equal(launched.at(-1), "restart kit opus medium");
-    // The same model again: nothing to do.
-    await conn.send({ type: "session.configure", requestId: "r4", sessionId: "s1", changes: { model: "opus" } });
-    await tick();
-    assert.equal(launched.filter((l) => l.startsWith("restart")).length, 2);
+    // Never restarted: a send only makes sure the TUI runs (a TUI not running starts on the session's model).
+    assert.deepEqual(launched, ["ensure kit claude-opus-4-1", "ensure kit claude-fable-5-2"]);
     await conn.close();
     await host.close();
-  });
-
-  it("restart closes the running TUI's herdr tab, then starts it with the new model", async () => {
-    const calls: string[] = [];
-    let alive = true;
-    const run = async (bin: string, args: string[], env: NodeJS.ProcessEnv) => {
-      calls.push(bin === "sh" ? `sh model=${env.CC_WORKER_MODEL}` : `${bin} ${args.join(" ")}`);
-      if (args[0] === "agent" && args[1] === "get") return alive ? { code: 0, stdout: JSON.stringify({ result: { agent: { name: "cc-kit", tab_id: "w1:t3" } } }), stderr: "" } : { code: 1, stdout: "", stderr: "" };
-      if (args[0] === "tab" && args[1] === "close") alive = false;
-      return { code: 0, stdout: "{}", stderr: "" };
-    };
-    const l = new CcLauncher({ herdrEnv: () => ({}), script: "/x/start-bot.sh", run });
-    await l.restart("kit", { cwd: join(TMP, "k"), stateDir: join(TMP, "k-state"), env: { DINOBOT_CLAUDE_BIN: "/bin/true" }, model: "claude-fable-5-2" });
-    assert.deepEqual(calls, ["herdr agent get cc-kit", "herdr tab close w1:t3", "herdr agent get cc-kit", "herdr agent get cc-kit", "sh model=claude-fable-5-2"]);
   });
 });

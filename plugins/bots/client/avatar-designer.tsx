@@ -50,7 +50,6 @@ import {
   deselect,
   hints,
   hitTest,
-  layerBox,
   nudge,
   pickCharacter,
   removeAllAccessories,
@@ -64,7 +63,7 @@ import {
   type Look,
   type NudgeAction,
 } from "./avatar-designer-state";
-import { designerSvgs, tileSvgs, type Tile } from "./avatar-designer-svg";
+import { designerSvgs, stageLayerBox, stageScale, stageToFrame, tileSvgs, type StageView, type Tile } from "./avatar-designer-svg";
 import type { SvgXmlComponent } from "./host-svg";
 import { isDarkSurface } from "./manage-format";
 
@@ -263,6 +262,7 @@ function Stage({
   designer,
   pack,
   xml,
+  view,
   Svg,
   checker,
   c,
@@ -278,6 +278,8 @@ function Stage({
   designer: Designer;
   pack: AvatarPack;
   xml: string;
+  /** The square `xml` shows (designerSvgs): stage points and lengths map through it to avatar.json units. */
+  view: StageView;
   Svg: SvgXmlComponent;
   checker: string;
   c: Colors;
@@ -285,8 +287,8 @@ function Stage({
   onActive(active: boolean): void;
   testID: string;
 }) {
-  const live = useRef({ designer, size, dispatch, onActive });
-  live.current = { designer, size, dispatch, onActive };
+  const live = useRef({ designer, size, dispatch, onActive, view });
+  live.current = { designer, size, dispatch, onActive, view };
   type Gesture = { start: AvatarAccessory | null; base: Pt[]; moved: boolean; pushed: boolean; off: boolean; maxPts: number };
   const gest = useRef<Gesture | null>(null);
 
@@ -302,8 +304,9 @@ function Stage({
       onPanResponderTerminationRequest: () => false,
       onShouldBlockNativeResponder: () => true,
       onPanResponderGrant: (e) => {
-        const { designer: d, size: s, dispatch: set } = live.current;
-        const hit = hitTest(pack, d.state.look, e.nativeEvent.locationX / s, e.nativeEvent.locationY / s);
+        const { designer: d, size: s, dispatch: set, view: v } = live.current;
+        const [hu, hv] = stageToFrame(pack, d.state.look.character, v, e.nativeEvent.locationX / s, e.nativeEvent.locationY / s);
+        const hit = hitTest(pack, d.state.look, hu, hv);
         const g: Gesture = { start: null, base: [], moved: false, pushed: false, off: hit < 0, maxPts: 1 };
         gest.current = g;
         if (hit >= 0 && hit !== d.sel) {
@@ -328,7 +331,8 @@ function Stage({
           if (dd < 3 && pts.length < 2) return;
           g.moved = true;
         }
-        const s = live.current.size;
+        // Stage px -> avatar.json units (the shown square can differ from the frame: AC1 centring).
+        const s = live.current.size / stageScale(pack, live.current.designer.state.look.character, live.current.view);
         let gesture: { dx: number; dy: number; scale?: number; rotation?: number };
         if (pts.length >= 2 && g.base.length >= 2) {
           const [p0, p1] = [pts[0]!, pts[1]!], [b0, b1] = [g.base[0]!, g.base[1]!];
@@ -361,7 +365,7 @@ function Stage({
     });
   }, [pack]);
 
-  const box = layerBox(pack, designer.state.look, designer.sel);
+  const box = stageLayerBox(pack, designer.state.look, view, designer.sel);
   const bw = big ? 44 : 30;
   const corner = box ? boxCorner(box) : null;
   const clampPx = (v: number) => Math.max(2, Math.min(size - bw - 2, v));
@@ -545,7 +549,10 @@ export function DesignerBody({ botName, initial, pack, theme, Svg, onCancel, onS
   }, []);
 
   const look = designer.state.look;
-  const svgs = useMemo(() => designerSvgs(pack, look), [pack, look]);
+  // AC1: the stage is centred like the saved picture; while a finger is on it the view holds still.
+  const held = useRef<StageView | null>(null);
+  const svgs = useMemo(() => designerSvgs(pack, look, dragging ? held.current : null), [pack, look, dragging]);
+  held.current = svgs.view;
   const tiles = tileSvgs(pack, look);
   const count = counters(pack, designer);
   const hint = hints(pack, designer);
@@ -621,11 +628,12 @@ export function DesignerBody({ botName, initial, pack, theme, Svg, onCancel, onS
                 designer={designer}
                 pack={pack}
                 xml={svgs.full}
+                view={svgs.view}
                 Svg={Svg}
                 checker={checker}
                 c={c}
                 dispatch={dispatch}
-                onActive={() => {}}
+                onActive={setDragging}
                 onTouchStart={exempt}
                 testID="avatar-stage-big"
               />
@@ -699,6 +707,7 @@ export function DesignerBody({ botName, initial, pack, theme, Svg, onCancel, onS
               designer={designer}
               pack={pack}
               xml={svgs.full}
+              view={svgs.view}
               Svg={Svg}
               checker={checker}
               c={c}

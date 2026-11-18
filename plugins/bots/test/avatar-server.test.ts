@@ -9,6 +9,7 @@ import { AVATAR_PACK, AVATAR_PACK_JSON, stableDefaultAvatar, type AvatarJson } f
 import { BotFiles } from "../server/manage";
 import { AvatarsService, withAvatarHashes } from "../server/avatars";
 import {
+  AVATAR_RENDER_VERSION,
   AVATAR_SIZES,
   avatarJsonHash,
   packGzip,
@@ -227,11 +228,13 @@ test("hash stability: the same picture always hashes the same, any change of pic
   const a = avatar();
   const h = avatarJsonHash(a);
   assert.match(h, /^[A-Za-z0-9_-]{16}$/);
-  // Golden value: the hash is part of file names and device caches, so it must not drift between releases.
+  // Golden value: the hash is part of file names and device caches, so it must not drift between releases; it
+  // changes only with AVATAR_RENDER_VERSION (AC1: 2 = centred by visual weight), when the same JSON draws differently.
+  assert.equal(AVATAR_RENDER_VERSION, 2);
   assert.equal(h, createHash("sha256").update(JSON.stringify({
     v: 1, packVersion: 1, character: "octopus", eyes: "closed", colour: "#FECB3E",
     accessories: [{ id: "sun-hat", x: 0.401, y: 0.3693, scale: 0.6083, rotation: -20 }, { id: "glasses", x: 0.5002, y: 0.5018, scale: 0.4549 }],
-  })).digest("base64url").slice(0, 16));
+  }) + "\nrender:2").digest("base64url").slice(0, 16));
   assert.equal(avatarJsonHash({ ...a, revision: 77 }), h);
   assert.equal(avatarJsonHash({ ...a, colour: "#fecb3e" }), h);
   for (const other of [

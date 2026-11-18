@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Resvg } from "@resvg/resvg-js";
-import { AVATAR_PACK, composeAvatarSvg, parseAvatar } from "../shared/avatar";
+import { AVATAR_PACK, composeAvatarSvg as composeSvg, parseAvatar } from "../shared/avatar";
 
 const fx = JSON.parse(readFileSync(join(__dirname, "fixtures", "avatar", "designer-r9.json"), "utf8")) as {
   packMd5: string;
@@ -34,6 +34,9 @@ for (const c of fx.cases) {
     const exact = parseAvatar(c.avatar, AVATAR_PACK), exported = parseAvatar(c.exported, AVATAR_PACK);
     assert.ok(exact.ok && exported.ok);
     const ref = render(c.designerSvg);
+    // designer-b drew in the pack frame; AC1 centring moves the square, so compare the drawing in that frame.
+    const [fx0, fy0, fw0] = AVATAR_PACK.characters.find((ch) => ch.id === (c.avatar as { character: string }).character)!.geo.frame;
+    const composeAvatarSvg = (a: Parameters<typeof composeSvg>[0], p: typeof AVATAR_PACK) => composeSvg(a, p, { viewBox: [fx0, fy0, fw0] });
     // full-precision placement: the same picture (sub-pixel float noise only)
     assert.ok(differs(ref, render(composeAvatarSvg(exact.avatar, AVATAR_PACK))) < 0.0005, "exact");
     // designer-b's own avatar.json export (3 decimals) still matches within anti-aliasing

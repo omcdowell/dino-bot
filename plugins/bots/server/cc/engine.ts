@@ -11,11 +11,12 @@
  * (compactor-runner.ts), the host's pi answers it (pi-runner.ts: the pi CLI on the host's pi sign-in, any model pi has),
  * falling back to the TUI when pi fails. DinoBot never calls a model API itself.
  */
+import { execFile } from "node:child_process";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, chmodSync, renameSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { bytes, cap, Memory, NODE, VIEW, type Compression, type Kind } from "pi-optchat/src/memory.ts";
 import { lockProfile } from "pi-optchat/src/lock.ts";
 import { task } from "pi-optchat/src/compaction-task.ts";
@@ -25,6 +26,11 @@ import { readSettings } from "pi-optchat/src/settings.ts";
 import { applyRoomBlocks } from "pi-optchat/src/room/blocks.ts";
 import { botSection } from "pi-optchat/src/bot-prompt.ts";
 import { IMPORT_GUIDANCE } from "pi-optchat/src/import/guidance.ts";
+import { memoryDirectory } from "pi-optchat/src/import/active.ts";
+import { escalator } from "pi-optchat/src/escalation.ts";
+import { checkpoint } from "pi-optchat/src/checkpoint.ts";
+import { RunLog } from "pi-optchat/src/run-log.ts";
+import { escalateTo } from "pi-optchat/src/user.ts";
 import { CompactorError } from "pi-optchat/src/provider-error.ts";
 import { ccBotSkills, formatCcSkills } from "./skills";
 import { readSettings as readBotsSettings } from "../settings";
@@ -44,15 +50,33 @@ export interface CcJob {
 }
 export type CcJobResult = { text: string } | { error: string; status?: number; retryAfterMs?: number };
 
+export type CcImage = { data: string; mimeType?: string };
+
+/** A tool's images as the view mod posts them, those with bytes: `{ images }`, or nothing. */
+const images = (v: unknown): { images?: CcImage[] } => {
+  const list = (Array.isArray(v) ? v : []).flatMap((i): CcImage[] =>
+    i && typeof i.data === "string" && i.data ? [typeof i.mimeType === "string" && i.mimeType ? { data: i.data, mimeType: i.mimeType } : { data: i.data }] : [],
+  );
+  return list.length ? { images: list } : {};
+};
+
 /** What the mods report about the session, for the app's timeline. */
 export type CcEvent =
   /** origin: Claude Code's origin kind of a turn the TUI started itself (`composer` typed, `task-notification`…). */
   | { type: "started"; id: string | null; text: string; origin?: string }
-  | { type: "step"; answer: string }
+  /**
+   * A prompt Claude Code put into the running turn (a background task's notice that came mid-turn, text typed over the
+   * turn): no turn of its own; the running turn's end ends it.
+   */
+  | { type: "into"; text: string; origin?: string }
+  /** partial: the step's answer so far (it streams); the step's last one is whole. */
+  | { type: "step"; answer: string; partial?: boolean }
   /** A thinking block of a step, the whole of it so far (`block` names it: turn, step, block index), sent as it grows. */
   | { type: "thinking"; block: string; text: string }
-  | { type: "tool"; phase: "running" | "done"; id: string; name: string; input?: unknown; output?: string; isError?: boolean }
-  | { type: "complete"; aborted: boolean; reason: string | null }
+  /** images: what the tool returned as images (base64 or a data URL), for the app's chat image store. */
+  | { type: "tool"; phase: "running" | "done"; id: string; name: string; input?: unknown; output?: string; isError?: boolean; images?: CcImage[] }
+  /** reason: Claude Code's (`answer`, `aborted`, `refusal`, `error`); `detail`: the refusal's explanation or the error's text. */
+  | { type: "complete"; aborted: boolean; reason: string | null; detail?: string }
   | { type: "session"; restarted: boolean }
   /** The TUI's figures so far (server/cc/usage.ts): context, Claude Code's cost, tokens, rate limits. */
   | { type: "usage"; usage: CcRunUsage }
@@ -63,7 +87,9 @@ export type CcEvent =
   /** An inbox item the TUI never took (typed and not seen, too often): it leaves the inbox. */
   | { type: "undelivered"; id: string; reason: string }
   /** The TUI waits on a permission prompt or a question in its terminal: inbox items wait too. */
-  | { type: "blocked"; since: number };
+  | { type: "blocked"; since: number }
+  /** A warning of the bot's memory or its compactions (also in the daemon log): pi-optchat shows them in the chat. */
+  | { type: "warning"; text: string };
 
 interface InboxItem {
   id: string;
@@ -224,6 +250,8 @@ export class CcEngine {
   private failures = 0;
   private blockedSince = 0;
   private lastWait = "";
+  /** The profile's git checkpoints (pi-optchat's checkpoint.ts), one after another. */
+  private checkpoints: Promise<void> = Promise.resolve();
   private readonly pumpTimer: ReturnType<typeof setInterval>;
 
   private constructor(
@@ -232,10 +260,24 @@ export class CcEngine {
     private readonly unlock: () => Promise<void>,
     private readonly opts: CcEngineOptions,
   ) {
-    const warn = opts.warn ?? (() => {});
+    const warn = (s: string) => this.warn(s);
     this.pi = opts.pi ?? spawnPiRunner();
     this.loadSettings();
-    this.memory = new Memory(dir, (input, signal) => this.compress(input, signal), warn, VIEW, opts.parallel ?? 4, 10_000, join(dir, "compactor-errors.jsonl"));
+    // As pi-optchat's controller opens it: the profile's active memory generation (an import's: active-memory.json), and
+    // refused lines escalated with bot-dm, sent from the bot's chat (its PASEO_AGENT_ID); none without one.
+    const env = () => this.opts.env ?? process.env;
+    const send = (file: string, args: string[]) =>
+      new Promise<void>((resolve, reject) => execFile(file, args, { env: env(), timeout: 30_000 }, (error) => (error ? reject(error) : resolve())));
+    this.memory = new Memory(
+      memoryDirectory(dir),
+      (input, signal) => this.compress(input, signal),
+      warn,
+      VIEW,
+      opts.parallel ?? 4,
+      10_000,
+      join(dir, "compactor-errors.jsonl"),
+      env().PASEO_AGENT_ID ? escalator(basename(dir), send, () => escalateTo(env())) : undefined,
+    );
     for (const e of this.memory.root) if (e.receipt) this.receipts.add(e.receipt);
     this.loadInbox();
     this.scan = setInterval(() => {
@@ -247,9 +289,9 @@ export class CcEngine {
         warn(`cc ${bot}: ${(error as Error).message}`);
       }
     }, 1000);
-    this.scan.unref?.();
+    (this.scan as { unref?: () => void }).unref?.();
     this.pumpTimer = setInterval(() => void this.pump(), opts.tickMs ?? 500);
-    this.pumpTimer.unref?.();
+    (this.pumpTimer as { unref?: () => void }).unref?.();
   }
 
   /** Takes the profile lock (a busy profile rejects with pi-optchat's ProfileBusyError) and loads its memory. */
@@ -271,9 +313,23 @@ export class CcEngine {
   private emit(e: CcEvent) {
     for (const l of this.listeners) l(e);
   }
+  /** The daemon log, and the bot's chat (a notification row, as pi-optchat's warnings). */
+  private warn(text: string) {
+    this.opts.warn?.(text);
+    this.emit({ type: "warning", text });
+  }
 
   setEnv(env: NodeJS.ProcessEnv) {
     this.opts.env = env;
+  }
+
+  /**
+   * The model and effort the TUI runs on, from the chat (the app's picker): the inbox mod's turn.step hook asks /run
+   * at each main-loop step, so a switch applies from the next step, with no restart (unset: the TUI's own).
+   */
+  private run: { model?: string; effort?: string } = {};
+  setRun(run: { model?: string; effort?: string }) {
+    this.run = { ...(run.model ? { model: run.model } : {}), ...(run.effort ? { effort: run.effort } : {}) };
   }
 
   /** The TUI to type into (the provider sets it once it knows the bot's herdr agent). */
@@ -335,7 +391,7 @@ export class CcEngine {
     const key = `${plan.runner}:${plan.pi.provider}/${plan.pi.model}:${plan.inSession.model}`;
     if (plan.runner === "in-session" && plan.why === "bot" && !(plan.pi.provider === "anthropic" && /^claude-/.test(plan.pi.model)) && this.warnedPlan !== key) {
       this.warnedPlan = key;
-      (this.opts.warn ?? (() => {}))(
+      this.warn(
         `cc ${this.bot}: compactor ${plan.pi.provider}/${plan.pi.model} runs in-session as ${plan.inSession.model} (compactorRunner "in-session"; set "pi" or remove it to use that model)`,
       );
     }
@@ -376,7 +432,7 @@ export class CcEngine {
     }
     const rest = this.opts.piRestMs ?? PI_REST_MS;
     this.piRestUntil = Date.now() + rest;
-    (this.opts.warn ?? (() => {}))(`cc ${this.bot}: pi compactor failed (${model}): ${error.slice(0, 300)}; running in-session for ${Math.round(rest / 60_000)} min`);
+    this.warn(`cc ${this.bot}: pi compactor failed (${model}): ${error.slice(0, 300)}; running in-session for ${Math.round(rest / 60_000)} min`);
     this.appendLog("compactor-runner.jsonl", { t: new Date().toISOString(), runner: "pi", model, fallback: "in-session", restMs: rest, error: error.slice(0, 2000) });
     return inSession("pi");
   }
@@ -480,7 +536,27 @@ export class CcEngine {
       const saved = JSON.parse(readFileSync(this.inboxFile, "utf8"));
       if (Array.isArray(saved)) this.items = saved.filter((i) => i && typeof i.id === "string" && typeof i.text === "string" && !this.receipts.has(i.id));
     } catch {}
-    for (const i of this.items) i.state = "queued";
+    // One in its turn (the TUI goes on through a daemon restart) stays submitted: that turn's log receipts it, and it
+    // is never typed again. One being typed goes again (unless the transcript shows it: deliverStep).
+    for (const i of this.items) if (i.state !== "submitted") i.state = "queued";
+  }
+
+  /**
+   * A new TUI: the messages whose turn died with the old one go into memory as unanswered (pi-optchat's
+   * Inbox.recover), so the bot sees them and they are not answered twice; one typed and not seen goes again.
+   */
+  private recoverInbox() {
+    for (const i of this.items) {
+      if (i.state !== "submitted") {
+        i.state = "queued";
+        continue;
+      }
+      if (!this.receipts.has(i.id)) this.memory.append("user", i.text, i.date, i.id);
+      this.receipts.add(i.id);
+      this.deliveryLog({ ev: "recovered", id: i.id });
+    }
+    this.items = this.items.filter((i) => i.state !== "submitted");
+    this.saveInbox();
   }
   private saveInbox() {
     const tmp = `${this.inboxFile}.${process.pid}.tmp`;
@@ -570,7 +646,7 @@ export class CcEngine {
     try {
       await this.deliverStep(this.opts.delivery);
     } catch (error) {
-      (this.opts.warn ?? (() => {}))(`cc ${this.bot}: delivery: ${(error as Error).message}`);
+      this.warn(`cc ${this.bot}: delivery: ${(error as Error).message}`);
     } finally {
       this.pumping = false;
     }
@@ -674,7 +750,7 @@ export class CcEngine {
 
   private roomBlocks() {
     const before = this.memory.root.length;
-    applyRoomBlocks(this.memory, this.dir, this.opts.warn ?? (() => {}));
+    applyRoomBlocks(this.memory, this.dir, (s) => this.warn(s));
     for (const e of this.memory.root.slice(before)) if (e.receipt) this.receipts.add(e.receipt);
   }
 
@@ -683,11 +759,13 @@ export class CcEngine {
   async handle(method: string, path: string, query: URLSearchParams, body: any): Promise<{ status: number; json: unknown }> {
     const ok = (json: unknown) => ({ status: 200, json });
     switch (`${method} ${path}`) {
+      case "GET /run":
+        return ok(this.run);
       case "GET /prompt":
         return ok({ text: this.systemPrompt() });
       case "POST /hello": {
-        // A (re)started TUI: what the old one had in flight goes again; its unanswered jobs too.
-        for (const i of this.items) i.state = "queued";
+        // A (re)started TUI: what the old one had typed goes again, what its turn died with is logged; its unanswered jobs go again.
+        this.recoverInbox();
         this.inflight = null;
         this.retryAt = 0;
         this.failures = 0;
@@ -707,23 +785,35 @@ export class CcEngine {
         const now = Date.now();
         if (body.running) {
           const wasRunning = this.idle(now) ? false : this.turn.running;
+          // Into the running turn: Claude Code says so (the inbox mod's `into`, from the submit's turnId); an older
+          // mod does not, and the engine's own running turn stands in.
+          const into = typeof body.into === "boolean" ? body.into : wasRunning;
           Object.assign(this.turn, { running: true, since: wasRunning ? this.turn.since : now });
           // The item the engine typed: its ack. Anything else the TUI submitted itself (typed in the terminal, or
-          // Claude Code's own like a background task's notification) starts a turn of its own.
+          // Claude Code's own like a background task's notification) starts a turn of its own, unless it went into
+          // the running turn: then that turn's one turn.complete ends it, so it starts none.
           const f = this.inflight;
+          const origin = typeof body.origin === "string" && body.origin ? { origin: body.origin } : {};
           if (body.typed && f && f.item.state === "delivering" && body.origin !== "task-notification" && sameText(String(body.text ?? ""), f.item.text))
             // Into a turn already running (one of the TUI's own started just before the Enter): merged into it.
-            wasRunning ? this.merged(f.item, "hook") : this.acked(f.item, "hook");
-          else if (body.typed)
-            this.emit({ type: "started", id: null, text: String(body.text ?? ""), ...(typeof body.origin === "string" && body.origin ? { origin: body.origin } : {}) });
+            into ? this.merged(f.item, "hook") : this.acked(f.item, "hook");
+          else if (body.typed && into) this.emit({ type: "into", text: String(body.text ?? ""), ...origin });
+          else if (body.typed) this.emit({ type: "started", id: null, text: String(body.text ?? ""), ...origin });
         } else {
-          Object.assign(this.turn, { running: false, endedAt: now, compactDue: !!body.answered });
-          this.emit({ type: "complete", aborted: !body.answered, reason: typeof body.reason === "string" ? body.reason : null });
+          // Every turn ends with the trigger mod's compaction (stopped and failed ones too): the inbox waits for it.
+          Object.assign(this.turn, { running: false, endedAt: now, compactDue: true });
+          const detail = typeof body.refusal?.explanation === "string" ? body.refusal.explanation : typeof body.error === "string" ? body.error : "";
+          this.emit({
+            type: "complete",
+            aborted: !body.answered,
+            reason: typeof body.reason === "string" ? body.reason : null,
+            ...(detail.trim() ? { detail: detail.trim().slice(0, 1000) } : {}),
+          });
         }
         return ok({ ok: true });
       }
       case "POST /event": {
-        if (body.type === "step") this.emit({ type: "step", answer: String(body.answer ?? "") });
+        if (body.type === "step") this.emit({ type: "step", answer: String(body.answer ?? ""), ...(body.partial === true ? { partial: true } : {}) });
         else if (body.type === "thinking") {
           const text = String(body.text ?? "");
           if (text.trim()) this.emit({ type: "thinking", block: String(body.block ?? ""), text: text.slice(0, 64_000) });
@@ -734,17 +824,26 @@ export class CcEngine {
             id: String(body.id ?? ""),
             name: String(body.name ?? ""),
             input: body.input ?? null,
-            ...(body.phase === "done" ? { output: String(body.output ?? "").slice(0, 4000), isError: body.isError === true } : {}),
+            ...(body.phase === "done" ? { output: String(body.output ?? ""), isError: body.isError === true, ...images(body.images) } : {}),
           });
         return ok({ ok: true });
       }
       case "POST /append": {
         const ids: number[] = [];
-        for (const m of (body.messages ?? []) as Array<{ kind: Kind; text: string }>) {
-          if (typeof m?.text !== "string" || !m.text.trim()) continue;
+        this.loadSettings();
+        // The profile's Tool digest: the turn's calls, results and commentary go through pi-optchat's RunLog as one entry.
+        const digest = this.settings.toolDigest ? new RunLog(this.memory, true) : null;
+        const messages = ((body.messages ?? []) as AppendEntry[]).filter((m) => typeof m?.text === "string" && m.text.trim());
+        for (let k = 0; k < messages.length; k++) {
+          const m = messages[k]!;
           // A user message that is an inbox item carries its id as the receipt, then leaves the journal.
           const item = m.kind === "user" ? this.items.find((i) => i.state === "submitted" && i.text.trim() === m.text.trim()) : undefined;
-          ids.push(this.memory.append(m.kind, m.kind === "echo" ? cap(m.text) : m.text, undefined, item?.id).i);
+          if (digest) {
+            const before = this.memory.root.length;
+            k = digestWrite(digest, this.memory, messages, k, item?.id);
+            if (k === messages.length - 1) digest.end();
+            for (let i = before; i < this.memory.root.length; i++) ids.push(i);
+          } else ids.push(this.memory.append(m.kind, m.kind === "echo" ? cap(m.text) : m.text, undefined, item?.id).i);
           if (item) {
             this.receipts.add(item.id);
             this.items = this.items.filter((i) => i !== item);
@@ -753,6 +852,7 @@ export class CcEngine {
         }
         this.turn.compactDue = false;
         this.roomBlocks();
+        this.checkpoint();
         return ok({ ids, total: this.memory.root.length });
       }
       case "GET /view": {
@@ -829,6 +929,11 @@ export class CcEngine {
     return { status: 404, json: { error: "no route" } };
   }
 
+  /** A git commit of the profile after each turn's log, as pi-optchat makes after each run; not waited for. */
+  private checkpoint() {
+    this.checkpoints = this.checkpoints.then(() => checkpoint(this.dir)).catch((error) => this.warn(`cc ${this.bot}: local checkpoint failed: ${(error as Error).message}`));
+  }
+
   /** Where summaries run now: the runner, why, the model; while pi rests after a failure, until when. */
   compactorStatus() {
     const plan = this.lastPlan ?? compactorPlan(this.dir, this.hostRunner());
@@ -840,10 +945,10 @@ export class CcEngine {
     };
   }
 
-  /** The newest log entries (user and talk), for the app's history of a reopened chat. */
-  recent(limit = 200): Array<{ i: number; kind: Kind; text: string; date: string }> {
+  /** The newest log entries (messages, tool calls and their results), for the app's history of a reopened chat. */
+  recent(limit = 400): Array<{ i: number; kind: Kind; text: string; date: string }> {
     return this.memory.root
-      .filter((e) => e.kind === "user" || e.kind === "talk")
+      .filter((e) => e.kind === "user" || e.kind === "talk" || e.kind === "tool" || e.kind === "echo")
       .slice(-limit)
       .map((e) => ({ i: e.i, kind: e.kind, text: e.text, date: e.date }));
   }
@@ -855,6 +960,8 @@ export class CcEngine {
     clearInterval(this.pumpTimer);
     for (const j of [...this.jobs.values()]) j.done({ error: "engine closed", status: 503 });
     await this.memory.close().catch(() => {});
+    this.checkpoint();
+    await this.checkpoints;
     await this.unlock().catch(() => {});
   }
 }
@@ -942,6 +1049,42 @@ export class CcHost {
       this.server = null;
     }
   }
+}
+
+/** A log entry from the view mod; a call (tool) and its result (echo) carry the call's id, name, input and result. */
+interface AppendEntry {
+  kind: Kind;
+  text: string;
+  name?: string;
+  input?: unknown;
+  call?: string;
+  result?: string;
+  isError?: boolean;
+}
+
+/**
+ * Writes `messages[k]` to pi-optchat's RunLog as the pi message it stands for (a talk with the calls after it is one
+ * assistant message); returns the index of the last entry taken. An echo with no call (a background task's notice) is
+ * logged as it is.
+ */
+function digestWrite(log: RunLog, memory: Memory, messages: AppendEntry[], k: number, receipt?: string): number {
+  const m = messages[k]!;
+  const timestamp = Date.now();
+  const assistant = (content: unknown[]) => ({ role: "assistant", content, stopReason: content.some((c: any) => c.type === "toolCall") ? "toolUse" : "stop", timestamp }) as never;
+  const call = (e: AppendEntry) => ({ type: "toolCall", id: e.call, name: e.name, arguments: e.input ?? {} });
+  const isCall = (e: AppendEntry | undefined) => e?.kind === "tool" && typeof e.call === "string";
+  if (m.kind === "user") log.write({ role: "user", content: m.text, timestamp } as never, receipt);
+  else if (m.kind === "talk" || isCall(m)) {
+    const content: unknown[] = m.kind === "talk" ? [{ type: "text", text: m.text }] : [call(m)];
+    while (isCall(messages[k + 1])) content.push(call(messages[++k]!));
+    log.write(assistant(content));
+  } else if (m.kind === "echo" && typeof m.call === "string")
+    log.write({ role: "toolResult", toolCallId: m.call, toolName: m.name ?? "", content: [{ type: "text", text: m.result ?? m.text }], isError: m.isError === true, timestamp } as never);
+  else {
+    log.end();
+    memory.append(m.kind, m.kind === "echo" ? cap(m.text) : m.text);
+  }
+  return k;
 }
 
 /** True when a profile already has a log (for "has history" checks without opening it). */

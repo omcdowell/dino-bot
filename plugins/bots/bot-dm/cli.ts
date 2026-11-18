@@ -195,6 +195,9 @@ function profileName(dir: string): string | null {
   }
 }
 
+/** OptChat chats: on pi (optchat) or on Claude Code (optchat-cc). */
+const OPTCHAT_PROVIDERS = new Set(["optchat", "optchat-cc"]);
+
 /** The bot's current chat: labelled bot=<name> first, else an unlabelled OptChat agent in its folder (as the plugin's chatFor). */
 export function chatFor(name: string, agents: AgentInfo[], root: string): AgentInfo | null {
   const labelled = agents.filter((a) => a.labels.bot === name);
@@ -202,7 +205,7 @@ export function chatFor(name: string, agents: AgentInfo[], root: string): AgentI
   const candidates = labelled.length
     ? labelled
     : profileName(folder)
-      ? agents.filter((a) => !a.labels.bot && a.cwd === folder && a.provider === "optchat")
+      ? agents.filter((a) => !a.labels.bot && a.cwd === folder && OPTCHAT_PROVIDERS.has(a.provider))
       : [];
   return [...candidates].sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))[0] ?? null;
 }
@@ -223,7 +226,7 @@ async function launchingBot(name: string, agents: AgentInfo[], root: string, env
 /** Bot name of a Paseo agent: its bot= label, else its folder under the bots root. */
 export function botNameOf(agent: AgentInfo, root: string): string | null {
   if (agent.labels.bot) return agent.labels.bot;
-  if (agent.provider === "optchat" && dirname(agent.cwd) === root && profileName(agent.cwd)) return basename(agent.cwd);
+  if (OPTCHAT_PROVIDERS.has(agent.provider) && dirname(agent.cwd) === root && profileName(agent.cwd)) return basename(agent.cwd);
   return null;
 }
 

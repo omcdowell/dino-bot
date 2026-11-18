@@ -216,3 +216,12 @@ test("lead hint: click on desktop/web, tap on phones", () => {
   assert.equal(leadHint("ios"), "tap to make lead");
   assert.equal(leadHint("android"), "tap to make lead");
 });
+
+test("new bot: the model picked on either engine (pi or Claude Code) names its chat provider", async () => {
+  const { BOT_ENGINES, newBotChat } = await import("../client/manage-format");
+  assert.deepEqual(BOT_ENGINES.map((e) => e.provider), ["optchat", "optchat-cc"]);
+  assert.deepEqual(newBotChat("optchat", { modelId: "anthropic/claude-opus-5-5", thinkingId: "high" }), { provider: "optchat/anthropic/claude-opus-5-5", thinkingOptionId: "high" });
+  assert.deepEqual(newBotChat("optchat-cc", { modelId: "opus", thinkingId: null }), { provider: "optchat-cc/opus" });
+  assert.equal(newBotChat("optchat-cc", null), undefined);
+  assert.equal(newBotChat("optchat", { modelId: "", thinkingId: null }), undefined);
+});
