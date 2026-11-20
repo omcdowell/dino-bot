@@ -3,10 +3,15 @@ import { Modal, Pressable, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { StyleSheet } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { X } from "lucide-react-native";
+import { Download, X } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import type { AttachmentMetadata } from "@/attachments/types";
 import { useAttachmentPreviewUrl } from "@/attachments/use-attachment-preview-url";
+import {
+  chatImageSaveLabel,
+  openChatImageActions,
+  saveChatImage,
+} from "@/chat-images/image-actions";
 import { isNative, isWeb } from "@/constants/platform";
 import { SPACING } from "@/styles/theme";
 import { WindowChromeRootRegion } from "@/utils/desktop-window";
@@ -68,8 +73,21 @@ export function AttachmentLightbox({ source, onClose }: AttachmentLightboxProps)
     ],
     [insets.bottom, insets.left, insets.right, insets.top],
   );
+  const mimeType = metadata?.mimeType ?? null;
+  const handleSave = useCallback(() => {
+    if (url) void saveChatImage({ uri: url, mimeType }, t);
+  }, [mimeType, t, url]);
+  const handleLongPress = useCallback(() => {
+    if (url) openChatImageActions({ uri: url, mimeType }, t);
+  }, [mimeType, t, url]);
   const actions = useMemo(
     () => [
+      {
+        icon: Download,
+        label: chatImageSaveLabel(t),
+        onPress: handleSave,
+        testID: "attachment-lightbox-save",
+      },
       {
         icon: X,
         label: t("message.attachments.closeImage"),
@@ -77,7 +95,7 @@ export function AttachmentLightbox({ source, onClose }: AttachmentLightboxProps)
         testID: "attachment-lightbox-close",
       },
     ],
-    [onClose, t],
+    [handleSave, onClose, t],
   );
 
   const handleImageError = useCallback(() => setErrored(true), []);
@@ -112,6 +130,7 @@ export function AttachmentLightbox({ source, onClose }: AttachmentLightboxProps)
                     fit={LIGHTBOX_FIT}
                     onError={handleImageError}
                     onPressOutsideContent={onClose}
+                    onLongPressContent={handleLongPress}
                     style={styles.imageViewport}
                     testID="attachment-lightbox"
                     uri={url}

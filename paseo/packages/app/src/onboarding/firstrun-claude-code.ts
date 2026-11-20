@@ -45,6 +45,8 @@ export const CLAUDE_CODE_FIRST_RUN_COPY = {
   /** A daemon that predates engines.* (no Claude Code login there): update it first. */
   updateHost:
     "Your computer's bots service is too old for Claude Code. Update it on your computer, then Check again.",
+  /** First run, while the computer says what it is signed in to (signInGate "wait"). */
+  checking: "Checking what your computer is already signed in to…",
   extraUsageWarning:
     "⚠ Billed per token on top of any Claude plan you pay for.",
 } as const;
@@ -139,4 +141,38 @@ export function signedInWithClaudeCode(
   const label = CLAUDE_CODE_FIRST_RUN_COPY.label;
   if (cc.kind !== "logged-in" || signedIn.includes(label)) return [...signedIn];
   return [label, ...signedIn];
+}
+
+/**
+ * Whether the first-run sign-in step shows at all (SR2, 20 Nov: after pairing again to a computer whose bots already
+ * work, "why am i being asked to login when i already am logged in"). Signed in already = pi has a ready sign-in
+ * (signin.options `signedIn`) or Claude Code is logged in, its own login or the owner's proxy (engines.status):
+ * the step is done, so it is skipped ("skip"). Until both answers are in, "wait" (the screen shows a short check,
+ * not the list). A real first-time user (nothing signed in) gets the list as before ("show").
+ *
+ * Always "show": from Settings, a sign-in asked for by name (`option`), a sign-in going, `pick` (the user came
+ * back to the list on purpose: Back from Choose models, or Choose models found no models), a list that did not
+ * load, a host without DinoBot's setup, and once the list was shown (`shown`: adding another account after one
+ * sign-in must not jump away).
+ */
+export type SignInGate = "wait" | "skip" | "show";
+
+export function signInGate(input: {
+  firstRun: boolean;
+  pick: boolean;
+  shown: boolean;
+  sessionActive: boolean;
+  loadError: boolean;
+  options: { available: boolean; signedIn: readonly string[] } | null;
+  claudeCode: FirstRunClaudeCode;
+  /** engines.status answered or failed (a failure leaves the card "checking"). */
+  claudeCodeChecked: boolean;
+}): SignInGate {
+  if (!input.firstRun || input.pick || input.shown || input.sessionActive || input.loadError) return "show";
+  if (!input.options) return "wait";
+  if (!input.options.available) return "show";
+  if (input.options.signedIn.length) return "skip";
+  if (input.claudeCode.kind === "logged-in") return "skip";
+  if (input.claudeCode.kind === "checking" && !input.claudeCodeChecked) return "wait";
+  return "show";
 }

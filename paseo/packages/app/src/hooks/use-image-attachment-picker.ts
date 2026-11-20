@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import { Alert } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { File } from "expo-file-system";
 import { useTranslation } from "react-i18next";
 import { getDesktopHost, isElectronRuntime } from "@/desktop/host";
 import {
@@ -9,10 +10,25 @@ import {
   type PickedImageAttachmentInput,
 } from "@/hooks/image-attachment-picker";
 import { isWeb } from "@/constants/platform";
+import type { SelectedFile } from "@/attachments/selected-file";
+import { splitPickedMediaAssets, videoAssetToSelectedFile } from "@/hooks/media-attachment-picker";
+
+/** Library picks: images go as images, videos as files to upload (bots cannot watch video). */
+export interface PickedMedia {
+  images: PickedImageAttachmentInput[];
+  videos: SelectedFile[];
+}
 
 interface UseImageAttachmentPickerResult {
   pickImages: () => Promise<PickedImageAttachmentInput[] | null>;
+  /** Photo library, images and videos. Null when cancelled. */
+  pickMedia: () => Promise<PickedMedia | null>;
+  /** One photo from the camera (native). Null when cancelled or unavailable. */
+  takePhoto: () => Promise<PickedImageAttachmentInput[] | null>;
 }
+
+// Native only: web assets carry a File and never reach this.
+const readUriBytes = (uri: string): Promise<Uint8Array> => new File(uri).bytes();
 
 export function useImageAttachmentPicker(): UseImageAttachmentPickerResult {
   const { t } = useTranslation();
@@ -88,5 +104,82 @@ export function useImageAttachmentPicker(): UseImageAttachmentPickerResult {
     }
   }, [ensurePermission, t]);
 
-  return { pickImages };
+  const pickMedia = useCallback(async (): Promise<PickedMedia | null> => {
+    if (isPickingRef.current) {
+      return null;
+    }
+    isPickingRef.current = true;
+    try {
+      if (isWeb && isElectronRuntime()) {
+        const selectedImages = await pickImagesWithDesktopDialog(getDesktopHost()?.dialog);
+        return selectedImages.length === 0 ? null : { images: selectedImages, videos: [] };
+      }
+      if (!(await ensurePermission())) {
+        return null;
+      }
+      const pendingResult = await ImagePicker.getPendingResultAsync();
+      const result =
+        pendingResult && "canceled" in pendingResult && !pendingResult.canceled
+          ? pendingResult
+          : await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ["images", "videos"] as ImagePicker.MediaType[],
+              allowsMultipleSelection: true,
+              quality: 0.8,
+              // Send the video as it is in the library; no re-encode before the upload.
+              preferredAssetRepresentationMode:
+                ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
+            });
+      if (!("assets" in result) || result.canceled || !result.assets?.length) {
+        return null;
+      }
+      const { images, videos } = splitPickedMediaAssets(result.assets);
+      return {
+        images: await normalizePickedImageAssets(images),
+        videos: videos.map((asset) => videoAssetToSelectedFile(asset, readUriBytes)),
+      };
+    } catch (error) {
+      console.error("[ImageAttachmentPicker] Failed to pick media:", error);
+      Alert.alert(t("imageAttachmentPicker.errorTitle"), t("imageAttachmentPicker.failedToSelect"));
+      return null;
+    } finally {
+      isPickingRef.current = false;
+    }
+  }, [ensurePermission, t]);
+
+  const takePhoto = useCallback(async () => {
+    if (isPickingRef.current) {
+      return null;
+    }
+    isPickingRef.current = true;
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          t("imageAttachmentPicker.permissionTitle"),
+          t("imageAttachmentPicker.cameraPermissionMessage"),
+        );
+        return null;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"] as ImagePicker.MediaType[],
+        quality: 0.8,
+      });
+      if (result.canceled || result.assets.length === 0) {
+        return null;
+      }
+      return await normalizePickedImageAssets(result.assets);
+    } catch (error) {
+      // The iOS simulator has no camera: launchCameraAsync rejects there.
+      console.error("[ImageAttachmentPicker] Failed to take photo:", error);
+      Alert.alert(
+        t("imageAttachmentPicker.errorTitle"),
+        t("imageAttachmentPicker.cameraUnavailable"),
+      );
+      return null;
+    } finally {
+      isPickingRef.current = false;
+    }
+  }, [t]);
+
+  return { pickImages, pickMedia, takePhoto };
 }

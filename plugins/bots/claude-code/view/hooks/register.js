@@ -271,6 +271,9 @@ async function withLiveOutput($, e, id, args, run) {
 
 const THINK_MS = 250
 let viewShown = false
+// The main loop's step posts (thinking, the answer so far) still on their way: a tool's row waits for them, so the
+// app shows a step's text before the tool call that followed it, whole (not cut where the call arrived).
+let stepPosts = Promise.resolve()
 export function register(on) {
   on('tool.list', async ($, e, next) => {
     const listed = await next(e)
@@ -282,7 +285,10 @@ export function register(on) {
   on('tool.call', async ($, e, next) => {
     const { tool, tool_use_id, consent, ...args } = e
     const id = tool_use_id || `${tool}-${Date.now()}`
-    if (!e.agentId) await post($, '/event', { type: 'tool', phase: 'running', id, name: tool, input: args })
+    if (!e.agentId) {
+      await stepPosts
+      await post($, '/event', { type: 'tool', phase: 'running', id, name: tool, input: args })
+    }
     let r
     if (MEMORY_TOOL_NAMES.has(tool)) {
       try {
@@ -352,7 +358,8 @@ export function register(on) {
   // The step's thinking goes to the engine as it streams (the whole block so far, at most every THINK_MS, and once
   // more when the block ends), then its answer. Empty thinking (Claude Code asked for none shown) sends nothing.
   // The answer streams the same way (`partial`: the answer so far, trimmed) while it is one text block; the step's
-  // whole answer goes when it ends.
+  // whole answer goes when it ends. A tool call that starts sends the answer so far at once (what is left of the text
+  // block, which came before the call), so the tool's row never lands inside it.
   on('turn.step', async function* ($, e, next) {
     if (e.agentId) return yield* next(e)
     const thinking = new Map() // block index -> { text, sent, at }
@@ -364,6 +371,7 @@ export function register(on) {
       answer.sent = text
       answer.at = Date.now()
       chain = chain.then(() => post($, '/event', { type: 'step', answer: text, partial: true }))
+      stepPosts = chain
     }
     const flush = (index) => {
       const b = thinking.get(index)
@@ -372,6 +380,7 @@ export function register(on) {
       b.at = Date.now()
       const body = { type: 'thinking', block: `${e.turnId}:${e.index}:${index}`, text: b.text }
       chain = chain.then(() => post($, '/event', body))
+      stepPosts = chain
     }
     const it = next(e)
     let result
@@ -397,7 +406,11 @@ export function register(on) {
           answer.index = c.index
           answer.text += c.text
           if (Date.now() - answer.at >= THINK_MS) flushAnswer()
-        } else if (c && c.kind !== 'engine') for (const i of thinking.keys()) flush(i)
+        } else if (c && c.kind !== 'engine') {
+          for (const i of thinking.keys()) flush(i)
+          // The text block ended before this call: its tail goes now, ahead of the tool's row (tool.call waits on it).
+          if (c.kind === 'tool') flushAnswer()
+        }
         yield c
       }
     } finally {

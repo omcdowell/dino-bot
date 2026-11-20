@@ -167,6 +167,28 @@ describe("prompt attachments", () => {
     );
   });
 
+  it("gives a video's saved path, type and duration so the bot can pull frames", () => {
+    expect(
+      renderPromptAttachmentAsText({
+        type: "uploaded_file",
+        id: "upload_v",
+        fileName: "clip.mov",
+        mimeType: "video/quicktime",
+        size: 4_200_000,
+        path: "/srv/paseo/uploads/upload_v/clip.mov",
+        durationMs: 12_480,
+      }),
+    ).toBe(
+      [
+        "Uploaded file: clip.mov",
+        "Path: /srv/paseo/uploads/upload_v/clip.mov",
+        "MIME: video/quicktime",
+        "Size: 4200000 bytes",
+        "Duration: 12.48 s",
+      ].join("\n"),
+    );
+  });
+
   it("returns undefined when firstAgentContext is empty", () => {
     expect(buildAgentBranchNameSeed(undefined)).toBeUndefined();
     expect(buildAgentBranchNameSeed({})).toBeUndefined();

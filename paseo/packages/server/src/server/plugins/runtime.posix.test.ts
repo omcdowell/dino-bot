@@ -1912,3 +1912,31 @@ export default function contribute(server) {
     await runtime.stopAll();
   }
 });
+
+it("publishes the sources a usage source stands in for", async () => {
+  const directory = await createPlugin(
+    "fallback-source",
+    `
+export default function contribute(server) {
+  server.registerUsageSource({
+    id: "fallback-source",
+    label: "Fallback",
+    fallbackFor: ["claude"],
+    input: { parseAsync: async (value) => value },
+    discover: async () => [],
+    fetch: async () => ({ status: "available", windows: [] }),
+  });
+  return () => {};
+}
+`,
+  );
+  const runtime = createTestRuntime();
+  try {
+    await runtime.startPlugin("fallback-source", directory);
+    expect(runtime.getUsageSourceRegistrations("fallback-source")).toEqual([
+      { id: "fallback-source", label: "Fallback", fallbackFor: ["claude"] },
+    ]);
+  } finally {
+    await runtime.stopAll();
+  }
+});

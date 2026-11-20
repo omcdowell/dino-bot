@@ -109,7 +109,7 @@ describe("Choose models with no models (SR1 fix 1: no dead end)", () => {
     expect(byId("setup-models-continue")).toBeNull();
     expect(byId("setup-models-bots")).toBeNull();
     await act(async () => byId("setup-models-sign-in")!.click());
-    expect(h.router.replace).toHaveBeenCalledWith("/setup-signin?serverId=s");
+    expect(h.router.replace).toHaveBeenCalledWith("/setup-signin?serverId=s&pick=1");
     h.router.replace.mockReset();
     await act(async () => byId("setup-models-skip")!.click());
     await flush();

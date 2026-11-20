@@ -15,7 +15,7 @@ import {
 import { useSessionStore } from "@/stores/session-store";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createUserMessage } from "@/types/stream";
-import { PinnedMessages } from "./pinned-messages";
+import { PinnedMessages, resolvePinnedMeta } from "./pinned-messages";
 
 void testI18n;
 
@@ -288,5 +288,27 @@ describe("PinnedMessages taken bubble after a daemon restart", () => {
     });
     expect(useOutboxStore.getState().records).toEqual([]);
     expect(container.querySelector('[data-testid="pinned-messages"]')).toBeNull();
+  });
+});
+
+describe("resolvePinnedMeta while photos upload (UF1)", () => {
+  const message = {
+    key: "k",
+    clientMessageId: "id-pics",
+    text: "pics",
+    createdAt: Date.UTC(2026, 10, 20, 14, 22),
+    state: "clock" as const,
+    remote: false,
+    record: null,
+  };
+  const upload = { index: 3, count: 16, sentBytes: 512, totalBytes: 1024 };
+  const t = (key: string, options?: Record<string, unknown>) => String(testI18n.t(key, options));
+
+  it("shows which photo is going up and how far along the whole message is", () => {
+    expect(resolvePinnedMeta(message, true, t, upload)).toBe("Uploading photo 3 of 16 · 15%");
+  });
+
+  it("says it waits for the connection when offline, not that it uploads", () => {
+    expect(resolvePinnedMeta(message, false, t, upload)).toMatch(/^Will send when connected · /);
   });
 });

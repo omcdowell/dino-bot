@@ -154,6 +154,7 @@ import { parsePluginClientId } from "./plugins/plugin-session-identity.js";
 import { pluginCatalogForClient } from "./plugins/catalog-bundles.js";
 import { buildAgentForkContextAttachment } from "./agent/activity-curator.js";
 import { buildAgentPrompt } from "./agent/prompt-attachments.js";
+import { readImageUploads } from "./file-upload/index.js";
 import type { StructuredGenerationDaemonConfig } from "./agent/structured-generation-providers.js";
 import {
   getAgentStreamEventTurnId,
@@ -8770,12 +8771,34 @@ export class Session {
     const runBehavior: RunActiveTurnBehavior =
       msg.activeTurnBehavior === "queue" ? "steer" : (msg.activeTurnBehavior ?? "interrupt");
 
+    // Photos sent ahead with file.upload come back as inline images, after any sent inline.
+    let images = msg.images;
+    if (msg.imageUploads?.length) {
+      try {
+        images = [
+          ...(msg.images ?? []),
+          ...(await readImageUploads(this.paseoHome, msg.imageUploads)),
+        ];
+      } catch (error) {
+        this.emit({
+          type: "send_agent_message_response",
+          payload: {
+            requestId: msg.requestId,
+            agentId: resolved.agentId,
+            accepted: false,
+            error: getErrorMessage(error),
+          },
+        });
+        return;
+      }
+    }
+
     try {
       const agentId = resolved.agentId;
       // What the agent receives: a dictated message starts with a short marker.
       const text = markDictated(msg.text, msg.dictated);
 
-      const prompt = buildAgentPrompt(text, msg.images, msg.attachments);
+      const prompt = buildAgentPrompt(text, images, msg.attachments);
       this.sessionLogger.trace(
         {
           agentId,
@@ -8790,7 +8813,7 @@ export class Session {
           await this.agentQueue.enqueue(agentId, {
             messageId: msg.messageId,
             text,
-            ...(msg.images ? { images: msg.images } : {}),
+            ...(images ? { images } : {}),
             ...(msg.attachments ? { attachments: msg.attachments } : {}),
             ...(msg.sourceAgentId ? { sourceAgentId: msg.sourceAgentId } : {}),
             createdAt: new Date().toISOString(),

@@ -8,7 +8,9 @@ import {
   CLAUDE_CODE_OPTION_ID,
   claudeCodeBots,
   claudeCodeLogout,
+  claudeCodeProxy,
   claudeCodeStatus,
+  CLAUDE_CODE_PROXY_PLAN,
   keyHint,
   parseClaudeVersion,
   piCard,
@@ -247,5 +249,73 @@ describe("Claude Code card", () => {
     const { h, L } = home({});
     const signin = new PhoneSignIn(L, { HOME: h, PATH: "", DINOBOT_CLAUDE_BIN: join(h, "missing") }, { overrides: () => [] });
     await assert.rejects(signin.start({ optionId: CLAUDE_CODE_OPTION_ID }), /not installed/);
+  });
+});
+
+describe("Claude Code card: what counts as signed in (SR2: asked to log in again when already signed in)", () => {
+  // `claude auth status --json` as Claude Code prints it, for each kind of host.
+  const STATUS = {
+    oauth: { loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", email: "me@example.com", subscriptionType: "max" },
+    apiKey: { loggedIn: true, authMethod: "api_key", apiProvider: "firstParty" },
+    none: { loggedIn: false, authMethod: "none", apiProvider: "firstParty" },
+  };
+  const fakeRun = (status) => async (_bin, args) =>
+    args[0] === "--version" ? { code: 0, stdout: "2.1.323 (Claude Code)\n", stderr: "" } : { code: status.loggedIn ? 0 : 1, stdout: JSON.stringify(status), stderr: "" };
+  /** A bots root with bot folders; `proxied` bots have a .bot.json cc.baseUrl (launch.ts ccProxyFor). */
+  function botsRoot({ proxied = [], plain = [] } = {}) {
+    const h = mkdtempSync(join(TMP, "sr2-"));
+    const root = join(h, "bots");
+    for (const bot of [...proxied, ...plain]) {
+      mkdirSync(join(root, bot), { recursive: true });
+      const meta = proxied.includes(bot) ? { cc: { baseUrl: "http://127.0.0.1:8080/me" } } : { cc: {} };
+      writeFileSync(join(root, bot, ".bot.json"), JSON.stringify(meta));
+    }
+    return { HOME: h, PASEO_BOTS_ROOT: root, PATH: "" };
+  }
+  const card = (env, status, opts = {}) => claudeCodeStatus(env, { run: fakeRun(status), bin: "/fake/claude", ...opts });
+
+  it("Claude Code logged in (its own login): logged in, with the plan", async () => {
+    const st = await card(botsRoot(), STATUS.oauth);
+    assert.deepEqual([st.loggedIn, st.authMethod, st.plan], [true, "claude.ai", "Max plan"]);
+  });
+
+  it("API key only (Claude Code on an Anthropic API key): logged in, 'API key'", async () => {
+    const st = await card(botsRoot(), STATUS.apiKey);
+    assert.deepEqual([st.loggedIn, st.authMethod, st.plan], [true, "api_key", "API key"]);
+  });
+
+  it("proxy base URL (no login of its own): logged in 'through your proxy', from a bot's .bot.json or the env", async () => {
+    const env = botsRoot({ proxied: ["kit"], plain: ["ada"] });
+    assert.equal(claudeCodeProxy(env), "bot:kit");
+    const st = await card(env, STATUS.none);
+    assert.deepEqual([st.loggedIn, st.authMethod, st.plan], [true, "proxy", CLAUDE_CODE_PROXY_PLAN]);
+    assert.ok(!JSON.stringify(st).includes("127.0.0.1")); // where, never the URL
+    for (const k of ["DINOBOT_CC_BASE_URL", "CC_WORKER_BASE_URL"]) {
+      const e = { ...botsRoot(), [k]: "https://proxy.example/v1" };
+      assert.equal(claudeCodeProxy(e), `env:${k}`);
+      assert.equal((await card(e, STATUS.none)).authMethod, "proxy");
+    }
+    // A real login still wins (its plan is shown, not the proxy).
+    assert.equal((await card(env, STATUS.oauth)).plan, "Max plan");
+    // The login flow's check asks Claude Code's own login only: a failed login is not hidden by the proxy.
+    assert.equal((await card(env, STATUS.none, { proxy: false })).loggedIn, false);
+  });
+
+  it("nothing (no login, no proxy): not logged in, so the app offers the login", async () => {
+    const env = { ...botsRoot({ plain: ["ada"] }), CC_WORKER_BASE_URL: "", DINOBOT_CC_BASE_URL: "not a url" };
+    assert.equal(claudeCodeProxy(env), null);
+    assert.equal(claudeCodeProxy({ HOME: join(TMP, "nope"), PASEO_BOTS_ROOT: join(TMP, "nope") }), null);
+    const st = await card(env, STATUS.none);
+    assert.deepEqual([st.loggedIn, st.authMethod, st.plan], [false, "none", null]);
+  });
+
+  it("engines.status end to end (createOnboarding): the proxy host's card says logged in", async () => {
+    const { h, L } = home({});
+    const cc = fakeClaude(h);
+    const env = { HOME: h, DINOBOT_HOME: L.root, PATH: "/usr/bin:/bin", DINOBOT_CLAUDE_BIN: cc.bin, CC_WORKER_BASE_URL: "http://127.0.0.1:8080/me" };
+    const ob = createOnboarding(env);
+    const st = await ob.enginesStatus();
+    ob.stopQrSweep?.();
+    assert.deepEqual([st.claudeCode.loggedIn, st.claudeCode.plan], [true, CLAUDE_CODE_PROXY_PLAN]);
   });
 });

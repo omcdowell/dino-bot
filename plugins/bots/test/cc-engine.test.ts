@@ -301,6 +301,17 @@ describe("cc provider", () => {
     assert.match(sh, /export PASEO_AGENT_ID='a1'/);
     assert.match(sh, /export Q='it'\\''s'/);
   });
+
+  it("an uploaded file (a video too: models cannot watch video) reaches the bot as its host path and name", () => {
+    const text = promptText(
+      [
+        { type: "text", text: "what happens here?" },
+        { type: "uploaded_file", id: "upload_1", fileName: "clip.mov", mimeType: "video/quicktime", size: 1234, path: "/srv/paseo/uploads/upload_1/clip.mov", durationMs: 12480 } as never,
+      ],
+      join(TMP, "upl"),
+    );
+    assert.equal(text, "what happens here?\nUploaded file: clip.mov\nPath: /srv/paseo/uploads/upload_1/clip.mov\nMIME: video/quicktime\nSize: 1234 bytes\nDuration: 12.48 s");
+  });
 });
 
 describe("cc pane env: no PASEO_HOST next to PASEO_HOME (bot-dm would refuse: both set)", () => {

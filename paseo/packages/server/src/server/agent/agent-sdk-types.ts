@@ -4,6 +4,7 @@ import type {
   AgentFeatureToggle,
   AgentProviderNotice,
   AgentTaskItem,
+  AgentTimelineFile,
   AgentTimelineImage,
   JsonValue,
   ProviderOptions,
@@ -18,6 +19,7 @@ export type {
   AgentFeatureToggle,
   AgentProviderNotice,
   AgentTaskItem,
+  AgentTimelineFile,
   AgentTimelineImage,
 };
 
@@ -398,6 +400,8 @@ export type AgentTimelineItem =
       messageId?: string;
       clientMessageId?: string;
       images?: AgentTimelineImage[];
+      /** Files sent with the message (uploaded_file attachments), shown as chips. */
+      files?: AgentTimelineFile[];
     }
   | { type: "assistant_message"; text: string; messageId?: string }
   | { type: "reasoning"; text: string }

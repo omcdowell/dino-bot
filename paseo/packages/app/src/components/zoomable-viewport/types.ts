@@ -18,6 +18,8 @@ export interface ZoomableViewportProps {
   maxScale?: number;
   minScale?: number;
   onPressOutsideContent?: () => void;
+  /** Long-press on the content (native; web uses the toolbar). */
+  onLongPressContent?: () => void;
   style?: StyleProp<ViewStyle>;
   testID?: string;
   wheelActivation?: "always" | "modifier";

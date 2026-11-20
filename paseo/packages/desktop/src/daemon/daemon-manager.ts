@@ -49,6 +49,10 @@ import { describeSandbox } from "../diagnostics/sandbox.js";
 import { getDesktopAppLogs } from "../diagnostics/app-logs.js";
 import { getDesktopUpdaterDiagnostics } from "../diagnostics/updater.js";
 import {
+  createDesktopReleaseNoticeChecker,
+  type ReleaseNoticeChecker,
+} from "../features/release-notice.js";
+import {
   deleteLegacySkillSelection,
   readLegacySkillSelection,
 } from "../integrations/legacy-skill-selection.js";
@@ -489,10 +493,22 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
 }
 
 export function registerDaemonManager(): void {
+  const flavour = getDesktopFlavour();
+  let releaseNoticeChecker: ReleaseNoticeChecker | null = null;
   const handlers = applyFlavourToCommandHandlers(
     createDaemonCommandHandlers(),
-    getDesktopFlavour(),
+    flavour,
     resolveDesktopAppVersion,
+    async () => {
+      if (!flavour.releaseRepo || !flavour.displayVersion) return null;
+      releaseNoticeChecker ??= createDesktopReleaseNoticeChecker({
+        repo: flavour.releaseRepo,
+        currentVersion: flavour.displayVersion,
+        appName: flavour.appName,
+        userDataDir: app.getPath("userData"),
+      });
+      return releaseNoticeChecker.check();
+    },
   );
 
   ipcMain.handle(

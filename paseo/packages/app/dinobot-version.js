@@ -20,21 +20,38 @@ const path = require("node:path");
 
 const DINOBOT_VERSION = "0.1.3";
 /** iOS CFBundleVersion of the next TestFlight build; must keep rising (App Store Connect). */
-const DINOBOT_IOS_BUILD = "15";
+const DINOBOT_IOS_BUILD = "17";
 
 /**
  * The DinoBot release version, read from the repo's lib/product.json (the one place it lives; tag
  * v<version>). Null when this paseo/ tree is not inside the DinoBot repo. `root` is for tests.
  */
-function dinobotReleaseVersion(root = path.join(__dirname, "..", "..", "..")) {
-  let product;
+const DEFAULT_ROOT = path.join(__dirname, "..", "..", "..");
+
+function readProduct(root) {
   try {
-    product = JSON.parse(fs.readFileSync(path.join(root, "lib", "product.json"), "utf8"));
+    return JSON.parse(fs.readFileSync(path.join(root, "lib", "product.json"), "utf8"));
   } catch {
     return null;
   }
-  const v = typeof product.version === "string" ? product.version.trim() : "";
+}
+
+function dinobotReleaseVersion(root = DEFAULT_ROOT) {
+  const product = readProduct(root);
+  const v = typeof product?.version === "string" ? product.version.trim() : "";
   return /^\d+\.\d+\.\d+$/.test(v) ? v : null;
 }
 
-module.exports = { DINOBOT_VERSION, DINOBOT_IOS_BUILD, dinobotReleaseVersion };
+/**
+ * The GitHub repo that publishes DinoBot releases (lib/product.json `releaseRepo`, "owner/name"):
+ * the desktop app's new-release notice reads its latest release. Null outside the DinoBot repo.
+ */
+function dinobotReleaseRepo(root = DEFAULT_ROOT) {
+  const product = readProduct(root);
+  const repo = typeof product?.releaseRepo === "string" ? product.releaseRepo.trim() : "";
+  return /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/.test(repo)
+    ? repo
+    : null;
+}
+
+module.exports = { DINOBOT_VERSION, DINOBOT_IOS_BUILD, dinobotReleaseVersion, dinobotReleaseRepo };

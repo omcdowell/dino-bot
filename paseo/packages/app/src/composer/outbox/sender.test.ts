@@ -11,7 +11,13 @@ import {
   type OutboxRecord,
 } from "@/stores/outbox-store";
 import {
+  outboxUploadPercent,
+  useOutboxUploadProgress,
+  type OutboxUploadProgress,
+} from "./image-uploads";
+import {
   classifyOutboxSendError,
+  INLINE_TOO_LARGE_MESSAGE,
   OutboxSender,
   type OutboxSendClient,
   type OutboxSenderHost,
@@ -503,5 +509,211 @@ describe("edit", () => {
     await sender.edit("id-gone");
     await settle();
     expect(draftText()).toBeUndefined();
+  });
+});
+
+describe("photos (UF1)", () => {
+  const photo = (n: number, byteSize = 1000): AttachmentMetadata => ({
+    id: `photo-${n}`,
+    mimeType: "image/jpeg",
+    storageType: "native-file",
+    storageKey: `photo-${n}.jpg`,
+    fileName: `test-photo-${n}.jpg`,
+    byteSize,
+    createdAt: 1,
+  });
+
+  interface UploadCall {
+    fileName: string;
+    byteLength: number;
+    progressSeen: OutboxUploadProgress | undefined;
+  }
+
+  class UploadingDaemon extends FakeDaemon {
+    readonly uploads: UploadCall[] = [];
+    readonly photoOptions: Array<{ images?: unknown[]; imageUploads?: unknown[] }> = [];
+    failUploadAt: number | null = null;
+    failWith: { kind: "throw"; message: string } | { kind: "error"; message: string } = {
+      kind: "throw",
+      message: "Connection lost",
+    };
+
+    constructor() {
+      super();
+      const send = this.sendAgentMessage;
+      this.sendAgentMessage = (agentId, text, options) => {
+        this.photoOptions.push({ images: options.images, imageUploads: options.imageUploads });
+        return send(agentId, text, options);
+      };
+    }
+
+    // A prototype method that uses `this`, like DaemonClient.uploadFile: the sender must call it
+    // on the client, not as a detached function (it failed with "undefined is not a function").
+    async uploadFile(
+      input: Parameters<NonNullable<OutboxSendClient["uploadFile"]>>[0],
+    ): ReturnType<NonNullable<OutboxSendClient["uploadFile"]>> {
+      const n = this.uploads.length + 1;
+      if (this.failUploadAt === n) {
+        this.failUploadAt = null;
+        if (this.failWith.kind === "throw") throw new Error(this.failWith.message);
+        return { file: null, error: this.failWith.message };
+      }
+      input.onProgress?.(input.bytes.byteLength / 2, input.bytes.byteLength);
+      this.uploads.push({
+        fileName: input.fileName,
+        byteLength: input.bytes.byteLength,
+        progressSeen: Object.values(useOutboxUploadProgress.getState())[0],
+      });
+      input.onProgress?.(input.bytes.byteLength, input.bytes.byteLength);
+      return {
+        file: { id: `upload_${n}`, fileName: input.fileName, mimeType: input.mimeType },
+        error: null,
+      };
+    }
+  }
+
+  async function settleUploads(): Promise<void> {
+    for (let round = 0; round < 6; round += 1) await settle();
+  }
+
+  let uploading: UploadingDaemon;
+  const reads: string[] = [];
+  const remembered: string[] = [];
+
+  async function writePhotos(text: string, images: AttachmentMetadata[]): Promise<void> {
+    await addOutboxRecord({
+      serverId: "srv",
+      agentId: "agent",
+      clientMessageId: `id-${text}`,
+      text,
+      images,
+      attachments: [],
+      composerAttachments: images.map((metadata) => ({ kind: "image" as const, metadata })),
+      activeTurnBehavior: "queue",
+      createdAt: now,
+    });
+  }
+
+  beforeEach(() => {
+    sender.dispose();
+    uploading = new UploadingDaemon();
+    daemon = uploading;
+    reads.length = 0;
+    remembered.length = 0;
+    sender = makeSender({
+      features: () => ({ messageReceivedAck: true, agentMessageQueue: true, imageUploads: true }),
+      encodeImages: async () => {
+        throw new Error("photos must not go inline to an imageUploads host");
+      },
+      readImageBytes: async (image) => {
+        reads.push(image.id);
+        return new Uint8Array(image.byteSize ?? 0);
+      },
+      onImageBytes: async (image) => {
+        remembered.push(image.id);
+      },
+    });
+  });
+
+  test("each photo goes up on its own with progress; the message names the uploads only", async () => {
+    await writePhotos("pics", [photo(1, 400), photo(2, 800), photo(3, 200)]);
+    await settleUploads();
+
+    expect(uploading.uploads.map((upload) => [upload.fileName, upload.byteLength])).toEqual([
+      ["test-photo-1.jpg", 400],
+      ["test-photo-2.jpg", 800],
+      ["test-photo-3.jpg", 200],
+    ]);
+    expect(uploading.uploads.map((upload) => upload.progressSeen)).toEqual([
+      { index: 1, count: 3, sentBytes: 200, totalBytes: 400 },
+      { index: 2, count: 3, sentBytes: 400, totalBytes: 800 },
+      { index: 3, count: 3, sentBytes: 100, totalBytes: 200 },
+    ]);
+    expect(remembered).toEqual(["photo-1", "photo-2", "photo-3"]);
+    expect(uploading.photoOptions).toEqual([
+      {
+        images: [],
+        imageUploads: [
+          { id: "upload_1", fileName: "test-photo-1.jpg", mimeType: "image/jpeg" },
+          { id: "upload_2", fileName: "test-photo-2.jpg", mimeType: "image/jpeg" },
+          { id: "upload_3", fileName: "test-photo-3.jpg", mimeType: "image/jpeg" },
+        ],
+      },
+    ]);
+
+    uploading.calls[0]?.resolve({ disposition: "taken" });
+    await settleUploads();
+    expect(getOutboxRecord("id-pics")?.state).toBe("taken");
+    expect(useOutboxUploadProgress.getState()).toEqual({});
+  });
+
+  test("a dropped connection mid-upload retries, sending only the photos not yet up", async () => {
+    uploading.failUploadAt = 3;
+    await writePhotos("retry", [photo(1), photo(2), photo(3), photo(4)]);
+    await settleUploads();
+
+    const record = getOutboxRecord("id-retry");
+    expect(record?.state).toBe("outbox");
+    expect(record?.lastError).toBe("Connection lost");
+    expect(Object.keys(record?.uploadedImages ?? {})).toEqual(["photo-1", "photo-2"]);
+    expect(uploading.calls).toHaveLength(0);
+    expect(useOutboxUploadProgress.getState()).toEqual({});
+
+    const wait = (record?.nextAttemptAt ?? 0) - now;
+    now += wait;
+    await vi.advanceTimersByTimeAsync(wait);
+    await settleUploads();
+
+    expect(reads).toEqual(["photo-1", "photo-2", "photo-3", "photo-3", "photo-4"]);
+    expect(uploading.photoOptions[0]?.imageUploads).toHaveLength(4);
+    uploading.calls[0]?.resolve({ disposition: "taken" });
+    await settleUploads();
+    expect(getOutboxRecord("id-retry")?.state).toBe("taken");
+  });
+
+  test("an upload the host refuses fails the message visibly, ready to resend", async () => {
+    uploading.failUploadAt = 1;
+    uploading.failWith = { kind: "error", message: "No space left on host" };
+    await writePhotos("refused", [photo(1)]);
+    await settleUploads();
+    expect(getOutboxRecord("id-refused")).toMatchObject({
+      state: "failed",
+      lastError: "No space left on host",
+    });
+    expect(uploading.calls).toHaveLength(0);
+  });
+
+  test("an old host gets the photos inline, but never a frame too big for its socket", async () => {
+    sender.dispose();
+    const encoded: string[][] = [];
+    sender = makeSender({
+      encodeImages: async (images) => {
+        encoded.push(images.map((image) => image.id));
+        return images.map(() => ({ data: "AAAA", mimeType: "image/jpeg" }));
+      },
+    });
+
+    await writePhotos("small", [photo(1, 5_000_000), photo(2, 5_000_000)]);
+    await settleUploads();
+    expect(encoded).toEqual([["photo-1", "photo-2"]]);
+    expect(uploading.uploads).toHaveLength(0);
+    uploading.calls[0]?.resolve({ disposition: "taken" });
+    await settleUploads();
+
+    const big = Array.from({ length: 16 }, (_, i) => photo(i + 10, 6_700_000));
+    await writePhotos("big", big);
+    await settleUploads();
+    expect(encoded).toHaveLength(1);
+    expect(getOutboxRecord("id-big")).toMatchObject({
+      state: "failed",
+      lastError: INLINE_TOO_LARGE_MESSAGE,
+    });
+  });
+
+  test("upload percent counts finished photos as whole", () => {
+    expect(outboxUploadPercent({ index: 1, count: 4, sentBytes: 0, totalBytes: 100 })).toBe(0);
+    expect(outboxUploadPercent({ index: 2, count: 4, sentBytes: 50, totalBytes: 100 })).toBe(37);
+    expect(outboxUploadPercent({ index: 4, count: 4, sentBytes: 100, totalBytes: 100 })).toBe(100);
+    expect(outboxUploadPercent({ index: 1, count: 0, sentBytes: 0, totalBytes: 0 })).toBe(0);
   });
 });

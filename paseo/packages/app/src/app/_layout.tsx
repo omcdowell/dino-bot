@@ -84,6 +84,7 @@ import { legacyFavoriteProfileMigration } from "@/agent-profiles/migration";
 import { updateDesktopWindowChrome } from "@/desktop/electron/window";
 import { getDesktopHost } from "@/desktop/host";
 import { loadDesktopSettings } from "@/desktop/settings/desktop-settings";
+import { ReleaseNoticeCalloutSource } from "@/desktop/updates/release-notice-callout-source";
 import { RosettaCalloutSource } from "@/desktop/updates/rosetta-callout-source";
 import { UpdateCalloutSource } from "@/desktop/updates/update-callout-source";
 import { useLatchedBoolean } from "@/hooks/use-latched-boolean";
@@ -646,6 +647,7 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
         <DownloadToast />
         <RosettaCalloutSource />
         <UpdateCalloutSource />
+        <ReleaseNoticeCalloutSource />
         <LegacyAgentSkillsMigration />
         <CommandCenterRootActions />
         <CommandCenterWorkspaceActions />

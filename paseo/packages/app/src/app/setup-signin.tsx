@@ -56,6 +56,7 @@ import {
   firstRunClaudeCode,
   orderPiOptions,
   signedInWithClaudeCode,
+  signInGate,
   type FirstRunClaudeCode,
 } from "@/onboarding/firstrun-claude-code";
 
@@ -100,6 +101,9 @@ function claudeCodeOption(id: string): SignInOption | null {
   return null;
 }
 
+/** The longest the first-run step checks what the computer is signed in to before it shows the list anyway. */
+const SIGNIN_CHECK_MAX_MS = 12_000;
+
 /** Survives the screen being mounted again (appearance change); see signin-session-store.ts. */
 const signInMemory = createSignInMemory<Options>();
 
@@ -139,6 +143,7 @@ export default function SetupSignInScreen() {
     from?: string;
     option?: string;
     add?: string;
+    pick?: string;
   }>();
   const serverId = typeof params.serverId === "string" ? params.serverId : "";
   // Opened from Settings → Providers (or after installing a provider from a link), not onboarding:
@@ -147,6 +152,8 @@ export default function SetupSignInScreen() {
   const optionParam = typeof params.option === "string" ? params.option : "";
   // Settings › Providers › "Add a provider package": only the install-from-a-link card.
   const packageOnly = fromSettings && params.add === "package";
+  // The user came back to the list on purpose (Back from Choose models, or no models there): no skipping on.
+  const pick = params.pick === "1";
   // Kept outside the screen so a remount (appearance change) keeps the list and a sign-in going.
   const memory = useSyncExternalStore(
     signInMemory.subscribe,
@@ -172,6 +179,7 @@ export default function SetupSignInScreen() {
   const showClaudeCode = !fromSettings;
   const [ccCard, setCcCard] = useState<ClaudeCodeCard | null>(null);
   const [ccUnsupported, setCcUnsupported] = useState(false);
+  const [ccChecked, setCcChecked] = useState(false);
   const loadClaudeCode = useCallback(async () => {
     try {
       const r = await rpc<EnginesAnswer>(serverId, ENGINES_RPC.status, {});
@@ -181,6 +189,8 @@ export default function SetupSignInScreen() {
       // An older daemon has no Claude Code login either: the card asks to update it. Other
       // errors: the card stays usable (signin.start reports what is wrong).
       if (isEnginesUnsupportedError(e)) setCcUnsupported(true);
+    } finally {
+      setCcChecked(true);
     }
   }, [serverId]);
   const reloadClaudeCode = useCallback(() => void loadClaudeCode(), [loadClaudeCode]);
@@ -207,6 +217,35 @@ export default function SetupSignInScreen() {
     router.replace(route as Href);
   }, [router, serverId, fromSettings]);
   const goNext = useCallback(() => void next(), [next]);
+
+  // First run on a computer that is already signed in (pi, or Claude Code's own login or proxy): this step is done,
+  // so it goes straight on (SR2). The list shows for a first-time user, and stays once shown.
+  const [listShown, setListShown] = useState(false);
+  const gate = signInGate({
+    firstRun: !fromSettings && !optionParam,
+    pick,
+    shown: listShown,
+    sessionActive: Boolean(status),
+    loadError: Boolean(loadError),
+    options,
+    claudeCode,
+    claudeCodeChecked: ccChecked,
+  });
+  useEffect(() => {
+    if (gate === "show" && !listShown) setListShown(true);
+  }, [gate, listShown]);
+  const skipped = useRef(false);
+  useEffect(() => {
+    if (gate !== "skip" || skipped.current) return;
+    skipped.current = true;
+    void next();
+  }, [gate, next]);
+  // A computer slow to answer: show the list after a while rather than a check that never ends.
+  useEffect(() => {
+    if (gate !== "wait") return undefined;
+    const timer = setTimeout(() => setListShown(true), SIGNIN_CHECK_MAX_MS);
+    return () => clearTimeout(timer);
+  }, [gate]);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -372,6 +411,11 @@ export default function SetupSignInScreen() {
         ) : null}
         {packageOnly && serverId ? (
           <InstallFromLink serverId={serverId} />
+        ) : gate !== "show" ? (
+          <View style={styles.card} testID="setup-signin-checking">
+            <MutedSpinner />
+            <Text style={styles.body}>{CLAUDE_CODE_FIRST_RUN_COPY.checking}</Text>
+          </View>
         ) : status ? (
           <View style={styles.card} testID="setup-signin-session">
             <Text style={styles.title}>{status.label}</Text>

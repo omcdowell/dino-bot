@@ -231,7 +231,8 @@ describe("sign-in from Settings (outside onboarding)", () => {
   });
 
   it("onboarding is unchanged: no install-from-link card, and the skip button is there", async () => {
-    h.params = { serverId: "srvC" };
+    // pick=1: the list on purpose (this host is signed in already, so first run would go straight on: SR2).
+    h.params = { serverId: "srvC", pick: "1" };
     h.invoke.mockResolvedValue(OPTIONS);
     await render();
     expect(container!.textContent).toContain("Sign in for your bots");

@@ -16,6 +16,7 @@ import type { ZoomableViewportProps } from "./types";
 
 const DEFAULT_MAX_SCALE = 8;
 const DEFAULT_MIN_SCALE = 0.25;
+const LONG_PRESS_MS = 400;
 
 export function ZoomableViewport({
   contentSize,
@@ -26,6 +27,7 @@ export function ZoomableViewport({
   maxScale = DEFAULT_MAX_SCALE,
   minScale = DEFAULT_MIN_SCALE,
   onPressOutsideContent,
+  onLongPressContent,
   style,
   testID,
 }: ZoomableViewportProps) {
@@ -158,9 +160,26 @@ export function ZoomableViewport({
         }),
     [fittedContent, onPressOutsideContent, scale, translateX, translateY, viewport],
   );
+  const longPressGesture = useMemo(
+    () =>
+      Gesture.LongPress()
+        .enabled(Boolean(onLongPressContent))
+        .minDuration(LONG_PRESS_MS)
+        .onStart((event) => {
+          if (!fittedContent || !viewport || !onLongPressContent) return;
+          const isInside = isPointInsideTransformedContent({
+            point: { x: event.x, y: event.y },
+            transform: { scale: scale.value, x: translateX.value, y: translateY.value },
+            fittedContent,
+            viewport,
+          });
+          if (isInside) runOnJS(onLongPressContent)();
+        }),
+    [fittedContent, onLongPressContent, scale, translateX, translateY, viewport],
+  );
   const tapGesture = useMemo(
-    () => Gesture.Exclusive(doubleTapGesture, backdropTapGesture),
-    [backdropTapGesture, doubleTapGesture],
+    () => Gesture.Exclusive(longPressGesture, doubleTapGesture, backdropTapGesture),
+    [backdropTapGesture, doubleTapGesture, longPressGesture],
   );
   const transformGesture = useMemo(
     () => Gesture.Simultaneous(panGesture, pinchGesture),

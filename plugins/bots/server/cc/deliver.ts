@@ -67,6 +67,9 @@ export function typedText(text: string, id: string, spillDir: string): string {
 /** Bot traffic (a bot DM, a room message or task), by its label; else the owner's own message. */
 export const isBotTraffic = (text: string) => /^\s*\[(dm|room) /.test(text);
 
+/** A prompt without the view a new session's first prompt carries in front of it. */
+export const afterView = (t: string) => (t.startsWith("<chat>") && t.includes("</chat>") ? t.slice(t.indexOf("</chat>") + 7).trim() : t);
+
 /** A typed text, as the mods report it, is the item's: the same after normalising (a view may stand before it). */
 export function sameText(typed: string, itemText: string): boolean {
   const a = normalise(typed).trim();

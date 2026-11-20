@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@getpaseo/protocol/agent-message";
 import type {
   AgentProvider,
+  AgentTimelineFile,
   AgentTimelineImage,
   AgentTimelineItem,
   JsonValue,
@@ -148,6 +149,8 @@ export interface UserMessageItem {
   timestamp: Date;
   images?: UserMessageImage[];
   attachments?: AgentAttachment[];
+  /** Files sent with the message, from the daemon's row (shown as chips). */
+  files?: AgentTimelineFile[];
 }
 
 export interface UserMessageInput {
@@ -160,6 +163,8 @@ export interface UserMessageInput {
   timestamp: Date;
   images?: UserMessageImage[];
   attachments?: AgentAttachment[];
+  /** Files sent with the message, from the daemon's row (shown as chips). */
+  files?: AgentTimelineFile[];
 }
 
 export function createUserMessage(input: UserMessageInput): UserMessageItem {
@@ -180,7 +185,22 @@ export function createUserMessage(input: UserMessageInput): UserMessageItem {
     ...(input.attachments && input.attachments.length > 0
       ? { attachments: input.attachments }
       : {}),
+    ...(input.files && input.files.length > 0 ? { files: input.files } : {}),
   };
+}
+
+function isSameUserMessage(a: UserMessageItem, b: UserMessageItem): boolean {
+  return (
+    a.id === b.id &&
+    a.clientMessageId === b.clientMessageId &&
+    a.messageId === b.messageId &&
+    a.timelineCursor === b.timelineCursor &&
+    a.text === b.text &&
+    a.timestamp === b.timestamp &&
+    a.images === b.images &&
+    a.attachments === b.attachments &&
+    a.files === b.files
+  );
 }
 
 export function isUnreconciledLocalUserMessage(message: UserMessageItem): boolean {
@@ -307,20 +327,12 @@ function produceUserMessage(
   const merged = createUserMessage({
     ...presentation,
     images: mergeUserMessageImages(presentation.images, fallback.images),
+    files: presentation.files ?? fallback.files,
     clientMessageId: incoming.clientMessageId ?? existing.clientMessageId,
     messageId: incoming.messageId ?? existing.messageId,
     timelineCursor: incoming.timelineCursor ?? existing.timelineCursor,
   });
-  if (
-    existing.id === merged.id &&
-    existing.clientMessageId === merged.clientMessageId &&
-    existing.messageId === merged.messageId &&
-    existing.timelineCursor === merged.timelineCursor &&
-    existing.text === merged.text &&
-    existing.timestamp === merged.timestamp &&
-    existing.images === merged.images &&
-    existing.attachments === merged.attachments
-  ) {
+  if (isSameUserMessage(existing, merged)) {
     return { items, index, message: existing, matched: true };
   }
   const next = [...items];
@@ -944,13 +956,18 @@ function appendUserMessage(
   timelineCursor?: TimelinePosition,
   turnId?: string,
   images?: AgentTimelineImage[],
+  files?: AgentTimelineFile[],
 ): StreamItem[] {
   const { chunk, hasContent } = normalizeChunk(text);
-  if (!hasContent && !images?.length) {
+  if (!hasContent && !images?.length && !files?.length) {
     return state;
   }
 
-  const chunkSeed = chunk.trim() || images?.map((image) => image.id).join(":") || chunk;
+  const chunkSeed =
+    chunk.trim() ||
+    images?.map((image) => image.id).join(":") ||
+    files?.map((file) => file.path).join(":") ||
+    chunk;
   const nextItem = createUserMessage({
     id: messageId ?? createUniqueTimelineId(state, "user", chunkSeed, timestamp),
     clientMessageId,
@@ -960,6 +977,7 @@ function appendUserMessage(
     text: chunk,
     timestamp,
     images,
+    files,
   });
   return upsertUserMessage(state, nextItem);
 }
@@ -1571,6 +1589,7 @@ function reduceTimelineEvent(
           timelineCursor,
           event.turnId,
           item.images,
+          item.files,
         ),
       );
     case "assistant_message":
@@ -1944,8 +1963,12 @@ export interface ApplyStreamEventResult {
   acknowledgedClientMessageIds?: string[];
 }
 
-function hasUserMessageContent(hasText: boolean, images: readonly unknown[] | undefined): boolean {
-  return hasText || (images?.length ?? 0) > 0;
+function hasUserMessageContent(
+  hasText: boolean,
+  images: readonly unknown[] | undefined,
+  files?: readonly unknown[],
+): boolean {
+  return hasText || (images?.length ?? 0) > 0 || (files?.length ?? 0) > 0;
 }
 
 function applyCanonicalUserMessageEvent(params: {
@@ -1960,7 +1983,8 @@ function applyCanonicalUserMessageEvent(params: {
   if (event.type !== "timeline" || event.item.type !== "user_message") return null;
   const normalized = normalizeChunk(event.item.text);
   const images = event.item.images;
-  const hasContent = hasUserMessageContent(normalized.hasContent, images);
+  const files = event.item.files;
+  const hasContent = hasUserMessageContent(normalized.hasContent, images, files);
 
   const flushedTail = head.length > 0 ? flushHeadToTail(tail, head) : tail;
   const flushedHead = head.length > 0 ? [] : head;
@@ -1975,6 +1999,7 @@ function applyCanonicalUserMessageEvent(params: {
     text: normalized.chunk,
     timestamp,
     images,
+    files,
   });
   if (unmatchedInsert === "head") {
     const reconciled = upsertUserMessageAcrossStream({

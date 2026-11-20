@@ -16,6 +16,8 @@ import { toStoredAgentRecord } from "./agent-projections.js";
 import { AgentManager } from "./agent-manager.js";
 import { buildProviderRegistry } from "./provider-registry.js";
 import { ProviderOverrideSchema } from "@getpaseo/protocol/provider-config";
+import { renderUploadedFileText } from "@getpaseo/protocol/uploaded-file-text";
+import { projectAgentMessage } from "./agent-messages/index.js";
 import { PluginAgentClientRegistry } from "./plugin-provider.js";
 import {
   isStaleProviderSessionError,
@@ -335,11 +337,9 @@ describe("PluginAgentClientRegistry", () => {
       providerDefinitions: { "plugin-direct": registry["plugin-direct"] },
     });
     const cwd = mkdtempSync(join(tmpdir(), "plugin-usage-"));
-    const agent = await manager.createAgent(
-      { provider: "plugin-direct", cwd },
-      undefined,
-      { workspaceId: undefined },
-    );
+    const agent = await manager.createAgent({ provider: "plugin-direct", cwd }, undefined, {
+      workspaceId: undefined,
+    });
     const first = manager.usageSession(agent.id);
     expect(first).toMatchObject({
       provider: "plugin-direct",
@@ -901,13 +901,104 @@ test("images reach the timeline as for built-in providers: the prompt's on the u
       { clientMessageId: "m-1" },
     );
     const timeline = manager.getTimeline(agent.id);
-    const image = expect.objectContaining({ id: expect.stringMatching(/^[0-9a-f]{64}$/), mimeType: "image/png" });
+    const image = expect.objectContaining({
+      id: expect.stringMatching(/^[0-9a-f]{64}$/),
+      mimeType: "image/png",
+    });
     expect(timeline.filter((item) => item.type === "user_message")).toEqual([
       expect.objectContaining({ text: "look", images: [image] }),
     ]);
     const call = timeline.find((item) => item.type === "tool_call");
     expect(call).toMatchObject({ callId: "call-1", status: "completed", images: [image] });
     expect(JSON.stringify(call)).not.toContain(PNG_1X1);
+  } finally {
+    await agent.session?.close();
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("a sent file stays on its user message as a file (live and when the bot echoes it back as text)", async () => {
+  const logger = createTestLogger();
+  const file = {
+    type: "uploaded_file" as const,
+    id: "upload_1",
+    fileName: "Q3 report.pdf",
+    mimeType: "application/pdf",
+    size: 48213,
+    path: "/srv/paseo/uploads/upload_1/Q3 report.pdf",
+  };
+  const harness = createProviderHarness({
+    capabilities: CAPABILITIES,
+    async handleInput(input, emit) {
+      if (input.type !== "session.prompt") return false;
+      const { sessionId } = input;
+      const clientMessageId = input.prompt.clientMessageId;
+      // As the Claude Code bot provider does: its echo names the file in four lines.
+      emit({
+        type: "timeline.item",
+        sessionId,
+        item: {
+          type: "user_message",
+          id: "u-1",
+          text: [
+            "read this",
+            "Uploaded file: Q3 report.pdf",
+            "Path: /srv/paseo/uploads/upload_1/Q3 report.pdf",
+            "MIME: application/pdf",
+            "Size: 48213 bytes",
+          ].join("\n"),
+          clientMessageId,
+        },
+      });
+      emit({
+        type: "session.prompt_result",
+        sessionId,
+        clientMessageId,
+        result: { type: "turn", turnId: "turn-1" },
+      });
+      emit({ type: "session.turn", sessionId, turnId: "turn-1", state: "started" });
+      emit({ type: "session.turn", sessionId, turnId: "turn-1", state: "completed" });
+      return true;
+    },
+  });
+  const plugins = new PluginAgentClientRegistry(logger);
+  plugins.replace([harness.registration]);
+  const registry = buildProviderRegistry(logger, { pluginProviders: plugins.definitions() });
+  const manager = new AgentManager({
+    logger,
+    clients: { "plugin-direct": registry["plugin-direct"].createClient(logger) },
+    providerDefinitions: { "plugin-direct": registry["plugin-direct"] },
+  });
+  const cwd = mkdtempSync(join(tmpdir(), "plugin-files-"));
+  const agent = await manager.createAgent({ provider: "plugin-direct", cwd }, undefined, {
+    workspaceId: undefined,
+  });
+  try {
+    await manager.runAgent(agent.id, [{ type: "text", text: "read this" }, file], {
+      clientMessageId: "m-1",
+    });
+    const sent = {
+      fileName: "Q3 report.pdf",
+      mimeType: "application/pdf",
+      size: 48213,
+      path: "/srv/paseo/uploads/upload_1/Q3 report.pdf",
+    };
+    const rows = manager.getTimeline(agent.id).filter((item) => item.type === "user_message");
+    expect(rows).toEqual([expect.objectContaining({ text: "read this" })]);
+    expect(rows[0]).toMatchObject({ files: [sent] });
+    // The bot's echo, as a reopened chat or a replay reads it, carries the same file.
+    expect(
+      projectAgentMessage({
+        type: "user_message",
+        text: `read this\n${renderUploadedFileText(sent)}`,
+        messageId: "provider-echo",
+      }),
+    ).toEqual({
+      type: "user_message",
+      text: "read this",
+      messageId: "provider-echo",
+      files: [sent],
+    });
   } finally {
     await agent.session?.close();
     rmSync(cwd, { recursive: true, force: true });

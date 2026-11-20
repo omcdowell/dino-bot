@@ -8,9 +8,22 @@ import { loadDesktopFlavour, OWN_DESKTOP_FLAVOUR, resolveDesktopFlavour } from "
 import { desktopFlavourJson } from "../scripts/stamp-flavour.mjs";
 
 // The DinoBot release (repo root lib/product.json), which the public desktop build shows.
-const releaseVersion: string = JSON.parse(
-  readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "lib", "product.json"), "utf8"),
-).version;
+const product = JSON.parse(
+  readFileSync(
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "..",
+      "..",
+      "lib",
+      "product.json",
+    ),
+    "utf8",
+  ),
+);
+const releaseVersion: string = product.version;
+const releaseRepo: string = product.releaseRepo;
 
 describe("desktop flavour", () => {
   it("is the own Paseo app unless flavour.json says public", () => {
@@ -45,7 +58,18 @@ describe("desktop flavour", () => {
       appUpdates: false,
       cliInstall: false,
       displayVersion: null,
+      releaseRepo: null,
     });
+  });
+
+  it("public: carries the release repo for the new-release notice; a malformed one is dropped", () => {
+    const base = { id: "public", appName: "DinoBot", linkScheme: "dinobot" };
+    expect(
+      resolveDesktopFlavour({ ...base, releaseRepo: "example-owner/example-repo" }).releaseRepo,
+    ).toBe("example-owner/example-repo");
+    for (const bad of ["", "no-slash", "a/b/c", "../x", "a b/c", 13, null]) {
+      expect(resolveDesktopFlavour({ ...base, releaseRepo: bad }).releaseRepo).toBeNull();
+    }
   });
 
   it("public: carries DinoBot's display version; a malformed one is dropped", () => {
@@ -91,6 +115,7 @@ describe("desktop flavour", () => {
       appName: "Paseo",
       linkScheme: "paseo",
       displayVersion: null,
+      releaseRepo: null,
     });
     expect(desktopFlavourJson({ PASEO_FLAVOUR: "public" })).toEqual({
       id: "public",
@@ -98,6 +123,7 @@ describe("desktop flavour", () => {
       linkScheme: "dinobot",
       // The DinoBot release (lib/product.json), not the iPhone's marketing version.
       displayVersion: releaseVersion,
+      releaseRepo,
     });
   });
 });

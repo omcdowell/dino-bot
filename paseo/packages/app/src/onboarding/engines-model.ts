@@ -92,6 +92,14 @@ export function piSignInStatus(row: PiSignIn): { ok: boolean; text: string; isKe
   return { ok: true, text: "signed in", isKey: false };
 }
 
+/**
+ * Claude Code works through the owner's Anthropic API proxy (lib/engines.mjs claudeCodeProxy), with no login of its
+ * own: logged in, but there is nothing to log out of here (`claude auth logout` would do nothing).
+ */
+export function claudeCodeViaProxy(card: Pick<ClaudeCodeCard, "loggedIn" | "authMethod">): boolean {
+  return card.loggedIn && card.authMethod === "proxy";
+}
+
 export type ClaudeCodeState = "not-installed" | "logged-out" | "logged-in" | "error";
 
 export function claudeCodeState(card: ClaudeCodeCard): ClaudeCodeState {

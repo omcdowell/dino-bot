@@ -27,6 +27,7 @@ export interface PluginUsageSourceMetadata {
   id: string;
   label: string;
   icon?: string;
+  fallbackFor?: string[];
 }
 
 export type PluginProcessRequest =
@@ -123,6 +124,7 @@ const usageSourceMetadataSchema = z
     id: z.string().min(1),
     label: z.string().min(1),
     icon: z.string().optional(),
+    fallbackFor: z.array(z.string().min(1)).optional(),
   })
   .strict();
 const providerConnectRequestSchema = z

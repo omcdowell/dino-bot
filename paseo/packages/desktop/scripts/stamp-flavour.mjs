@@ -20,6 +20,9 @@ export function desktopFlavourJson(env = process.env) {
     // The DinoBot release (lib/product.json, release-flavour.js desktopVersion) for the About panel;
     // null for the own build. Not the iPhone's marketing version (app/dinobot-version.js).
     displayVersion: flavour.desktopVersion,
+    // The repo whose latest GitHub release the new-release notice checks (lib/product.json); null
+    // for the own build (it keeps upstream's updater).
+    releaseRepo: flavour.releaseRepo,
   };
 }
 

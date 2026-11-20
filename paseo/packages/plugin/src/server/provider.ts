@@ -239,6 +239,8 @@ export type ProviderContent =
       mimeType: string;
       size: number;
       path: string;
+      /** A video's length, from the app's picker. */
+      durationMs?: number;
     };
 
 export type ProviderInput =
@@ -874,6 +876,7 @@ const providerContentSchema: z.ZodType<ProviderContent> = z.union([
       mimeType: z.string(),
       size: z.number().int().nonnegative(),
       path: z.string(),
+      durationMs: z.number().nonnegative().optional(),
     })
     .strip(),
 ]);

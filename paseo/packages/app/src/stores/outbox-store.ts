@@ -1,7 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { z } from "zod";
-import type { ActiveTurnBehavior, AgentAttachment } from "@getpaseo/protocol/messages";
+import type {
+  ActiveTurnBehavior,
+  AgentAttachment,
+  ImageUploadRef,
+} from "@getpaseo/protocol/messages";
 import type { AttachmentMetadata, ComposerAttachment } from "@/attachments/types";
 import { retainAttachmentForGarbageCollection } from "@/attachments/gc-retention";
 
@@ -52,6 +56,8 @@ export interface OutboxRecord {
   lastError?: string;
   /** A delete reached the daemon after the agent had taken the message. */
   deletedTooLate?: boolean;
+  /** Photos already on the host (file.upload), by attachment id: a retry sends only the rest. */
+  uploadedImages?: Record<string, ImageUploadRef>;
 }
 
 /** An Edit put a message back into this agent's composer draft; mounted composers show it. */
@@ -94,6 +100,12 @@ const PersistedOutboxSchema = z.object({
         lastError: z.string().optional(),
         deletedTooLate: z.boolean().optional(),
         dictated: z.boolean().optional(),
+        uploadedImages: z
+          .record(
+            z.string(),
+            z.object({ id: z.string(), fileName: z.string(), mimeType: z.string() }),
+          )
+          .optional(),
       })
       .passthrough(),
   ),

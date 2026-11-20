@@ -14,6 +14,10 @@
  *
  * Window ids, labels and tones are the Claude source's (five_hour "Session" 5h, weekly "Weekly" wk), so the cards
  * look the same.
+ *
+ * The card stands in for the Claude sign-in card (`fallbackFor`): a host whose usage list has a card from the Claude
+ * source (a claude.ai login on the host) lists that one and not this. A bot's own usage list keeps this card, since
+ * the Claude source does not answer a Claude Code chat's scope.
  */
 import { readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -31,6 +35,8 @@ import {
 } from "@getpaseo/plugin/server/usage";
 
 export const CC_USAGE_SOURCE = "optchat-cc";
+/** The Claude sign-in usage source (the claude-usage-source plugin) whose card makes this one redundant. */
+export const CLAUDE_SIGN_IN_SOURCE = "claude";
 const BOT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const inputSchema = z.object({ bot: z.string().regex(BOT_NAME) }).strict();
 
@@ -58,7 +64,10 @@ export interface CcUsageSourceOptions {
   now?: () => number;
 }
 
-export function createCcUsageSource(opts: CcUsageSourceOptions): UsageSourceRegistration {
+/** `fallbackFor` is newer than the pinned @getpaseo/plugin types; a daemon without it ignores the field. */
+export type CcUsageSourceRegistration = UsageSourceRegistration & { fallbackFor: string[] };
+
+export function createCcUsageSource(opts: CcUsageSourceOptions): CcUsageSourceRegistration {
   const now = opts.now ?? Date.now;
   const read = (bot: string): Ledger | null => {
     try {
@@ -84,6 +93,7 @@ export function createCcUsageSource(opts: CcUsageSourceOptions): UsageSourceRegi
     id: CC_USAGE_SOURCE,
     label: "Claude",
     icon: "server/cc/claude.svg",
+    fallbackFor: [CLAUDE_SIGN_IN_SOURCE],
     input: inputSchema,
     async discover(scope) {
       const bot = botOf(scope);

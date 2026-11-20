@@ -37,6 +37,10 @@ class FakeTui implements CcDelivery {
   refuse: string[] = [];
   ack = true;
   transcript: string | null = null;
+  /** What sits in the composer: typing adds to it, Enter submits it all (Claude Code puts a stopped prompt back here). */
+  composer = "";
+  /** The prompt of the turn running (what a Stop before any answer puts back in the composer). */
+  submitted = "";
   /** What the TUI makes of a typed text (Claude Code keeps it; a test may change it). */
   shown = (t: string) => t;
   engine!: CcEngine;
@@ -48,16 +52,30 @@ class FakeTui implements CcDelivery {
   }
   async clear() {
     this.cleared++;
+    this.composer = "";
   }
   async prompt(text: string) {
     const code = this.refuse.shift() ?? (this.st === "blocked" ? "agent_blocked" : this.st === "gone" ? "agent_not_found" : "");
     if (code) return { ok: false as const, code };
     this.typed.push(text);
+    const sent = this.composer + text;
+    this.composer = "";
+    this.submitted = sent;
     // Not acked: as if the Enter was lost (the text sits in the composer, the TUI idle).
     if (!this.ack) return { ok: true as const };
     this.st = "working";
-    setTimeout(() => void this.engine.handle("POST", "/turn", q, { running: true, typed: true, text: this.shown(text), origin: "composer" }), 3);
+    setTimeout(() => void this.engine.handle("POST", "/turn", q, { running: true, typed: true, text: this.shown(sent), origin: "composer" }), 3);
     return { ok: true as const };
+  }
+  /**
+   * Esc before the turn has any answer, as Claude Code 2.1.327 does it (reproduced): the turn ends aborted, its prompt
+   * leaves the conversation and goes back in the composer; the trigger mod's compaction then has nothing of it.
+   */
+  async stopBeforeAnswer() {
+    this.composer = this.submitted;
+    this.st = "idle";
+    await this.engine.handle("POST", "/turn", q, { running: false, answered: false, reason: "aborted" });
+    await this.engine.handle("POST", "/append", q, { messages: [] });
   }
   /** The turn ends (answered: the view mod logs it at the compaction that follows). */
   async finish(answered = true) {
@@ -395,13 +413,55 @@ describe("delivery after Stop (as for a bot on pi: bot DMs and room tasks still 
     await conn.send({ type: "session.interrupt", requestId: "r2", sessionId: "s1" });
     await until(() => turns().includes("c1:canceled"));
     await send("d2", "[dm 02J from ada] ping");
-    await until(() => tui.typed.length === 2);
+    // Acked (its turn runs) before it finishes: the hook's post comes a moment after the typing.
+    await until(() => tui.typed.length === 2 && tui.engine.running);
     await tui.finish();
     await tick(20);
     await tui.engine.handle("POST", "/append", q, { messages: [{ kind: "user", text: "[dm 02J from ada] ping" }] });
     await send("t1", "[room g task from user msg 01M]\ntask: go");
     await until(() => tui.typed.length === 3);
     assert.deepEqual(tui.typed.slice(1), ["[dm 02J from ada] ping", "[room g task from user msg 01M]\ntask: go"]);
+    await conn.close();
+    await host.close();
+  });
+
+  // A user stopped a turn before it answered and sent their next message; Claude Code had put the
+  // stopped prompt back in the composer, the next one was typed onto its end, and the chat showed a third, merged row.
+  it("Stop before any answer: the prompt Claude Code puts back is cleared, so the next message goes alone (no merged row)", async () => {
+    const { conn, host, tui, engine, send, turns, events } = await chat();
+    (engine as any).opts.ackMs = 5000;
+    await send("c1", "[dictated] Be running our new Tronic version system.");
+    await until(() => turns().includes("c1:started") && engine.running);
+    await tui.stopBeforeAnswer();
+    await until(() => turns().includes("c1:canceled"));
+    assert.equal(tui.composer, "[dictated] Be running our new Tronic version system.");
+    await send("c2", "are we running our new trunk versioning system");
+    await until(() => tui.typed.length === 2);
+    await until(() => engine.running);
+    assert.equal(tui.submitted, "are we running our new trunk versioning system");
+    // Two rows, the ones shown when sent; c2 runs as its own turn (acked), nothing left waiting.
+    const rows = events.flatMap((ev) => (ev.type === "timeline.item" && ev.item.type === "user_message" ? [(ev.item as any).text] : []));
+    assert.deepEqual(rows, ["[dictated] Be running our new Tronic version system.", "are we running our new trunk versioning system"]);
+    assert.deepEqual(turns(), ["c1:started", "c1:canceled", "c2:started"]);
+    // The stopped message is in memory as the person sent it (pi logs a stopped run too), and out of the journal.
+    assert.equal(engine.memory.root.find((x) => x.receipt === "c1")?.text, "[dictated] Be running our new Tronic version system.");
+    assert.deepEqual(JSON.parse(readFileSync(join((engine as any).dir, "pending-inputs.json"), "utf8")).map((i: any) => i.id), ["c2"]);
+    await conn.close();
+    await host.close();
+  });
+
+  it("Stop after the turn answered something: Claude Code keeps the prompt; the composer is not touched beyond a clear", async () => {
+    const { conn, host, tui, engine, send, turns } = await chat();
+    await send("k1", "list the files");
+    await until(() => turns().includes("k1:started") && engine.running);
+    // Stopped mid-tool: the prompt stays in the conversation, the compaction logs it with its receipt.
+    tui.st = "idle";
+    await engine.handle("POST", "/turn", q, { running: false, answered: false, reason: "aborted" });
+    await engine.handle("POST", "/append", q, { messages: [{ kind: "user", text: "list the files" }, { kind: "tool", text: "Bash {}" }] });
+    await send("k2", "never mind");
+    await until(() => tui.typed.length === 2 && engine.running);
+    assert.equal(tui.submitted, "never mind");
+    assert.equal(engine.memory.root.filter((x) => x.receipt === "k1").length, 1);
     await conn.close();
     await host.close();
   });

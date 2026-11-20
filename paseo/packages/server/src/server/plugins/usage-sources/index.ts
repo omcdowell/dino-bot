@@ -15,6 +15,8 @@ export interface UsageSource {
   id: string;
   label: string;
   icon?: string;
+  /** Source ids whose cards make this source's cards redundant in a listed host or agent list. */
+  fallbackFor?: readonly string[];
   discover(scope: UsageScope): Promise<unknown>;
   fetch(input: unknown): Promise<unknown>;
 }
@@ -104,6 +106,7 @@ export class UsageSourceRegistry {
       this.mergeKnown();
       ids = [...this.known.keys()];
     }
+    if (options.reportIds === undefined) ids = withoutFallbacks(ids, reports);
     return Promise.all(
       [...new Set(ids)].flatMap((id) => {
         const known = reports.get(id);
@@ -343,6 +346,18 @@ function legacyError(report: UsageReport, now: number): string | null {
   if (report.status === "error") return report.error;
   if (report.status === "unavailable") return legacyProblem(report.problem, now);
   return null;
+}
+
+/**
+ * A list without the cards of a fallback source when it also has a card from a source the fallback
+ * stands in for: one account, one card. An explicit request by report id is never filtered.
+ */
+function withoutFallbacks(ids: string[], reports: Map<string, KnownReport>): string[] {
+  const listed = new Set(ids.flatMap((id) => reports.get(id)?.source.id ?? []));
+  return ids.filter((id) => {
+    const fallbackFor = reports.get(id)?.source.fallbackFor ?? [];
+    return !fallbackFor.some((sourceId) => listed.has(sourceId));
+  });
 }
 
 // Inputs are opaque JSON locators. Canonical equality deduplicates discovery across scopes.

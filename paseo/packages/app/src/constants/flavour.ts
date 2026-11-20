@@ -76,6 +76,9 @@ export interface ReleasePolicy {
   desktopBuiltInDaemon: boolean;
   /** Desktop app: check for and install updates from upstream Paseo's GitHub releases. */
   desktopAppUpdates: boolean;
+  /** Desktop app: a sidebar notice when the release repo (lib/product.json releaseRepo) has a newer
+   * GitHub release, with a download link (desktop features/release-notice.ts). No auto-install. */
+  desktopReleaseNotice: boolean;
   /** Desktop app: offer "Remote host over SSH" (not Tailscale-only, so off with tailnetOnly). */
   desktopRemoteSsh: boolean;
   /** Desktop app: Settings > Integrations installs the `paseo` CLI (~/.local/bin, shell rc line). */
@@ -113,6 +116,7 @@ export const RELEASE_POLICIES: Record<AppFlavour, ReleasePolicy> = {
     upstreamChangelog: true,
     desktopBuiltInDaemon: true,
     desktopAppUpdates: true,
+    desktopReleaseNotice: false,
     desktopRemoteSsh: true,
     desktopCliInstall: true,
     claudePlanDefault: "max",
@@ -133,6 +137,7 @@ export const RELEASE_POLICIES: Record<AppFlavour, ReleasePolicy> = {
     upstreamChangelog: false,
     desktopBuiltInDaemon: false,
     desktopAppUpdates: false,
+    desktopReleaseNotice: true,
     desktopRemoteSsh: false,
     desktopCliInstall: false,
     claudePlanDefault: "pro",

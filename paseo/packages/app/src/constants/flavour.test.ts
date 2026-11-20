@@ -163,12 +163,14 @@ describe("release flavour", () => {
     expect(RELEASE_POLICIES.public).toMatchObject({
       desktopBuiltInDaemon: false,
       desktopAppUpdates: false,
+      desktopReleaseNotice: true,
       desktopRemoteSsh: false,
       desktopCliInstall: false,
     });
     expect(RELEASE_POLICIES.own).toMatchObject({
       desktopBuiltInDaemon: true,
       desktopAppUpdates: true,
+      desktopReleaseNotice: false,
       desktopRemoteSsh: true,
       desktopCliInstall: true,
     });

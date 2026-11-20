@@ -32,6 +32,12 @@ export interface DesktopFlavour {
    * version for the daemon checks.
    */
   displayVersion: string | null;
+  /**
+   * GitHub repo ("owner/name", lib/product.json `releaseRepo`) whose latest release the public app
+   * checks for a newer version (features/release-notice.ts). null: no check (the own build keeps
+   * upstream's electron-updater instead).
+   */
+  releaseRepo: string | null;
 }
 
 export const OWN_DESKTOP_FLAVOUR: DesktopFlavour = {
@@ -45,12 +51,14 @@ export const OWN_DESKTOP_FLAVOUR: DesktopFlavour = {
   appUpdates: true,
   cliInstall: true,
   displayVersion: null,
+  releaseRepo: null,
 };
 
 export function publicDesktopFlavour(
   appName: string,
   linkScheme: string,
   displayVersion: string | null = null,
+  releaseRepo: string | null = null,
 ): DesktopFlavour {
   return {
     id: "public",
@@ -63,12 +71,14 @@ export function publicDesktopFlavour(
     appUpdates: false,
     cliInstall: false,
     displayVersion,
+    releaseRepo,
   };
 }
 
 const SAFE_NAME = /^[A-Za-z][A-Za-z0-9 ._-]{0,63}$/;
 const SAFE_SCHEME = /^[a-z][a-z0-9+.-]{0,31}$/;
 const SAFE_VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,4}$/;
+const SAFE_REPO = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/;
 
 /** The flavour from a parsed flavour.json; anything unexpected falls back to the own flavour. */
 export function resolveDesktopFlavour(raw: unknown): DesktopFlavour {
@@ -84,7 +94,11 @@ export function resolveDesktopFlavour(raw: unknown): DesktopFlavour {
     typeof record.displayVersion === "string" && SAFE_VERSION.test(record.displayVersion.trim())
       ? record.displayVersion.trim()
       : null;
-  return publicDesktopFlavour(appName, linkScheme, displayVersion);
+  const releaseRepo =
+    typeof record.releaseRepo === "string" && SAFE_REPO.test(record.releaseRepo.trim())
+      ? record.releaseRepo.trim()
+      : null;
+  return publicDesktopFlavour(appName, linkScheme, displayVersion, releaseRepo);
 }
 
 export const FLAVOUR_FILENAME = "flavour.json";

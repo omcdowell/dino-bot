@@ -9,7 +9,7 @@ import {
   FileTransferOpcode,
   type FileTransferFrame,
 } from "@getpaseo/protocol/binary-frames/index";
-import { FileUploadStore } from "./index.js";
+import { FileUploadStore, readImageUploads } from "./index.js";
 
 const tempDirs: string[] = [];
 
@@ -263,6 +263,68 @@ async function uploadNamed(uploads: FileUploadStore, fileName: string) {
   expect(response?.payload.error).toBeNull();
   return response?.payload.file;
 }
+
+describe("readImageUploads (photos sent ahead of the message)", () => {
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function uploadPhoto(paseoHome: string, fileName: string, text: string) {
+    const uploads = new FileUploadStore({ paseoHome });
+    uploads.beginUpload({
+      type: "file.upload.request",
+      fileName,
+      mimeType: "image/jpeg",
+      size: text.length,
+      modifiedAt: "2026-11-20T00:00:00.000Z",
+      requestId: `req-${fileName}`,
+    });
+    await uploads.receiveFrame(uploadBegins(`req-${fileName}`));
+    await uploads.receiveFrame(uploadChunk(`req-${fileName}`, text));
+    const response = await uploads.receiveFrame(uploadEnds(`req-${fileName}`));
+    const file = response?.payload.file;
+    if (!file) throw new Error("upload failed");
+    return { id: file.id, fileName: file.fileName, mimeType: file.mimeType };
+  }
+
+  it("reads uploaded photos back as base64 images, in order", async () => {
+    const paseoHome = makePaseoHome();
+    const first = await uploadPhoto(paseoHome, "IMG_0001.jpg", "first");
+    const second = await uploadPhoto(paseoHome, "IMG 0002.jpg", "second");
+    await expect(readImageUploads(paseoHome, [first, second])).resolves.toEqual([
+      { data: Buffer.from("first").toString("base64"), mimeType: "image/jpeg" },
+      { data: Buffer.from("second").toString("base64"), mimeType: "image/jpeg" },
+    ]);
+    await expect(readImageUploads(paseoHome, undefined)).resolves.toEqual([]);
+  });
+
+  it("only reads inside the uploads folder and only images", async () => {
+    const paseoHome = makePaseoHome();
+    const photo = await uploadPhoto(paseoHome, "IMG_0001.jpg", "x");
+    await expect(readImageUploads(paseoHome, [{ ...photo, id: "../../etc" }])).rejects.toThrow(
+      "Not an upload id",
+    );
+    await expect(
+      readImageUploads(paseoHome, [{ ...photo, fileName: "../../../secret.jpg" }]),
+    ).rejects.toThrow("no longer on the host");
+    await expect(
+      readImageUploads(paseoHome, [{ ...photo, mimeType: "text/plain" }]),
+    ).rejects.toThrow("Not an image");
+  });
+
+  it("fails clearly when the upload is gone", async () => {
+    const paseoHome = makePaseoHome();
+    await expect(
+      readImageUploads(paseoHome, [
+        {
+          id: "upload_00000000-0000-4000-8000-000000000000",
+          fileName: "IMG_0001.jpg",
+          mimeType: "image/jpeg",
+        },
+      ]),
+    ).rejects.toThrow("Uploaded photo is no longer on the host: IMG_0001.jpg");
+  });
+});
 
 function makePaseoHome(): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "file-upload-test-")));

@@ -67,6 +67,7 @@ vi.mock("react-i18next", () => ({
         "message.attachments.closeImage": "Close image",
         "message.attachments.dismissImage": "Dismiss image",
         "message.attachments.imageLoadFailed": "Couldn't load image",
+        "message.attachments.downloadImage": "Download image",
       })[key] ?? key,
   }),
 }));
@@ -84,6 +85,7 @@ vi.mock("lucide-react-native", () => {
   const createIcon = (name: string) => (props: Record<string, unknown>) =>
     React.createElement("span", { ...props, "data-icon": name });
   return {
+    Download: createIcon("Download"),
     X: createIcon("X"),
   };
 });
@@ -225,6 +227,33 @@ describe("AttachmentLightbox", () => {
     click(closeButton!);
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("downloads the shown image from the save button on web", () => {
+    const clicked: Array<{ href: string; download: string }> = [];
+    const clickSpy = vi
+      .spyOn(window.HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        clicked.push({ href: this.href, download: this.download });
+      });
+    try {
+      render(
+        <AttachmentLightbox
+          source={{ type: "uri", uri: "data:image/png;base64,iVBORw0K" }}
+          onClose={vi.fn()}
+        />,
+      );
+      const saveButton = document.querySelector(
+        '[aria-label="Download image"][data-testid="attachment-lightbox-save"]',
+      );
+      expect(saveButton).not.toBeNull();
+      click(saveButton!);
+      expect(clicked).toHaveLength(1);
+      expect(clicked[0]?.href).toBe("data:image/png;base64,iVBORw0K");
+      expect(clicked[0]?.download).toMatch(/^image-\d{8}-\d{6}\.png$/);
+    } finally {
+      clickSpy.mockRestore();
+    }
   });
 
   it("shows error text when the preview URL resolves to null", () => {

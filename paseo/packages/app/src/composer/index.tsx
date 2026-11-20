@@ -39,6 +39,7 @@ import {
   FileText,
   GitPullRequest,
   Image as ImageIcon,
+  Camera,
   ClipboardPaste,
   Paperclip,
 } from "lucide-react-native";
@@ -1444,7 +1445,7 @@ function ComposerContentImpl({
     [blurOnSubmit, clearDraft, replaceUserInput, resetSuppression, setSelectedAttachments],
   );
 
-  const { pickImages } = useImageAttachmentPicker();
+  const { pickMedia, takePhoto } = useImageAttachmentPicker();
   const { pickFiles } = useFilePicker();
   const agentIdRef = useRef(agentId);
   const sendBehaviorRef = useRef<SendBehavior>("interrupt");
@@ -1781,15 +1782,6 @@ function ComposerContentImpl({
     ],
   );
 
-  const handlePickImage = useCallback(async () => {
-    const newImages = await pickAndPersistImages({
-      pickImages,
-      persister: composerImageAttachmentPersister,
-    });
-    if (newImages.length === 0) return;
-    addImages(newImages);
-  }, [addImages, pickImages]);
-
   const handlePasteImage = useCallback(async () => {
     try {
       const newImages = await pickAndPersistImages({
@@ -1858,6 +1850,32 @@ function ComposerContentImpl({
     },
     [addFiles, client, t],
   );
+
+  // Photo library: images and videos. Videos are uploaded to the host as files (Claude models
+  // cannot watch video; the bot gets the saved path), images stay images.
+  const handlePickImage = useCallback(async () => {
+    const picked = await pickMedia();
+    if (!picked) return;
+    if (picked.images.length > 0) {
+      const newImages = await pickAndPersistImages({
+        pickImages: async () => picked.images,
+        persister: composerImageAttachmentPersister,
+      });
+      if (newImages.length > 0) addImages(newImages);
+    }
+    if (picked.videos.length > 0) {
+      await uploadSelectedFiles(picked.videos);
+    }
+  }, [addImages, pickMedia, uploadSelectedFiles]);
+
+  const handleTakePhoto = useCallback(async () => {
+    const newImages = await pickAndPersistImages({
+      pickImages: takePhoto,
+      persister: composerImageAttachmentPersister,
+    });
+    if (newImages.length === 0) return;
+    addImages(newImages);
+  }, [addImages, takePhoto]);
 
   const handlePickFile = useCallback(async () => {
     if (!client) {
@@ -2201,6 +2219,14 @@ function ComposerContentImpl({
     ];
     if (isNative) {
       items.push({
+        id: "camera",
+        label: t("composer.attachments.takePhoto"),
+        icon: <ThemedCamera size={ICON_SIZE.md} uniProps={iconForegroundMutedMapping} />,
+        onSelect: () => {
+          void handleTakePhoto();
+        },
+      });
+      items.push({
         id: "paste-image",
         label: t("composer.attachments.pasteImage"),
         icon: <ThemedClipboardPaste size={ICON_SIZE.md} uniProps={iconForegroundMutedMapping} />,
@@ -2236,6 +2262,7 @@ function ComposerContentImpl({
     handlePasteImage,
     handlePickFile,
     handlePickImage,
+    handleTakePhoto,
     pluginAttachments.menuItems,
     t,
   ]);
@@ -2696,6 +2723,7 @@ const ThemedCircleDot = withUnistyles(CircleDot);
 const ThemedAudioLines = withUnistyles(AudioLines);
 const ThemedPaperclip = withUnistyles(Paperclip);
 const ThemedImageIcon = withUnistyles(ImageIcon);
+const ThemedCamera = withUnistyles(Camera);
 const ThemedClipboardPaste = withUnistyles(ClipboardPaste);
 const ThemedFileText = withUnistyles(FileText);
 const iconForegroundMapping = (theme: Theme) => ({ color: theme.colors.foreground });

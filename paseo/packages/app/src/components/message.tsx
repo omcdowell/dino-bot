@@ -72,6 +72,7 @@ import {
 } from "@/types/stream";
 import { ChatImage, LocalChatImage } from "@/chat-images/chat-image";
 import type { AgentAttachment } from "@getpaseo/protocol/messages";
+import type { AgentTimelineFile } from "@getpaseo/protocol/agent-types";
 import type { ToolCallDetail } from "@getpaseo/protocol/agent-types";
 import { buildToolCallPresentation } from "@/tool-calls/presentation";
 import { resolveToolCallIcon } from "@/utils/tool-call-icon";
@@ -106,7 +107,11 @@ import {
 } from "@/assistant-file-links";
 import { getCompactionMarkerLabel } from "./message-compaction-label";
 import { useAssistantImage } from "@/assistant-image/use-assistant-image";
+import { openChatImageActions } from "@/chat-images/image-actions";
+import { useChatImageBox } from "@/chat-images/use-chat-image-box";
 import { AttachmentFrame, AttachmentLabel } from "@/components/attachment-pill";
+import { SentFileChips } from "@/chat-files/sent-file-chips";
+import { attachmentsWithoutFiles, sentFilesOf } from "@/chat-files/sent-files";
 import { AttachmentLightbox, type ImageLightboxSource } from "@/components/attachment-lightbox";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { isWeb, isNative } from "@/constants/platform";
@@ -135,6 +140,8 @@ interface UserMessageProps {
   message: string;
   images?: UserMessageImage[];
   attachments?: AgentAttachment[];
+  /** Files sent with the message (the daemon's row); chips that download them again. */
+  files?: AgentTimelineFile[];
   timestamp: number;
   capabilities?: AgentCapabilityFlags;
   client?: DaemonClient | null;
@@ -168,7 +175,7 @@ function userMessageLayout(input: {
   };
 }
 
-/** Images above a user bubble, at the chat's width (capped), each with its own aspect ratio. */
+/** Images above a user bubble, right-aligned, each whole in its own box (chat-images/sizing.ts). */
 function UserMessageImages({
   images,
   serverId,
@@ -192,6 +199,7 @@ function UserMessageImages({
             serverId={serverId}
             client={client}
             accessibilityLabel={t("composer.attachments.openImage")}
+            align="end"
           />
         ) : (
           <LocalChatImage
@@ -199,6 +207,7 @@ function UserMessageImages({
             metadata={image}
             onOpen={onOpenLocal}
             accessibilityLabel={t("composer.attachments.openImage")}
+            align="end"
           />
         ),
       )}
@@ -554,7 +563,8 @@ export const UserMessage = memo(function UserMessage({
   messageId,
   message,
   images = [],
-  attachments = [],
+  attachments: allAttachments = [],
+  files,
   timestamp,
   capabilities,
   client,
@@ -577,7 +587,12 @@ export const UserMessage = memo(function UserMessage({
   const resolvedDisableOuterSpacing = useDisableOuterSpacing(disableOuterSpacing);
   const hasText = message.trim().length > 0;
   const hasImages = images.length > 0;
-  const hasAttachments = attachments.length > 0;
+  const sentFiles = useMemo(
+    () => sentFilesOf({ files, attachments: allAttachments }),
+    [files, allAttachments],
+  );
+  const attachments = useMemo(() => attachmentsWithoutFiles(allAttachments), [allAttachments]);
+  const hasAttachments = attachments.length > 0 || sentFiles.length > 0;
   // Always on screen (desktop and phone alike); pending bubbles show their own clock/tick.
   const showTrailingRow = isUserMessageTrailingRowVisible({ isPending, hasText });
   const formattedTimestamp = useMemo(
@@ -647,6 +662,7 @@ export const UserMessage = memo(function UserMessage({
               </AttachmentFrame>
             );
           })}
+          <SentFileChips files={sentFiles} serverId={serverId} client={client} />
         </View>
       ) : null}
       {hasText ? (
@@ -908,13 +924,16 @@ export const assistantMessageStylesheet = StyleSheet.create((theme) => ({
   },
   imageFrame: {
     width: "100%",
-    minHeight: 160,
+    alignItems: "flex-start",
     marginHorizontal: -theme.spacing[1],
   },
   imageSurface: {
-    width: "100%",
     overflow: "hidden",
     position: "relative",
+  },
+  imageFailed: {
+    width: "100%",
+    height: 160,
   },
   image: {
     width: "100%",
@@ -986,10 +1005,17 @@ function AssistantMarkdownImage({
     () => [assistantMessageStylesheet.imageFrame, containerStyle],
     [containerStyle],
   );
-  const imageSizeStyle = useMemo<ViewStyle>(() => {
-    if (image.status === "failed") return { height: 160 };
-    return { aspectRatio: aspectRatio ?? ASSISTANT_IMAGE_DEFAULT_ASPECT_RATIO };
-  }, [aspectRatio, image.status]);
+  // The whole image in a tidy box (chat-images/sizing.ts), measured against the frame's width.
+  const { box, onLayout } = useChatImageBox({
+    aspectRatio: aspectRatio ?? ASSISTANT_IMAGE_DEFAULT_ASPECT_RATIO,
+  });
+  const imageSizeStyle = useMemo<ViewStyle>(
+    () => ({ width: box.width, height: box.height }),
+    [box.height, box.width],
+  );
+  const handleLongPress = useCallback(() => {
+    if (imageUri && image.status === "loaded") openChatImageActions({ uri: imageUri }, t);
+  }, [image.status, imageUri, t]);
   const surfaceStyle = useMemo<StyleProp<ViewStyle>>(
     () => [assistantMessageStylesheet.imageSurface, imageSizeStyle],
     [imageSizeStyle],
@@ -1003,40 +1029,44 @@ function AssistantMarkdownImage({
     };
   }, [aspectRatio, imageUri, viewerOpen]);
 
-  const stateFrameStyle = useMemo<StyleProp<ViewStyle>>(
+  const stateStyle = useMemo<StyleProp<ViewStyle>>(
     () => [
-      assistantMessageStylesheet.imageFrame,
-      containerStyle,
-      imageSizeStyle,
+      image.status === "failed" ? assistantMessageStylesheet.imageFailed : imageSizeStyle,
       assistantMessageStylesheet.imageState,
     ],
-    [containerStyle, imageSizeStyle],
+    [image.status, imageSizeStyle],
   );
   const copyDataSet = useMemo(() => markdownCopyImageDataSet(source, alt), [source, alt]);
 
   if (image.status === "failed") {
     return (
-      <View style={stateFrameStyle} dataSet={copyDataSet}>
-        <Text style={assistantMessageStylesheet.imageErrorText}>{image.message}</Text>
+      <View style={frameStyle} onLayout={onLayout} dataSet={copyDataSet}>
+        <View style={stateStyle}>
+          <Text style={assistantMessageStylesheet.imageErrorText}>{image.message}</Text>
+        </View>
       </View>
     );
   }
 
   if (!binding) {
     return (
-      <View style={stateFrameStyle} dataSet={copyDataSet}>
-        <ThemedLoadingSpinner size="small" uniProps={foregroundMutedColorMapping} />
+      <View style={frameStyle} onLayout={onLayout} dataSet={copyDataSet}>
+        <View style={stateStyle}>
+          <ThemedLoadingSpinner size="small" uniProps={foregroundMutedColorMapping} />
+        </View>
       </View>
     );
   }
 
   return (
-    <View style={frameStyle} dataSet={copyDataSet}>
+    <View style={frameStyle} onLayout={onLayout} dataSet={copyDataSet}>
       <Pressable
         accessibilityLabel={t("composer.attachments.openImage")}
         accessibilityRole="button"
         disabled={image.status !== "loaded"}
         onPress={openViewer}
+        onLongPress={handleLongPress}
+        delayLongPress={400}
         style={surfaceStyle}
       >
         <View

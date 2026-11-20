@@ -166,6 +166,14 @@ export function createLocalFileAttachmentStore(params: {
       return await fileSystem.readAsBase64(attachmentUri(attachment));
     },
 
+    ...(fileSystem.readBytes
+      ? {
+          async readBytes({ attachment }: { attachment: AttachmentMetadata }): Promise<Uint8Array> {
+            return await fileSystem.readBytes!(attachmentUri(attachment));
+          },
+        }
+      : {}),
+
     async resolvePreviewUrl({ attachment }): Promise<string> {
       return await params.resolvePreviewUrl(attachment);
     },

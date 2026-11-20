@@ -6,7 +6,6 @@ import {
   type FetchDisplayImage,
 } from "./display-loader";
 import { shouldAutoDownloadImages } from "./network-policy";
-import { chatImageFrameSize, CHAT_IMAGE_MAX_WIDTH } from "./sizing";
 import { planThumbnailEviction, ThumbnailMemoryCache } from "./thumbnail-memory";
 
 vi.mock("./thumbnail-disk", () => ({ thumbnailDiskStore: { read: vi.fn(), write: vi.fn() } }));
@@ -116,19 +115,6 @@ describe("chat image auto-download", () => {
     expect(shouldAutoDownloadImages({ constrained: false, phone: good, saveData: true })).toBe(
       false,
     );
-  });
-});
-
-describe("chat image frame", () => {
-  it("keeps the photo's aspect ratio, capped on wide screens and for tall images", () => {
-    expect(chatImageFrameSize({ width: 4032, height: 3024 }, { height: 900 })).toEqual({
-      aspectRatio: 4032 / 3024,
-      maxWidth: CHAT_IMAGE_MAX_WIDTH,
-    });
-    const portrait = chatImageFrameSize({ width: 3024, height: 4032 }, { height: 900 });
-    expect(portrait.aspectRatio).toBeCloseTo(0.75);
-    expect(portrait.maxWidth).toBe(Math.round(540 * 0.75));
-    expect(chatImageFrameSize({}, { height: 900 }).aspectRatio).toBeCloseTo(4 / 3);
   });
 });
 

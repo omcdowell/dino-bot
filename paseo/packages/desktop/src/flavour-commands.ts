@@ -11,6 +11,11 @@ export function applyFlavourToCommandHandlers(
   handlers: Record<string, DesktopCommandHandler>,
   flavour: DesktopFlavour,
   currentVersion: () => string,
+  /**
+   * The public app's own update check (features/release-notice.ts): `check_release_notice` answers
+   * with a newer DinoBot release or null. Only registered when the flavour names a release repo.
+   */
+  checkReleaseNotice?: () => Promise<unknown>,
 ): Record<string, DesktopCommandHandler> {
   const next = { ...handlers };
   const unavailable = (what: string) => () => {
@@ -35,6 +40,9 @@ export function applyFlavourToCommandHandlers(
       version: null,
       message: `${flavour.appName} updates come with the installer (dinobot update).`,
     });
+  }
+  if (flavour.releaseRepo && flavour.displayVersion && checkReleaseNotice) {
+    next.check_release_notice = () => checkReleaseNotice();
   }
   if (!flavour.cliInstall) {
     next.install_cli = unavailable("install a command-line tool");

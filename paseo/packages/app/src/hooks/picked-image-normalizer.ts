@@ -8,12 +8,13 @@ export interface PickedImageAttachmentInput {
 
 export interface ExpoImagePickerAssetLike {
   uri: string;
+  /** Pixel size from the picker, when known. */
+  width?: number | null;
+  height?: number | null;
   mimeType?: string | null;
   fileName?: string | null;
   file?: File | null;
 }
-
-export type ExportPickedImageAsPng = (uri: string) => Promise<string>;
 
 interface SupportedPickedImageFormat {
   mimeType: "image/jpeg" | "image/png";
@@ -85,28 +86,59 @@ function replaceFileExtension(
   return fileName.replace(/\.[^./\\]+$/, "") + `.${extension}`;
 }
 
+/**
+ * Photos go to the bot at most this many pixels on the long edge. Claude reads images at about
+ * 1.15 megapixels anyway (larger ones are scaled down by the API), and a phone camera photo at
+ * full size is 4-8 MB as JPEG, tens of MB once a HEIC became a PNG: a handful of those froze the
+ * app and stalled the send for hours (UF1). 2048 keeps a photographed document legible.
+ */
+export const PICKED_IMAGE_MAX_EDGE = 2048;
+/** JPEG quality for photos the app re-encodes (HEIC and oversized photos). */
+export const PICKED_IMAGE_JPEG_QUALITY = 0.85;
+
+export type PickedImagePlan =
+  | { kind: "keep"; format: SupportedPickedImageFormat }
+  | {
+      kind: "transcode";
+      format: SupportedPickedImageFormat;
+      /** Scale so this edge is PICKED_IMAGE_MAX_EDGE (the other follows the aspect ratio). */
+      resize: { width: number } | { height: number } | null;
+    };
+
+/** Keep JPEG/PNG that already fit; scale down the rest; anything else (HEIC…) becomes JPEG. */
+export function planPickedImage(asset: ExpoImagePickerAssetLike): PickedImagePlan {
+  const supported = pickedAssetSupportedFormat(asset);
+  const width = asset.width ?? 0;
+  const height = asset.height ?? 0;
+  const tooLarge = Math.max(width, height) > PICKED_IMAGE_MAX_EDGE;
+  if (supported && !tooLarge) return { kind: "keep", format: supported };
+  let resize: { width: number } | { height: number } | null = null;
+  if (tooLarge) {
+    resize = width >= height ? { width: PICKED_IMAGE_MAX_EDGE } : { height: PICKED_IMAGE_MAX_EDGE };
+  }
+  return { kind: "transcode", format: supported === PNG_FORMAT ? PNG_FORMAT : JPEG_FORMAT, resize };
+}
+
+/** Re-encodes (and scales) a picked image natively; returns the new file's URI. */
+export type TranscodePickedImage = (
+  uri: string,
+  plan: Extract<PickedImagePlan, { kind: "transcode" }>,
+) => Promise<string>;
+
 export async function normalizePickedImageAssetsWith(
   assets: readonly ExpoImagePickerAssetLike[],
-  exportAsPng: ExportPickedImageAsPng,
+  transcode: TranscodePickedImage,
 ): Promise<PickedImageAttachmentInput[]> {
-  return await Promise.all(
-    assets.map(async (asset) => {
-      const supportedFormat = pickedAssetSupportedFormat(asset);
-      if (supportedFormat) {
-        return {
-          source: { kind: "file_uri", uri: asset.uri },
-          mimeType: supportedFormat.mimeType,
-          fileName: replaceFileExtension(asset.fileName, supportedFormat.extension),
-        };
-      }
-
-      const convertedUri = await exportAsPng(asset.uri);
-
-      return {
-        source: { kind: "file_uri", uri: convertedUri },
-        mimeType: PNG_FORMAT.mimeType,
-        fileName: replaceFileExtension(asset.fileName, PNG_FORMAT.extension),
-      };
-    }),
-  );
+  // One at a time: decoding a dozen full-size photos at once would hold hundreds of MB.
+  const result: PickedImageAttachmentInput[] = [];
+  for (const asset of assets) {
+    const plan = planPickedImage(asset);
+    const uri = plan.kind === "keep" ? asset.uri : await transcode(asset.uri, plan);
+    result.push({
+      source: { kind: "file_uri", uri },
+      mimeType: plan.format.mimeType,
+      fileName: replaceFileExtension(asset.fileName, plan.format.extension),
+    });
+  }
+  return result;
 }

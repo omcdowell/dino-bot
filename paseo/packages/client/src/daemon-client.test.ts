@@ -3243,6 +3243,7 @@ test("uploadFile sends metadata request and file bytes as binary chunks", async 
   mock.triggerOpen();
   await connectPromise;
 
+  const progress: Array<[number, number]> = [];
   const responsePromise = client.uploadFile({
     fileName: "notes.txt",
     mimeType: "text/plain",
@@ -3250,6 +3251,7 @@ test("uploadFile sends metadata request and file bytes as binary chunks", async 
     modifiedAt: "2026-05-02T00:00:00.000Z",
     requestId: "req-upload",
     chunkSize: 5,
+    onProgress: (sent, total) => progress.push([sent, total]),
   });
 
   // Other tasks must run before a multi-chunk upload has queued all its bytes.
@@ -3263,6 +3265,11 @@ test("uploadFile sends metadata request and file bytes as binary chunks", async 
     expect(frames.at(-1)?.opcode).toBe(FileTransferOpcode.FileEnd);
   });
 
+  expect(progress).toEqual([
+    [5, 11],
+    [10, 11],
+    [11, 11],
+  ]);
   expect(JSON.parse(assertStr(mock.sent[0]))).toEqual({
     type: "session",
     message: {

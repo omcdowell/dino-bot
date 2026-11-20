@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { botIdFor, createStarterBot, starterAvatarJson, trashBot } from "../lib/bots.mjs";
 import { readEnvFile, writeBotsSettings, writeDaemonConfig, writeDaemonEnv } from "../lib/config.mjs";
+import { desktopAppHint, macDesktopAppVersion, plistShortVersion } from "../lib/desktop-app.mjs";
 import { detectSignIns, isTailnetIp, lanIp, subscriptionFor } from "../lib/detect.mjs";
 import { planGc } from "../lib/herdr.mjs";
 import { buildOffer, desktopPairLines, offerEndpoints, offerUrl } from "../lib/offer.mjs";
@@ -243,5 +244,29 @@ describe("cli output into a closed pipe", () => {
     const code = await new Promise((resolve) => child.on("close", (c) => resolve(c)));
     assert.doesNotMatch(stderr, /EPIPE|Unhandled 'error' event/);
     assert.equal(code, 0);
+  });
+});
+
+describe("desktop app hint after `update`", () => {
+  const plist = (v) => `<?xml version="1.0"?><plist><dict><key>CFBundleName</key><string>DinoBot</string><key>CFBundleShortVersionString</key>\n  <string>${v}</string></dict></plist>`;
+
+  it("reads the app's version from /Applications or ~/Applications, macOS only", () => {
+    assert.equal(plistShortVersion(plist("0.1.15")), "0.1.15");
+    const files = { "/home/someone/Applications/DinoBot.app/Contents/Info.plist": plist("0.1.14") };
+    const read = (f) => {
+      if (!(f in files)) throw new Error("ENOENT");
+      return files[f];
+    };
+    assert.equal(macDesktopAppVersion({ product: "DinoBot", home: "/home/someone", platform: "darwin", read }), "0.1.14");
+    assert.equal(macDesktopAppVersion({ product: "DinoBot", home: "/home/someone", platform: "linux", read }), null);
+    assert.equal(macDesktopAppVersion({ product: "DinoBot", home: "/nobody", platform: "darwin", read }), null);
+  });
+
+  it("one line only when the installed app is older than the new release", () => {
+    const base = { product: "DinoBot", newVersion: "0.1.16", releaseRepo: "example-owner/example-repo" };
+    assert.match(desktopAppHint({ ...base, desktopVersion: "0.1.15" }), /desktop app is 0\.1\.15; download 0\.1\.16 from https:\/\/github\.com\/example-owner\/example-repo\/releases\/tag\/v0\.1\.16/);
+    assert.equal(desktopAppHint({ ...base, desktopVersion: "0.1.16" }), null);
+    assert.equal(desktopAppHint({ ...base, desktopVersion: null }), null);
+    assert.equal(desktopAppHint({ ...base, desktopVersion: "0.1.15", newVersion: "?" }), null);
   });
 });

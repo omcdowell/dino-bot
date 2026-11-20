@@ -362,9 +362,41 @@ describe("first run: Sign in for your bots", () => {
     expect(byId("setup-signin-claude-code")!.tagName).toBe("BUTTON");
   });
 
-  it("already logged in to Claude Code: shown on the card and as signed in, so 'Continue with this' is there", async () => {
+  it("already logged in to Claude Code, first run after pairing: no sign-in screen, straight on (SR2)", async () => {
     host(cc({ loggedIn: true, plan: "Max plan" }));
     await render();
+    expect(h.router.replace).toHaveBeenCalledWith("/setup-models");
+    expect(byId("setup-signin-claude-code")).toBeNull();
+  });
+
+  it("Claude Code through the owner's proxy, pi on a placeholder key: straight on, no fresh Claude login (SR2)", async () => {
+    h.invoke.mockImplementation(async (_p: string, method: string) => {
+      if (method === "signin.options") return { ...OPTIONS, signedIn: ["Anthropic through your proxy"] };
+      if (method === "engines.status") return cc({ loggedIn: true, authMethod: "proxy", plan: "Through your proxy" });
+      throw new Error(method);
+    });
+    await render();
+    expect(h.router.replace).toHaveBeenCalledWith("/setup-models");
+    expect(h.invoke.mock.calls.some((c) => c[1] === "signin.start")).toBe(false);
+  });
+
+  it("while the computer answers: a short check, not the list", async () => {
+    h.invoke.mockImplementation(async (_p: string, method: string) => {
+      if (method === "signin.options") return OPTIONS;
+      if (method === "engines.status") return new Promise(() => undefined); // never answers
+      throw new Error(method);
+    });
+    await render();
+    expect(byId("setup-signin-checking")).not.toBeNull();
+    expect(byId("setup-signin-claude-code")).toBeNull();
+    expect(h.router.replace).not.toHaveBeenCalled();
+  });
+
+  it("already logged in, back from Choose models (pick=1): the list with 'Continue with this', to add another", async () => {
+    h.params = { ...h.params, pick: "1" };
+    host(cc({ loggedIn: true, plan: "Max plan" }));
+    await render();
+    expect(h.router.replace).not.toHaveBeenCalled();
     expect(byId("setup-signin-claude-code-status")!.textContent).toContain(
       "Logged in · Max plan"
     );

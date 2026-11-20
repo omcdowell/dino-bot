@@ -1,5 +1,6 @@
 import { getForgeDefinitionOrNeutral } from "@getpaseo/protocol/forge-manifest";
 import type { AgentAttachment } from "@getpaseo/protocol/messages";
+import { renderUploadedFileText } from "@getpaseo/protocol/uploaded-file-text";
 import type { AgentPromptContentBlock, AgentPromptInput } from "./agent-sdk-types.js";
 
 const REVIEW_LINE_MARKERS = { add: "+", remove: "-", context: " " } as const;
@@ -116,12 +117,7 @@ export function renderPromptAttachmentAsText(attachment: AgentAttachment): strin
       return lines.join("\n");
     }
     case "uploaded_file": {
-      return [
-        `Uploaded file: ${attachment.fileName}`,
-        `Path: ${attachment.path}`,
-        `MIME: ${attachment.mimeType}`,
-        `Size: ${attachment.size} bytes`,
-      ].join("\n");
+      return renderUploadedFileText(attachment);
     }
     default:
       throw new Error("unreachable");

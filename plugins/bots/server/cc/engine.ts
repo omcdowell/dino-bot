@@ -38,7 +38,7 @@ import { readSettings as readBotsSettings } from "../settings";
 import { parseRunner, resolveRunner, type CompactorRunner, type RunnerWhy } from "./compactor-runner";
 import { spawnPiRunner, type PiRunner } from "./pi-runner";
 import { anthropicPrice, priceOf, type CcRunUsage, type CcTokens } from "./usage";
-import { sameText, transcriptHas, typedText, type CcDelivery } from "./deliver";
+import { afterView, sameText, transcriptHas, typedText, type CcDelivery } from "./deliver";
 
 /** A compaction the TUI's inbox mod runs with `$.model.complete`. */
 export interface CcJob {
@@ -233,7 +233,12 @@ export class CcEngine {
   readonly memory: Memory;
   private items: InboxItem[] = [];
   private readonly receipts = new Set<string>();
-  private readonly turn = { running: false, since: 0, compactDue: false, endedAt: 0 };
+  /**
+   * `prompt`: the running turn's prompt. `stopped`: the prompt of a turn that ended unanswered (Stop, an error). Stopped
+   * before any answer, Claude Code takes that prompt out of the conversation and puts it back in the composer, where the
+   * next typed text would join it: it is cleared before the next typing.
+   */
+  private readonly turn = { running: false, since: 0, compactDue: false, endedAt: 0, prompt: "", stopped: "" };
   private readonly jobs = new Map<string, { job: CcJob; takenAt: number; fallbackFrom?: CompactorRunner; done: (r: CcJobResult) => void }>();
   private readonly listeners = new Set<(e: CcEvent) => void>();
   private readonly scan: ReturnType<typeof setInterval>;
@@ -710,6 +715,13 @@ export class CcEngine {
     }
     this.blockedSince = 0;
     this.lastWait = "";
+    if (this.turn.stopped) {
+      // A stopped prompt Claude Code put back in the composer (nothing there if the turn had answered: no harm).
+      const stopped = this.turn.stopped;
+      this.turn.stopped = "";
+      await d.clear(stopped).catch(() => {});
+      this.deliveryLog({ ev: "cleared", id: item.id });
+    }
     // A turn may have started while herdr was asked; a canceled item is gone.
     if (!this.idle() || item.state !== "queued" || !this.items.includes(item)) return;
     item.state = "delivering";
@@ -766,7 +778,7 @@ export class CcEngine {
         this.retryAt = 0;
         this.failures = 0;
         for (const j of this.jobs.values()) j.takenAt = 0;
-        Object.assign(this.turn, { running: false, compactDue: false });
+        Object.assign(this.turn, { running: false, compactDue: false, prompt: "", stopped: "" });
         this.emit({ type: "session", restarted: true });
         return ok({ inbox: this.items.length });
       }
@@ -785,6 +797,7 @@ export class CcEngine {
           // mod does not, and the engine's own running turn stands in.
           const into = typeof body.into === "boolean" ? body.into : wasRunning;
           Object.assign(this.turn, { running: true, since: wasRunning ? this.turn.since : now });
+          if (!into && body.typed) this.turn.prompt = afterView(String(body.text ?? ""));
           // The item the engine typed: its ack. Anything else the TUI submitted itself (typed in the terminal, or
           // Claude Code's own like a background task's notification) starts a turn of its own, unless it went into
           // the running turn: then that turn's one turn.complete ends it, so it starts none.
@@ -797,7 +810,7 @@ export class CcEngine {
           else if (body.typed) this.emit({ type: "started", id: null, text: String(body.text ?? ""), ...origin });
         } else {
           // Every turn ends with the trigger mod's compaction (stopped and failed ones too): the inbox waits for it.
-          Object.assign(this.turn, { running: false, endedAt: now, compactDue: true });
+          Object.assign(this.turn, { running: false, endedAt: now, compactDue: true, stopped: body.answered ? "" : this.turn.prompt, prompt: "" });
           const detail = typeof body.refusal?.explanation === "string" ? body.refusal.explanation : typeof body.error === "string" ? body.error : "";
           this.emit({
             type: "complete",
@@ -850,6 +863,17 @@ export class CcEngine {
             this.items = this.items.filter((i) => i !== item);
             this.saveInbox();
           }
+        }
+        // A turn stopped before any answer: Claude Code dropped its prompt, so the compaction did not carry it. Logged
+        // as sent (as pi logs a stopped run), it leaves the journal.
+        if (this.turn.stopped && !this.turn.running) {
+          for (const i of this.items.filter((i) => i.state === "submitted")) {
+            ids.push(this.memory.append("user", i.text, i.date, i.id).i);
+            this.receipts.add(i.id);
+            this.deliveryLog({ ev: "stopped", id: i.id });
+          }
+          this.items = this.items.filter((i) => i.state !== "submitted");
+          this.saveInbox();
         }
         this.turn.compactDue = false;
         // The turn is logged: room talk handed over during it goes in, and the profile is committed (turn.ts).

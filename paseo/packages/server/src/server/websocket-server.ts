@@ -2688,6 +2688,8 @@ export class VoiceAssistantWebSocketServer {
         pluginEvents: true,
         // COMPAT(chatImages): added in v0.11.2, remove gate after 2027-04-10.
         chatImages: true,
+        // COMPAT(imageUploads): added in v0.11.3, remove gate after 2027-05-20.
+        imageUploads: true,
         agentMessageProvenance: true,
         // COMPAT(stableProjectIdentity): added in v0.1.109, remove gate after 2027-01-15.
         stableProjectIdentity: true,

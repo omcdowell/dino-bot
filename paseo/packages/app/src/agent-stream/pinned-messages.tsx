@@ -4,8 +4,14 @@ import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import { UserMessage } from "@/components/message";
+import { usePendingSentFiles } from "@/chat-files/sent-files";
 import { Button } from "@/components/ui/button";
 import { getOutboxSender } from "@/composer/outbox/sender";
+import {
+  outboxUploadPercent,
+  useOutboxUploadProgress,
+  type OutboxUploadProgress,
+} from "@/composer/outbox/image-uploads";
 import { useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { useSessionStore, type SessionState } from "@/stores/session-store";
 import { useToast } from "@/contexts/toast-context";
@@ -169,7 +175,8 @@ const PinnedBubble = memo(function PinnedBubble({
   const canCancel = useSessionStore(
     (state) => state.sessions[serverId]?.serverInfo?.features?.agentMessageQueue === true,
   );
-  const meta = resolvePinnedMeta(message, isConnected, t);
+  const upload = useOutboxUploadProgress((state) => state[message.clientMessageId]);
+  const meta = resolvePinnedMeta(message, isConnected, t, upload);
   const messageKey = message.key;
   const handleToggle = useCallback(() => onToggle(messageKey), [messageKey, onToggle]);
   // Long-press / right-click open the same actions; opening (not toggling) is safe when one
@@ -230,11 +237,14 @@ const PinnedBubble = memo(function PinnedBubble({
         !message.record.everOnWire &&
         message.record.activeTurnBehavior === "queue"));
 
+  const pendingFiles = usePendingSentFiles(message.record);
+
   return (
     <View>
       <UserMessage
         message={message.text}
         images={message.record?.images}
+        files={pendingFiles}
         timestamp={message.createdAt}
         isFirstInGroup={isFirst}
         isLastInGroup={isLast}
@@ -283,15 +293,23 @@ const PinnedBubble = memo(function PinnedBubble({
   );
 });
 
-function resolvePinnedMeta(
+export function resolvePinnedMeta(
   message: PinnedMessage,
   isConnected: boolean,
   t: (key: string, options?: Record<string, unknown>) => string,
+  upload?: OutboxUploadProgress,
 ): string {
   const time = formatClock(message.createdAt);
   if (message.remote) return `${t("delivery.note.queuedOtherDevice")} · ${time}`;
   const record = message.record;
   if (record?.deletedTooLate) return t("delivery.note.deletedTooLate");
+  if (upload && message.state === "clock" && isConnected) {
+    return t("delivery.note.uploadingPhotos", {
+      index: upload.index,
+      count: upload.count,
+      percent: outboxUploadPercent(upload),
+    });
+  }
   if (message.state === "clock" && !isConnected) {
     return `${t("delivery.note.waitingOffline")} · ${time}`;
   }

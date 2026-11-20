@@ -585,3 +585,38 @@ test("a source registered after an agent's first lookup is discovered on its nex
   ]);
   expect(fetches).toBe(1);
 });
+
+test("a fallback source's card is listed only when the source it stands in for has none", async () => {
+  let signedIn = true;
+  const agents = {
+    hasAgent: (id: string) => id === "bot",
+    usageSession: () => ({ sessionKey: "s", provider: "optchat-cc", env: {} }),
+  };
+  const registry = new UsageSourceRegistry(Date.now, 300_000, { warn: () => {} }, agents);
+  // The sign-in source answers the host scope; a Claude Code session is not its provider.
+  registry.register({
+    ...source({ id: "claude" }),
+    discover: async (scope: { kind: string }) =>
+      signedIn && scope.kind === "global" ? [{ key: "account", input: { login: "pro" } }] : [],
+  });
+  registry.register({
+    ...source({
+      id: "optchat-cc",
+      discover: async () => [{ key: "bot", label: "bot", input: { bot: "bot" } }],
+    }),
+    fallbackFor: ["claude"],
+  });
+  // The agent's own list has only the Claude Code card: it stays.
+  expect((await registry.listReports({ agentId: "bot" })).map((entry) => entry.id)).toEqual([
+    "optchat-cc:bot",
+  ]);
+  // Signed in: the host list has one Claude card.
+  expect((await registry.listReports()).map((entry) => entry.id)).toEqual(["claude:account"]);
+  // A refresh by report id is answered as asked.
+  expect(
+    (await registry.listReports({ reportIds: ["optchat-cc:bot"] })).map((entry) => entry.id),
+  ).toEqual(["optchat-cc:bot"]);
+  // No sign-in: the Claude Code card shows.
+  signedIn = false;
+  expect((await registry.listReports()).map((entry) => entry.id)).toEqual(["optchat-cc:bot"]);
+});

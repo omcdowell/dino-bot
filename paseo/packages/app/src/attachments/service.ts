@@ -1,5 +1,6 @@
 import { collectRetainedAttachmentIds } from "@/attachments/gc-retention";
 import { getAttachmentStore } from "@/attachments/store";
+import { decodeImageBase64 } from "@/chat-images/image-hash";
 import type { AttachmentMetadata, SaveAttachmentInput } from "@/attachments/types";
 
 const activePersistence = new Set<Promise<AttachmentMetadata>>();
@@ -90,6 +91,13 @@ export async function persistAttachmentFromFileUri(input: {
     fileName: input.fileName,
     source: { kind: "file_uri", uri: input.uri },
   });
+}
+
+/** An attachment's bytes: a native read where the store has one, else decoded from base64. */
+export async function readAttachmentBytes(attachment: AttachmentMetadata): Promise<Uint8Array> {
+  const store = await getAttachmentStore();
+  if (store.readBytes) return await store.readBytes({ attachment });
+  return decodeImageBase64(await store.encodeBase64({ attachment }));
 }
 
 export async function encodeAttachmentsForSend(

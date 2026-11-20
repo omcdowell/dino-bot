@@ -1,4 +1,5 @@
 import { renderPromptAttachmentAsText } from "../prompt-attachments.js";
+import { extractUploadedFileBlocks } from "@getpaseo/protocol/uploaded-file-text";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type {
@@ -151,11 +152,11 @@ export function projectAgentMessage(item: AgentTimelineItem): AgentTimelineItem 
   if (!message) {
     // COMPAT(legacySystemEnvelope): added in v0.11.1; remove after 2027-04-08 once
     // legacy notification history is retired. Schedules still use this envelope.
-    return isSystemInjectedEnvelope(item.text) ? null : item;
+    return isSystemInjectedEnvelope(item.text) ? null : withSentFiles(item);
   }
   const { source } = message;
   if (!source) {
-    return { ...item, text: message.text, clientMessageId: message.id };
+    return withSentFiles({ ...item, text: message.text, clientMessageId: message.id });
   }
   return {
     type: "tool_call",
@@ -189,4 +190,17 @@ const SYSTEM_ENVELOPE_PATTERN = /^<paseo-system>\n[\s\S]*\n<\/paseo-system>$/;
 
 export function isSystemInjectedEnvelope(text: string): boolean {
   return SYSTEM_ENVELOPE_PATTERN.test(text);
+}
+
+/**
+ * A user message as the person sent it: the "Uploaded file" blocks a text-only provider logged
+ * (pi, a Claude Code bot; see prompt-attachments.ts) become `files`, so a chat rebuilt from
+ * provider history shows the same file chips as the live row.
+ */
+function withSentFiles(
+  item: Extract<AgentTimelineItem, { type: "user_message" }>,
+): Extract<AgentTimelineItem, { type: "user_message" }> {
+  const { text, files } = extractUploadedFileBlocks(item.text);
+  if (files.length === 0) return item;
+  return { ...item, text, files: [...(item.files ?? []), ...files] };
 }

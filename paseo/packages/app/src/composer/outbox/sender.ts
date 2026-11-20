@@ -1,7 +1,18 @@
-import type { ActiveTurnBehavior, AgentAttachment } from "@getpaseo/protocol/messages";
+import type {
+  ActiveTurnBehavior,
+  AgentAttachment,
+  ImageUploadRef,
+} from "@getpaseo/protocol/messages";
 import type { AttachmentMetadata } from "@/attachments/types";
 import { restoreOutboxRecordToComposer } from "@/composer/outbox/edit-handoff";
 import { generateMessageId } from "@/types/stream";
+import {
+  clearOutboxUploadProgress,
+  INLINE_IMAGES_MAX_BYTES,
+  InlineImagesTooLargeError,
+  inlineImagesByteSize,
+  setOutboxUploadProgress,
+} from "@/composer/outbox/image-uploads";
 import {
   addOutboxRecord,
   getOutboxRecord,
@@ -31,11 +42,22 @@ export interface OutboxSendClient {
       messageId: string;
       activeTurnBehavior?: ActiveTurnBehavior;
       images: Array<{ data: string; mimeType: string }>;
+      imageUploads?: ImageUploadRef[];
       attachments: AgentAttachment[];
       dictated?: boolean;
       onReceived?: () => void;
     },
   ) => Promise<{ disposition?: string } | void>;
+  /** Chunked binary upload (file.upload); photos go this way on hosts with imageUploads. */
+  uploadFile?: (input: {
+    fileName: string;
+    mimeType: string;
+    bytes: Uint8Array;
+    onProgress?: (sentBytes: number, totalBytes: number) => void;
+  }) => Promise<{
+    file: { id: string; fileName: string; mimeType: string } | null;
+    error: string | null;
+  }>;
   cancelAgentMessage?: (
     agentId: string,
     messageId: string,
@@ -49,6 +71,8 @@ export interface OutboxSendClient {
 export interface OutboxHostFeatures {
   messageReceivedAck: boolean;
   agentMessageQueue: boolean;
+  /** The daemon reads photos sent ahead with file.upload (send_agent_message imageUploads). */
+  imageUploads?: boolean;
 }
 
 export interface OutboxSenderHost {
@@ -60,6 +84,10 @@ export interface OutboxSenderHost {
   encodeImages: (
     images: AttachmentMetadata[],
   ) => Promise<Array<{ data: string; mimeType: string }> | undefined>;
+  /** A photo's bytes from the attachment store (native read, no base64 on the JS thread). */
+  readImageBytes?: (image: AttachmentMetadata) => Promise<Uint8Array>;
+  /** Called with each photo's bytes before it goes up (lists it as sent from this device). */
+  onImageBytes?: (image: AttachmentMetadata, bytes: Uint8Array) => Promise<unknown>;
   /**
    * Puts a message's text and images back into its agent's composer draft (Edit). Must throw
    * when they did not land: the message is deleted only after this resolves.
@@ -97,6 +125,16 @@ export function classifyOutboxSendError(error: unknown): OutboxSendErrorKind {
 export function outboxBackoffMs(attempts: number, random: () => number = Math.random): number {
   const base = Math.min(BACKOFF_BASE_MS * 2 ** Math.max(0, attempts - 1), BACKOFF_MAX_MS);
   return Math.round(base * (1 + (random() * 2 - 1) * BACKOFF_JITTER));
+}
+
+/** Shown on the failed bubble; the host is too old to take photos one by one. */
+export const INLINE_TOO_LARGE_MESSAGE =
+  "Too many photos for this host in one message. Update the host, or send fewer at a time.";
+
+function extensionFor(mimeType: string): string {
+  if (mimeType === "image/png") return ".png";
+  if (mimeType === "image/jpeg") return ".jpg";
+  return "";
 }
 
 const OPEN_STATES = new Set<OutboxRecord["state"]>(["outbox", "received", "queued"]);
@@ -249,11 +287,12 @@ export class OutboxSender {
         nextAttemptAt: record.state === "outbox" ? 0 : this.now() + SETTLE_RETRY_MS,
       });
       if (getOutboxRecord(id)?.state === "cancelling") return;
-      const images = (await this.host.encodeImages(record.images)) ?? [];
+      const photos = await this.preparePhotos(client, record);
+      if (photos === "cancelled") return;
       const result = await client.sendAgentMessage(record.agentId, record.text, {
         messageId: id,
         activeTurnBehavior: record.activeTurnBehavior,
-        images,
+        ...photos,
         attachments: record.attachments,
         ...(record.dictated ? { dictated: true } : {}),
         onReceived: () => {
@@ -275,9 +314,74 @@ export class OutboxSender {
     } catch (error) {
       await this.handleSendError(record, error);
     } finally {
+      clearOutboxUploadProgress(id);
       this.inFlight.delete(id);
       this.kick();
     }
+  }
+
+  /**
+   * The photos for one attempt. On a host with imageUploads each photo goes up on its own as a
+   * chunked file upload (the socket stays live and the UI keeps running between chunks), its
+   * upload id saved on the record so a retry sends only the rest; the message then names them.
+   * Older hosts get them inline, unless that frame could never fit through the daemon's socket.
+   */
+  private async preparePhotos(
+    client: OutboxSendClient,
+    record: OutboxRecord,
+  ): Promise<
+    | { images: Array<{ data: string; mimeType: string }>; imageUploads?: ImageUploadRef[] }
+    | "cancelled"
+  > {
+    if (record.images.length === 0) return { images: [] };
+    const readImageBytes = this.host.readImageBytes;
+    if (
+      !this.host.features(record.serverId).imageUploads ||
+      !client.uploadFile ||
+      !readImageBytes
+    ) {
+      // COMPAT(imageUploads): hosts before v0.11.3 take photos inline only; remove after 2027-05-20.
+      const byteSize = inlineImagesByteSize(record.images);
+      if (byteSize > INLINE_IMAGES_MAX_BYTES) throw new InlineImagesTooLargeError(byteSize);
+      return { images: (await this.host.encodeImages(record.images)) ?? [] };
+    }
+    const id = record.clientMessageId;
+    const refs: ImageUploadRef[] = [];
+    for (const [index, image] of record.images.entries()) {
+      const saved = getOutboxRecord(id);
+      if (!saved || saved.state === "cancelling") return "cancelled";
+      const done = saved.uploadedImages?.[image.id];
+      if (done) {
+        refs.push(done);
+        continue;
+      }
+      const bytes = await readImageBytes(image);
+      await this.host.onImageBytes?.(image, bytes);
+      const progress = { index: index + 1, count: record.images.length };
+      setOutboxUploadProgress(id, { ...progress, sentBytes: 0, totalBytes: bytes.byteLength });
+      // Called on the client: DaemonClient.uploadFile is a method and needs its `this`.
+      const response = await client.uploadFile({
+        fileName: image.fileName ?? `photo-${index + 1}${extensionFor(image.mimeType)}`,
+        mimeType: image.mimeType,
+        bytes,
+        onProgress: (sentBytes, totalBytes) =>
+          setOutboxUploadProgress(id, { ...progress, sentBytes, totalBytes }),
+      });
+      if (!response.file) throw new Error(response.error ?? "Photo upload failed");
+      const ref: ImageUploadRef = {
+        id: response.file.id,
+        fileName: response.file.fileName,
+        mimeType: response.file.mimeType,
+      };
+      refs.push(ref);
+      const latest = getOutboxRecord(id);
+      if (latest) {
+        await updateOutboxRecord(id, {
+          uploadedImages: { ...latest.uploadedImages, [image.id]: ref },
+        });
+      }
+    }
+    return { images: [], imageUploads: refs };
   }
 
   private async handleSendError(record: OutboxRecord, error: unknown): Promise<void> {
@@ -300,7 +404,7 @@ export class OutboxSender {
     }
     await updateOutboxRecord(id, {
       state: kind === "unknown" ? "unknown" : "failed",
-      lastError: message,
+      lastError: error instanceof InlineImagesTooLargeError ? INLINE_TOO_LARGE_MESSAGE : message,
     });
   }
 

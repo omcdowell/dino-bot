@@ -1519,6 +1519,63 @@ describe("stream reducer canonical tool calls", () => {
     expect(state[0]).toMatchObject({ kind: "user_message", images: [ref] });
   });
 
+  it("keeps the files a user message carried, even with no text (a reopened chat)", () => {
+    const file = {
+      fileName: "Q3 report.pdf",
+      mimeType: "application/pdf",
+      size: 48213,
+      path: "/srv/paseo/uploads/upload_1/Q3 report.pdf",
+    };
+    const state = reduceStreamUpdate(
+      [],
+      {
+        type: "timeline",
+        provider: "pi",
+        item: { type: "user_message", text: "", messageId: "m-file", files: [file] },
+      },
+      new Date("2025-01-01T11:10:01Z"),
+    );
+    expect(state).toHaveLength(1);
+    expect(state[0]).toMatchObject({ kind: "user_message", text: "", files: [file] });
+  });
+
+  it("the daemon's row brings its files onto the message sent from this device", () => {
+    const file = {
+      fileName: "Q3 report.pdf",
+      mimeType: "application/pdf",
+      size: 48213,
+      path: "/srv/paseo/uploads/upload_1/Q3 report.pdf",
+    };
+    const optimistic = createUserMessage({
+      clientMessageId: "file-client",
+      text: "read this",
+      timestamp: new Date("2026-08-15T10:00:00Z"),
+      attachments: [{ type: "uploaded_file", id: "upload_1", ...file }],
+    });
+    const result = applyStreamEvent({
+      tail: [optimistic],
+      head: [],
+      event: {
+        type: "timeline",
+        provider: "pi",
+        item: {
+          type: "user_message",
+          text: "read this",
+          clientMessageId: "file-client",
+          messageId: "provider-file",
+          files: [file],
+        },
+      },
+      timestamp: new Date("2026-08-15T10:00:01Z"),
+    });
+    expect(result.tail).toHaveLength(1);
+    expect(result.tail[0]).toMatchObject({
+      kind: "user_message",
+      messageId: "provider-file",
+      files: [file],
+    });
+  });
+
   it("carries tool result images onto the tool call row", () => {
     const ref = { id: "d".repeat(64), mimeType: "image/png", source: "/x/d.png" };
     const state = reduceStreamUpdate(

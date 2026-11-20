@@ -23,7 +23,7 @@ import { aliasesOnly, CC_EFFORTS, CcModels, effortOption, modelSource, withModel
 import { ccToolDetail } from "./tool-detail";
 import { parseTaskNotification, taskNotificationItem } from "./task-notification";
 import { CcUsageLedger } from "./usage";
-import { isBotTraffic } from "./deliver";
+import { afterView, isBotTraffic } from "./deliver";
 import { skillCommandText, skillPrompt, type CcSkill } from "./skills";
 import { addHidden, ccPersistence, hiddenOf, listCcSessions, rewindRange, shown, type Hidden } from "./sessions";
 import { OPTCHAT_COMMAND, optchatCommand, withProfileLock } from "./profile-tools";
@@ -107,9 +107,22 @@ export function promptText(content: readonly ProviderContent[], profileDir: stri
       mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
       writeFileSync(path, bytes, { mode: 0o600 });
       parts.push(`[image: ${path} (read the file to see it)]`);
-    } else if (typeof (c as { text?: unknown }).text === "string") parts.push((c as unknown as { text: string }).text); // a text attachment
+    } else if (c.type === "uploaded_file") parts.push(uploadedFileText(c)); // a video goes this way too: models cannot watch video
+    else if (typeof (c as { text?: unknown }).text === "string") parts.push((c as unknown as { text: string }).text); // a text attachment
   }
   return parts.join("\n").trim();
+}
+
+/**
+ * A file the person sent (saved on the host by the daemon), named for the bot as Paseo names it for pi
+ * (protocol uploaded-file-text.ts renderUploadedFileText; keep the lines the same): the daemon reads these
+ * lines back as the message's file chips, live and in a reopened chat. A video adds its length (the bot pulls
+ * frames itself); optional so an older @getpaseo/plugin block without `durationMs` still typechecks.
+ */
+export function uploadedFileText(f: { fileName: string; path: string; mimeType: string; size: number; durationMs?: number }): string {
+  const lines = [`Uploaded file: ${f.fileName}`, `Path: ${f.path}`, `MIME: ${f.mimeType}`, `Size: ${f.size} bytes`];
+  if (typeof f.durationMs === "number") lines.push(`Duration: ${Math.round(f.durationMs) / 1000} s`);
+  return lines.join("\n");
 }
 
 const IMAGE_LINE = / ?\n?\[image: (\/[^\n]*?) \(read the file to see it\)\]/g;
@@ -207,8 +220,6 @@ export function replayItems(entries: ReturnType<CcEngine["recent"]>): Array<{ ti
   }
   return out;
 }
-
-const afterView = (t: string) => (t.startsWith("<chat>") && t.includes("</chat>") ? t.slice(t.indexOf("</chat>") + 7).trim() : t);
 
 interface Session {
   id: string;

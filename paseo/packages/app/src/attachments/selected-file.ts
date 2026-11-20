@@ -5,6 +5,10 @@ import { readDesktopFileBase64 } from "@/desktop/attachments/desktop-preview-url
 export interface SelectedFile {
   fileName: string;
   mimeType: string;
+  /** Size in bytes when known before reading, so an oversized file is refused unread. */
+  size?: number;
+  /** A video's length from the picker; sent on the attachment so the bot can pull frames. */
+  durationMs?: number;
   readBytes(): Promise<Uint8Array>;
 }
 

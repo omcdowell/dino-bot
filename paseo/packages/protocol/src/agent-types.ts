@@ -337,6 +337,20 @@ export interface AgentTimelineImage {
   display?: { width: number; height: number; byteSize: number };
 }
 
+/**
+ * A file the user sent with a message (an uploaded_file attachment), by reference. The bytes stay
+ * on the daemon at `path`; clients read them again with the file read RPC when the user taps it.
+ */
+export interface AgentTimelineFile {
+  fileName: string;
+  mimeType: string;
+  size: number;
+  /** Daemon-local absolute path, readable with the file read RPC. */
+  path: string;
+  /** The upload id, when known (absent on rows rebuilt from a provider's history). */
+  id?: string;
+}
+
 interface ToolCallBase {
   agentMessage?: AgentMessage;
   [key: string]: unknown;
@@ -407,6 +421,8 @@ export type AgentTimelineItem =
       messageId?: string;
       clientMessageId?: string;
       images?: AgentTimelineImage[];
+      /** Files sent with the message (shown as chips; tap downloads again). */
+      files?: AgentTimelineFile[];
     }
   | { type: "assistant_message"; text: string; messageId?: string }
   | { type: "reasoning"; text: string }

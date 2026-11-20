@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Image, Platform, Pressable, Text, View, useWindowDimensions } from "react-native";
+import { Image, Platform, Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { ArrowDown } from "lucide-react-native";
@@ -15,12 +15,16 @@ import { useChatImageAutoDownload } from "./network-policy";
 import { loadChatImageOriginal } from "./original-loader";
 import { useChatImagePlaceholder } from "./placeholder";
 import { forgetSentChatImage, touchSentChatImage, useSentChatImage } from "./sent-images";
-import { chatImageFrameSize, formatImageBytes } from "./sizing";
+import { openChatImageActions } from "./image-actions";
+import { formatImageBytes } from "./sizing";
+import { useChatImageBox } from "./use-chat-image-box";
 
 /** Display images are ~100-250 KB; the cap only guards against a wrong path. */
 const MAX_DISPLAY_BYTES = 16 * 1024 * 1024;
 /** Small chunks so a download over a slow link shows progress (old daemons send 256 KB). */
 const DISPLAY_CHUNK_BYTES = 16 * 1024;
+/** Hold time that opens the image's actions (Save to Photos, Share). */
+const LONG_PRESS_MS = 400;
 
 type DisplayState =
   | { status: "idle" }
@@ -203,22 +207,27 @@ interface ChatImageProps {
   serverId?: string;
   client?: DaemonClient | null;
   accessibilityLabel: string;
+  /** Side of the chat the image sits on: "end" for the user's own images. */
+  align?: ChatImageAlign;
 }
 
+export type ChatImageAlign = "start" | "end";
+
 /**
- * A chat image by reference (chatImages), WhatsApp style: at the chat's width with the photo's
- * aspect ratio, blurred (ThumbHash) until its display image is here. On a good link the display
+ * A chat image by reference (chatImages), WhatsApp style: the whole photo at its aspect ratio in
+ * a box sized by `chatImageBox` (sizing.ts), blurred (ThumbHash) until its display image is here. On a good link the display
  * image downloads by itself; otherwise a tap downloads it, with progress. A tap on the shown image
  * opens it full screen and loads the original (or a JPEG of a HEIC where HEIC cannot be shown).
+ * A long-press on the shown image offers Save to Photos and Share (web: download).
  */
 export const ChatImage = memo(function ChatImage({
   image,
   serverId,
   client,
   accessibilityLabel,
+  align = "start",
 }: ChatImageProps) {
   const { t } = useTranslation();
-  const viewport = useWindowDimensions();
   // The copy this device sent shows at once; nothing to download for it.
   const local = useLocalCopy(image);
   const hasLocal = local.status !== "none";
@@ -233,12 +242,11 @@ export const ChatImage = memo(function ChatImage({
   });
   const [lightbox, setLightbox] = useState<ImageLightboxSource | null>(null);
 
-  const size = useMemo(() => chatImageFrameSize(image, viewport), [image, viewport]);
+  const { box, onLayout } = useChatImageBox(image);
   const frameStyle = useMemo(
-    () => [styles.frame, { aspectRatio: size.aspectRatio, maxWidth: size.maxWidth }],
-    [size],
+    () => [styles.frame, { width: box.width, height: box.height }],
+    [box.height, box.width],
   );
-  const knownSize = Boolean(image.width && image.height);
   const contentSize = useMemo(
     () => (image.width && image.height ? { width: image.width, height: image.height } : undefined),
     [image.height, image.width],
@@ -261,6 +269,9 @@ export const ChatImage = memo(function ChatImage({
     );
   }, [client, contentSize, hasLocal, image, start, state]);
   const handleClose = useCallback(() => setLightbox(null), []);
+  const handleLongPress = useCallback(() => {
+    if (state.status === "loaded") openChatImageActions({ uri: state.uri }, t);
+  }, [state, t]);
 
   const sizeLabel = formatImageBytes(placeholder.displayBytes ?? image.byteSize);
   const progress = state.status === "downloading" ? state.progress : null;
@@ -278,9 +289,11 @@ export const ChatImage = memo(function ChatImage({
   const onLocalError = local.status === "ready" ? local.onError : undefined;
 
   return (
-    <>
+    <View onLayout={onLayout} style={align === "end" ? styles.slotEnd : styles.slotStart}>
       <Pressable
         onPress={handlePress}
+        onLongPress={handleLongPress}
+        delayLongPress={LONG_PRESS_MS}
         accessibilityRole="button"
         accessibilityLabel={loaded ? accessibilityLabel : t("message.attachments.downloadImage")}
         style={frameStyle}
@@ -291,7 +304,7 @@ export const ChatImage = memo(function ChatImage({
           <Image
             source={placeholderSource}
             style={styles.fill}
-            resizeMode="cover"
+            resizeMode="contain"
             blurRadius={6}
             testID="chat-image-placeholder"
           />
@@ -300,7 +313,7 @@ export const ChatImage = memo(function ChatImage({
           <Image
             source={displaySource}
             style={styles.fill}
-            resizeMode={knownSize ? "cover" : "contain"}
+            resizeMode="contain"
             onError={onLocalError}
             testID="chat-image-display"
           />
@@ -335,7 +348,7 @@ export const ChatImage = memo(function ChatImage({
         ) : null}
       </Pressable>
       <AttachmentLightbox source={lightbox} onClose={handleClose} />
-    </>
+    </View>
   );
 });
 
@@ -343,6 +356,7 @@ interface LocalChatImageProps {
   metadata: AttachmentMetadata;
   onOpen: (metadata: AttachmentMetadata) => void;
   accessibilityLabel: string;
+  align?: ChatImageAlign;
 }
 
 /** An image this device sent and still has locally (before the daemon's reference arrives). */
@@ -350,8 +364,9 @@ export const LocalChatImage = memo(function LocalChatImage({
   metadata,
   onOpen,
   accessibilityLabel,
+  align = "start",
 }: LocalChatImageProps) {
-  const viewport = useWindowDimensions();
+  const { t } = useTranslation();
   const uri = useAttachmentPreviewUrl(metadata);
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   useEffect(() => {
@@ -368,29 +383,44 @@ export const LocalChatImage = memo(function LocalChatImage({
       disposed = true;
     };
   }, [uri]);
-  const size = useMemo(() => chatImageFrameSize(natural ?? {}, viewport), [natural, viewport]);
+  const { box, onLayout } = useChatImageBox(natural ?? {});
   const frameStyle = useMemo(
-    () => [styles.frame, { aspectRatio: size.aspectRatio, maxWidth: size.maxWidth }],
-    [size],
+    () => [styles.frame, { width: box.width, height: box.height }],
+    [box.height, box.width],
   );
   const handlePress = useCallback(() => onOpen(metadata), [metadata, onOpen]);
+  const handleLongPress = useCallback(() => {
+    if (uri) openChatImageActions({ uri, mimeType: metadata.mimeType }, t);
+  }, [metadata.mimeType, t, uri]);
   const source = useMemo(() => ({ uri: uri ?? "" }), [uri]);
   return (
-    <Pressable
-      onPress={handlePress}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      style={frameStyle}
-      testID="chat-image-local"
-    >
-      {uri ? <Image source={source} style={styles.fill} resizeMode="contain" /> : null}
-    </Pressable>
+    <View onLayout={onLayout} style={align === "end" ? styles.slotEnd : styles.slotStart}>
+      <Pressable
+        onPress={handlePress}
+        onLongPress={handleLongPress}
+        delayLongPress={LONG_PRESS_MS}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        style={frameStyle}
+        testID="chat-image-local"
+      >
+        {uri ? <Image source={source} style={styles.fill} resizeMode="contain" /> : null}
+      </Pressable>
+    </View>
   );
 });
 
 const styles = StyleSheet.create((theme) => ({
-  frame: {
+  /** Full-width slot: its measured width is the space the image may take. */
+  slotStart: {
     width: "100%",
+    alignItems: "flex-start",
+  },
+  slotEnd: {
+    width: "100%",
+    alignItems: "flex-end",
+  },
+  frame: {
     borderRadius: theme.borderRadius.xl,
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,

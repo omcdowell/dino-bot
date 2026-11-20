@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { appendFile, mkdir, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 
 import { FileTransferOpcode, type FileTransferFrame } from "@getpaseo/protocol/binary-frames/index";
 import { getErrorMessage } from "@getpaseo/protocol/error-utils";
 import type { FileUploadRequest, FileUploadResponse } from "../messages.js";
+import type { ImageUploadRef } from "@getpaseo/protocol/messages";
 
 interface FileUploadStoreOptions {
   paseoHome: string;
@@ -225,7 +226,7 @@ const MAX_FILE_NAME_BYTES = 255;
 
 // Keeps the client's file name, replacing only what cannot appear in a single
 // file name on Linux, macOS, or Windows.
-function sanitizeFileName(value: string): string {
+export function sanitizeFileName(value: string): string {
   const name = basename(value)
     .replace(/[\p{Cc}\\/:*?"<>|]/gu, "_")
     .trim();
@@ -242,4 +243,34 @@ function fitFileNameLength(name: string): string {
     stem += char;
   }
   return stem + keptExtension;
+}
+
+const UPLOAD_ID = /^upload_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Same cap as a file upload from the app (50 MB). */
+const MAX_IMAGE_UPLOAD_BYTES = 50 * 1024 * 1024;
+
+/**
+ * Photos the app sent ahead with file.upload (send_agent_message_request.imageUploads) as the
+ * inline images the agent gets. Only reads `<paseoHome>/uploads/<upload id>/<file name>`: the id
+ * must be one this store makes, and the name goes through the same sanitising as the upload.
+ */
+export async function readImageUploads(
+  paseoHome: string,
+  refs: readonly ImageUploadRef[] | undefined,
+): Promise<Array<{ data: string; mimeType: string }>> {
+  const images: Array<{ data: string; mimeType: string }> = [];
+  for (const ref of refs ?? []) {
+    if (!UPLOAD_ID.test(ref.id)) throw new Error(`Not an upload id: ${ref.id}`);
+    if (!ref.mimeType.toLowerCase().startsWith("image/")) {
+      throw new Error(`Not an image: ${ref.fileName} (${ref.mimeType})`);
+    }
+    const path = join(paseoHome, "uploads", ref.id, sanitizeFileName(ref.fileName));
+    const info = await stat(path).catch(() => null);
+    if (!info?.isFile())
+      throw new Error(`Uploaded photo is no longer on the host: ${ref.fileName}`);
+    if (info.size > MAX_IMAGE_UPLOAD_BYTES)
+      throw new Error(`Uploaded photo is too large: ${ref.fileName}`);
+    images.push({ data: (await readFile(path)).toString("base64"), mimeType: ref.mimeType });
+  }
+  return images;
 }

@@ -24,9 +24,16 @@
  */
 
 /** DinoBot's display version and iOS build: dinobot-version.js (the one place they live). */
-const { DINOBOT_VERSION, DINOBOT_IOS_BUILD, dinobotReleaseVersion } = require("./dinobot-version.js");
+const {
+  DINOBOT_VERSION,
+  DINOBOT_IOS_BUILD,
+  dinobotReleaseVersion,
+  dinobotReleaseRepo,
+} = require("./dinobot-version.js");
 /** The DinoBot release (lib/product.json): the desktop app's version. Null outside the DinoBot repo. */
 const DINOBOT_RELEASE_VERSION = dinobotReleaseVersion();
+/** The repo whose GitHub releases the desktop app checks for a newer version (lib/product.json). */
+const DINOBOT_RELEASE_REPO = dinobotReleaseRepo();
 
 /** Working name (27 Oct: "DinoBot"). The ONE place the public name lives. */
 const PUBLIC_APP_NAME = "DinoBot";
@@ -60,6 +67,8 @@ const FLAVOURS = {
     displayVersion: null,
     /** Desktop app version: null = package.json's, as today. */
     desktopVersion: null,
+    /** No new-release notice: the own desktop app keeps upstream's updater. */
+    releaseRepo: null,
     /** iOS build number: null = ship.sh's CURRENT_PROJECT_VERSION, as today. */
     iosBuildNumber: null,
     /** Apple developer team: PASEO_APPLE_TEAM_ID (not kept in the source). */
@@ -95,6 +104,8 @@ const FLAVOURS = {
      * (lib/product.json), not the iPhone's marketing version (dinobot-version.js).
      */
     desktopVersion: DINOBOT_RELEASE_VERSION,
+    /** The desktop app's new-release notice reads this repo's latest GitHub release. */
+    releaseRepo: DINOBOT_RELEASE_REPO,
     /** Apple developer team: PASEO_APPLE_TEAM_ID (not kept in the source). */
     appleTeamId: null,
     // Distribution signing is set up with the App Store profile at upload time, not here.
@@ -182,7 +193,8 @@ function resolveEas(flavour, pushTransport, env = process.env) {
  * else the flavour's display version (the iPhone's, dinobot-version.js). null = package.json's.
  */
 function resolveShownVersion(flavour, env = process.env) {
-  if (env.PASEO_WEB_PLATFORM === "electron" && flavour.desktopVersion) return flavour.desktopVersion;
+  if (env.PASEO_WEB_PLATFORM === "electron" && flavour.desktopVersion)
+    return flavour.desktopVersion;
   return flavour.displayVersion;
 }
 

@@ -47,6 +47,7 @@ import {
   type AgentSessionConfig,
   type SteerResult,
   type AgentStreamEvent,
+  type AgentTimelineFile,
   type AgentTimelineImage,
   type AgentTimelineItem,
   type AgentUsage,
@@ -124,6 +125,24 @@ function submittedPromptImages(prompt: AgentPromptInput): AgentTimelineImage[] {
         ? [{ data: block.data, mimeType: block.mimeType }]
         : [],
     ),
+  );
+}
+
+/** The files sent with a prompt (its uploaded_file attachments), for the user_message row. */
+function submittedPromptFiles(prompt: AgentPromptInput): AgentTimelineFile[] {
+  if (typeof prompt === "string") return [];
+  return prompt.flatMap((block) =>
+    block.type === "uploaded_file"
+      ? [
+          {
+            fileName: block.fileName,
+            mimeType: block.mimeType,
+            size: block.size,
+            path: block.path,
+            id: block.id,
+          },
+        ]
+      : [],
   );
 }
 
@@ -4893,12 +4912,14 @@ export class AgentManager {
     options?: { messageId?: string; providerMessageId?: string; turnId?: string },
   ): void {
     const images = submittedPromptImages(prompt);
+    const files = submittedPromptFiles(prompt);
     const item = projectAgentMessage({
       type: "user_message",
       text: submittedPromptText(prompt),
       clientMessageId,
       ...(options?.messageId ? { messageId: options.messageId } : {}),
       ...(images.length > 0 ? { images } : {}),
+      ...(files.length > 0 ? { files } : {}),
     });
     if (!item) return;
     const rejected = this.rejectedSubmissions.get(agent.id) ?? new Set<string>();

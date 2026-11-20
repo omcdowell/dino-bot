@@ -15,6 +15,7 @@ interface ZoomableImageProps {
   minScale?: number;
   onError?: () => void;
   onPressOutsideContent?: () => void;
+  onLongPressContent?: () => void;
   style?: StyleProp<ViewStyle>;
   testID?: string;
   wheelActivation?: "always" | "modifier";
@@ -30,6 +31,7 @@ export function ZoomableImage({
   minScale = 1,
   onError,
   onPressOutsideContent,
+  onLongPressContent,
   style,
   testID = "zoomable-image",
   wheelActivation = "always",
@@ -81,6 +83,7 @@ export function ZoomableImage({
       maxScale={maxScale}
       minScale={minScale}
       onPressOutsideContent={onPressOutsideContent}
+      onLongPressContent={onLongPressContent}
       style={style}
       testID={testID}
       wheelActivation={wheelActivation}

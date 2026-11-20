@@ -18,6 +18,7 @@ import { createUserMessage, generateMessageId, type UserMessageItem } from "@/ty
 import type { MessageSubmissionRejectionOutcome } from "@/composer/submission/model";
 import type { PickedImageAttachmentInput } from "@/hooks/image-attachment-picker";
 import { i18n } from "@/i18n/i18next";
+import { maxUploadBytesFor } from "@/hooks/media-attachment-picker";
 
 export interface QueuedComposerMessage {
   id: string;
@@ -128,28 +129,36 @@ export async function uploadFileAttachments(input: {
   files: SelectedFile[];
 }): Promise<Extract<ComposerAttachment, { kind: "file" }>[]> {
   const result: Extract<ComposerAttachment, { kind: "file" }>[] = [];
-  const prepared: Array<{ fileName: string; mimeType: string; bytes: Uint8Array }> = [];
+  const prepared: Array<{
+    upload: { fileName: string; mimeType: string; bytes: Uint8Array };
+    durationMs?: number;
+  }> = [];
 
   for (const file of input.files) {
-    const bytes = await file.readBytes();
-    if (bytes.byteLength > 50 * 1024 * 1024) {
-      throw new Error(
-        i18n.t("composer.errors.fileTooLarge", { size: "50MB", fileName: file.fileName }),
+    // Videos go up as files (bots get the path); they may be up to 200 MB, other files 50 MB.
+    const cap = maxUploadBytesFor(file.mimeType);
+    const tooLarge = () =>
+      new Error(
+        i18n.t("composer.errors.fileTooLarge", { size: cap.label, fileName: file.fileName }),
       );
-    }
+    if (typeof file.size === "number" && file.size > cap.bytes) throw tooLarge();
+    const bytes = await file.readBytes();
+    if (bytes.byteLength > cap.bytes) throw tooLarge();
     prepared.push({
-      fileName: file.fileName,
-      mimeType: file.mimeType,
-      bytes,
+      upload: { fileName: file.fileName, mimeType: file.mimeType, bytes },
+      ...(typeof file.durationMs === "number" ? { durationMs: file.durationMs } : {}),
     });
   }
 
-  for (const file of prepared) {
-    const response = await input.client.uploadFile(file);
+  for (const { upload, durationMs } of prepared) {
+    const response = await input.client.uploadFile(upload);
     if (response.error || !response.file) {
       throw new Error(response.error ?? "Upload failed.");
     }
-    result.push({ kind: "file", attachment: response.file });
+    // The video's length rides on the attachment, so the bot's prompt names it. Spread, so this
+    // also type-checks against protocol declarations built before the optional field existed.
+    const duration = durationMs === undefined ? {} : { durationMs };
+    result.push({ kind: "file", attachment: { ...response.file, ...duration } });
   }
 
   return result;

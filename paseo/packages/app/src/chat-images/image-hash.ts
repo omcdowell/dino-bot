@@ -49,3 +49,8 @@ export function decodeImageBase64(data: string): Uint8Array {
 export async function chatImageIdForBase64(data: string): Promise<string> {
   return toHex(await sha256Digest(decodeImageBase64(data)));
 }
+
+/** The daemon's id for an image sent as these bytes (file upload). */
+export async function chatImageIdForBytes(bytes: Uint8Array): Promise<string> {
+  return toHex(await sha256Digest(bytes));
+}

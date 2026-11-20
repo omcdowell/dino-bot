@@ -4,6 +4,8 @@ import { installOutboxSender, type OutboxSendClient } from "@/composer/outbox/se
 import { hydrateOutbox } from "@/stores/outbox-store";
 import { useSessionStore } from "@/stores/session-store";
 import { encodeImages } from "@/utils/encode-images";
+import { readAttachmentBytes } from "@/attachments/service";
+import { rememberSentChatImageBytes } from "@/chat-images/sent-images";
 
 /**
  * Starts the outbox sender for the app: loads saved messages and sends them whenever a host is
@@ -19,6 +21,7 @@ export function startOutboxRuntime(store: HostRuntimeStore): () => void {
       return {
         messageReceivedAck: features?.messageReceivedAck === true,
         agentMessageQueue: features?.agentMessageQueue === true,
+        imageUploads: features?.imageUploads === true,
       };
     },
     daemonHolds: (serverId, agentId, messageId) =>
@@ -27,6 +30,8 @@ export function startOutboxRuntime(store: HostRuntimeStore): () => void {
         .sessions[serverId]?.agents.get(agentId)
         ?.messageQueue?.items.some((item) => item.messageId === messageId) === true,
     encodeImages,
+    readImageBytes: readAttachmentBytes,
+    onImageBytes: rememberSentChatImageBytes,
   });
   void hydrateOutbox().then(() => {
     sender.kick();

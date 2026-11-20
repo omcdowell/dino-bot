@@ -80,6 +80,11 @@ export interface UsageSourceRegistration {
   label: string;
   icon?: string;
   input: ZodType;
+  /**
+   * Source ids this source stands in for: the host's usage list leaves this source's cards out
+   * when it already has a card from one of them (the same account, read from a better source).
+   */
+  fallbackFor?: string[];
   /** Accounts for this scope only. The same key in any scope identifies the same account. */
   discover(scope: UsageScope): Promise<UsageAccount[]>;
   /** Re-reads the login store; never writes it. */

@@ -658,6 +658,14 @@ export const AgentTimelineImageSchema = z.object({
     .optional(),
 });
 
+export const AgentTimelineFileSchema = z.object({
+  fileName: z.string(),
+  mimeType: z.string(),
+  size: z.number().int().nonnegative(),
+  path: z.string(),
+  id: z.string().optional(),
+});
+
 const ToolCallBasePayloadSchema = z.object({
   agentMessage: AgentMessageSchema.optional(),
   type: z.literal("tool_call"),
@@ -705,6 +713,7 @@ export const AgentTimelineItemPayloadSchema: z.ZodType<AgentTimelineItem, unknow
     messageId: z.string().optional(),
     clientMessageId: z.string().optional(),
     images: z.array(AgentTimelineImageSchema).optional(),
+    files: z.array(AgentTimelineFileSchema).optional(),
   }),
   z.object({
     type: z.literal("assistant_message"),
@@ -1213,6 +1222,9 @@ export const UploadedFileAttachmentSchema = z.object({
   mimeType: z.string(),
   size: z.number().int().nonnegative(),
   path: z.string(),
+  // A video's length from the app's picker, so a bot can pull frames (models cannot watch video).
+  // Optional: older apps do not send it and older daemons drop it.
+  durationMs: z.number().nonnegative().optional(),
 });
 
 export const AgentAttachmentSchema = z.discriminatedUnion("type", [
@@ -1252,6 +1264,14 @@ const ImageAttachmentSchema = z.object({
   data: z.string(), // base64 encoded image
   mimeType: z.string(), // e.g., "image/jpeg", "image/png"
 });
+
+/** A photo sent ahead with file.upload: the id and file name from its file.upload.response. */
+export const ImageUploadRefSchema = z.object({
+  id: z.string(),
+  fileName: z.string(),
+  mimeType: z.string(),
+});
+export type ImageUploadRef = z.infer<typeof ImageUploadRefSchema>;
 
 // "queue" holds the message in the daemon until the agent is idle. Gate it on
 // server_info.features.agentMessageQueue: older daemons reject the value.
@@ -1433,6 +1453,12 @@ export const SendAgentMessageRequestSchema = z.object({
   messageId: z.string().optional(), // Client-provided ID for deduplication
   activeTurnBehavior: ActiveTurnBehaviorSchema.optional(),
   images: z.array(ImageAttachmentSchema).optional(),
+  /**
+   * Photos already sent with file.upload (chunked binary frames), by upload id. The daemon reads
+   * them back and gives them to the agent as images, after any inline `images`. Only with
+   * server_info.features.imageUploads; older daemons drop the field.
+   */
+  imageUploads: z.array(ImageUploadRefSchema).optional(),
   attachments: AgentAttachmentsSchema,
   /**
    * The text (or part of it) came from dictation. The daemon starts the agent's text with a short
@@ -3975,6 +4001,9 @@ export const ServerInfoStatusPayloadSchema = z
         dictationResume: z.boolean().optional(),
         // COMPAT(chatImages): added in v0.11.2, remove gate after 2027-04-10.
         chatImages: z.boolean().optional(),
+        // COMPAT(imageUploads): added in v0.11.3, remove gate after 2027-05-20. The daemon reads
+        // send_agent_message_request.imageUploads (photos sent ahead with file.upload).
+        imageUploads: z.boolean().optional(),
         agentMessageProvenance: z.boolean().optional(),
         // COMPAT(agentTurnIdentity): accept peers that observed pre-release v0.2.6 through 2027-01-31.
         agentTurnIdentity: z.boolean().optional(),

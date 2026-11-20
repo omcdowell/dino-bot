@@ -618,6 +618,7 @@ export class PluginService {
           id: source.id,
           label: source.label,
           icon: source.icon,
+          fallbackFor: source.fallbackFor,
           discover: async (scope) => {
             const result = await this.runtime.discoverUsage(pluginId, source.id, scope);
             if (!Array.isArray(result))

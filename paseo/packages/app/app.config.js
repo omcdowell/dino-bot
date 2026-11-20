@@ -44,8 +44,9 @@ const buildProfile = isFdroidBuild
         [
           "expo-camera",
           {
+            // Also used by the composer's "Take photo" (expo-image-picker launchCameraAsync).
             cameraPermission:
-              "Allow $(PRODUCT_NAME) to access your camera to scan pairing QR codes.",
+              "Allow $(PRODUCT_NAME) to access your camera to scan pairing QR codes and to take photos to send in chat.",
           },
         ],
       ],
@@ -189,6 +190,9 @@ export default {
       supportsTablet: flavour.supportsTablet,
       infoPlist: {
         NSMicrophoneUsageDescription: "This app needs access to the microphone for voice commands.",
+        // Long-press a chat image > Save to Photos (expo-media-library, add-only access).
+        NSPhotoLibraryAddUsageDescription:
+          "Allow $(PRODUCT_NAME) to save images from your chats to your photo library.",
         // Dictation (and realtime voice) keep capturing and streaming to the daemon while the
         // screen is locked or the app is in the background (20 Oct). The audio session is
         // only active while capturing or playing, so this does not keep the app alive otherwise.

@@ -98,14 +98,15 @@ export default function SetupModelsScreen() {
   // No models (no sign-in the bots can use): to the sign-in screen, never a dead end (SR1 fix 1).
   const signIn = useCallback(() => {
     if (fromSettings) router.push(`${stepRoute("signin", serverId)}&from=settings` as Href);
-    else router.replace(stepRoute("signin", serverId) as Href);
+    else router.replace(`${stepRoute("signin", serverId)}&pick=1` as Href);
   }, [router, serverId, fromSettings]);
 
   // Back goes to the sign-in step when it is behind this one (to add an account), else on.
   const back = useCallback(() => {
     if (fromSettings) return void next();
     const prev = previousStep(RELEASE_POLICY.onboardingSteps, "models");
-    if (prev && serverId) router.replace(stepRoute(prev, serverId) as Href);
+    // pick=1: the sign-in list itself, even when the computer is signed in (it skips itself on first run).
+    if (prev && serverId) router.replace(`${stepRoute(prev, serverId)}${prev === "signin" ? "&pick=1" : ""}` as Href);
     else void next();
   }, [router, serverId, next, fromSettings]);
 

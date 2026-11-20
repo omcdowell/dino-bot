@@ -1106,6 +1106,73 @@ describe("file upload preparation", () => {
     await expect(upload).resolves.toEqual([{ kind: "file", attachment: file }]);
   });
 
+  it("lets a video up to 200 MB through, refuses a bigger one unread, and keeps 50 MB for other files", async () => {
+    const MB = 1024 * 1024;
+    const uploaded: string[] = [];
+    const client: ComposerSendClient = {
+      sendAgentMessage: async () => {},
+      uploadFile: async (file) => {
+        uploaded.push(file.fileName);
+        return {
+          requestId: "r",
+          file: {
+            type: "uploaded_file",
+            id: "u",
+            fileName: file.fileName,
+            mimeType: file.mimeType,
+            size: file.bytes.byteLength,
+            path: `/uploads/${file.fileName}`,
+          },
+          error: null,
+        };
+      },
+    };
+    const bytesOf = (size: number) => async () => ({ byteLength: size }) as Uint8Array;
+
+    await expect(
+      uploadFileAttachments({
+        client,
+        files: [
+          {
+            fileName: "clip.mov",
+            mimeType: "video/quicktime",
+            durationMs: 12_480,
+            readBytes: bytesOf(150 * MB),
+          },
+        ],
+      }),
+    ).resolves.toEqual([
+      {
+        kind: "file",
+        attachment: expect.objectContaining({
+          fileName: "clip.mov",
+          path: "/uploads/clip.mov",
+          durationMs: 12_480,
+        }),
+      },
+    ]);
+    expect(uploaded).toEqual(["clip.mov"]);
+
+    const readBig = vi.fn(bytesOf(201 * MB));
+    await expect(
+      uploadFileAttachments({
+        client,
+        files: [
+          { fileName: "long.mp4", mimeType: "video/mp4", size: 201 * MB, readBytes: readBig },
+        ],
+      }),
+    ).rejects.toThrow("long.mp4 is too large (max 200 MB)");
+    expect(readBig).not.toHaveBeenCalled();
+
+    await expect(
+      uploadFileAttachments({
+        client,
+        files: [{ fileName: "big.zip", mimeType: "application/zip", readBytes: bytesOf(60 * MB) }],
+      }),
+    ).rejects.toThrow("big.zip is too large (max 50MB)");
+    expect(uploaded).toEqual(["clip.mov"]);
+  });
+
   it.each(["unreadable", "oversized"])(
     "does not upload a batch containing a later %s file",
     async (failure) => {

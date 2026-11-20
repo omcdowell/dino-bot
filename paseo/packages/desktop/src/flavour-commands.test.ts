@@ -35,4 +35,33 @@ describe("flavour command guards", () => {
     expect(next.install_app_update!()).toMatchObject({ installed: false });
     expect(next.desktop_daemon_status).toBe(handlers.desktop_daemon_status);
   });
+
+  it("public flavour with a release repo: check_release_notice asks the release checker", async () => {
+    const notice = { latestVersion: "0.2.0" };
+    const next = applyFlavourToCommandHandlers(
+      handlers,
+      publicDesktopFlavour("DinoBot", "dinobot", "0.1.15", "example-owner/example-repo"),
+      () => "0.11.2",
+      async () => notice,
+    );
+    expect(await next.check_release_notice!()).toBe(notice);
+    // The upstream updater stays off whatever the release notice does.
+    expect(next.check_app_update!()).toMatchObject({ hasUpdate: false });
+  });
+
+  it("no release repo (own flavour, or a build outside the DinoBot repo): no release check", () => {
+    const check = async () => ({});
+    expect(
+      applyFlavourToCommandHandlers(handlers, OWN_DESKTOP_FLAVOUR, () => "1.0.0", check)
+        .check_release_notice,
+    ).toBeUndefined();
+    expect(
+      applyFlavourToCommandHandlers(
+        handlers,
+        publicDesktopFlavour("DinoBot", "dinobot", "0.1.15"),
+        () => "0.11.2",
+        check,
+      ).check_release_notice,
+    ).toBeUndefined();
+  });
 });

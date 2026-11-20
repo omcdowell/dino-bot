@@ -579,6 +579,8 @@ export interface SendMessageOptions {
   /** What happens when the agent is mid-turn. The daemon interrupts the turn when omitted. */
   activeTurnBehavior?: ActiveTurnBehavior;
   images?: Array<{ data: string; mimeType: string }>;
+  /** Photos already sent with uploadFile (daemon feature imageUploads); the agent gets them as images. */
+  imageUploads?: SendAgentMessageRequest["imageUploads"];
   attachments?: SendAgentMessageRequest["attachments"];
   /** The text came (in whole or part) from dictation; the daemon marks it for the agent. */
   dictated?: boolean;
@@ -715,8 +717,17 @@ export interface FileUploadInput {
   modifiedAt?: string;
   requestId?: string;
   chunkSize?: number;
+  /** Bytes handed to the socket so far, after each chunk. */
+  onProgress?: (sentBytes: number, totalBytes: number) => void;
 }
 export type FileUploadResult = FileUploadResponse["payload"];
+
+/** Only sent when there are uploads, so older daemons never see the field. */
+function imageUploadsField(
+  options: SendMessageOptions | undefined,
+): Pick<SendAgentMessageRequest, "imageUploads"> {
+  return options?.imageUploads?.length ? { imageUploads: options.imageUploads } : {};
+}
 type FileDownloadTokenPayload = FileDownloadTokenResponse["payload"];
 type ListProviderFeaturesPayload = ListProviderFeaturesResponseMessage["payload"];
 type ListProviderModelsPayload = ListProviderModelsResponseMessage["payload"];
@@ -4183,6 +4194,7 @@ export class DaemonClient {
       ...(messageId ? { messageId } : {}),
       ...(options?.activeTurnBehavior ? { activeTurnBehavior: options.activeTurnBehavior } : {}),
       ...(options?.images ? { images: options.images } : {}),
+      ...imageUploadsField(options),
       ...(options?.attachments ? { attachments: options.attachments } : {}),
       ...(options?.dictated ? { dictated: true } : {}),
     });
@@ -5796,13 +5808,15 @@ export class DaemonClient {
         if (this.transport !== uploadTransport || this.connectionState.status !== "connected") {
           throw new DaemonConnectionError("Connection changed during file upload");
         }
+        const end = Math.min(offset + chunkSize, bytes.byteLength);
         this.sendBinaryFrame(
           encodeFileTransferFrame({
             opcode: FileTransferOpcode.FileChunk,
             requestId: resolvedRequestId,
-            payload: bytes.subarray(offset, Math.min(offset + chunkSize, bytes.byteLength)),
+            payload: bytes.subarray(offset, end),
           }),
         );
+        input.onProgress?.(end, bytes.byteLength);
       }
 
       this.sendBinaryFrame(

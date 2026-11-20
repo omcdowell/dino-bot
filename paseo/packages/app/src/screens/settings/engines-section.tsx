@@ -13,6 +13,7 @@ import {
   claudeCodeInstallRoute,
   claudeCodeSignInRoute,
   claudeCodeState,
+  claudeCodeViaProxy,
   claudeCodeSummary,
   ENGINES_RPC,
   isEnginesUnsupportedError,
@@ -521,7 +522,11 @@ function ClaudeCodeCardView({
             </View>
           </View>
           <View style={[settingsStyles.row, settingsStyles.rowBorder, styles.actionsRow]}>
-            {state === "logged-in" ? (
+            {state === "logged-in" && claudeCodeViaProxy(card) ? (
+              <Text style={styles.blurb} testID="engine-claude-proxy">
+                Your proxy holds the login. Change it on your computer.
+              </Text>
+            ) : state === "logged-in" ? (
               <Button
                 variant="ghost"
                 size="sm"

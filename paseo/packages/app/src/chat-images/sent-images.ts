@@ -4,7 +4,7 @@ import { create } from "zustand";
 import { z } from "zod";
 import type { AttachmentMetadata } from "@/attachments/types";
 import { getSentChatImagesMaxBytes } from "@/runtime/replica-cache/budget";
-import { chatImageIdForBase64 } from "./image-hash";
+import { chatImageIdForBase64, chatImageIdForBytes } from "./image-hash";
 
 /**
  * Photos this device sent, by the daemon's image id (sha256 of the bytes, hashed here before the
@@ -146,13 +146,29 @@ export function rememberSentChatImage(
   attachment: AttachmentMetadata,
   data: string,
 ): Promise<string | null> {
+  return remember(attachment, Math.floor((data.length * 3) / 4), () => chatImageIdForBase64(data));
+}
+
+/** Same, for a photo sent as a file upload: hashes the bytes themselves. */
+export function rememberSentChatImageBytes(
+  attachment: AttachmentMetadata,
+  bytes: Uint8Array,
+): Promise<string | null> {
+  return remember(attachment, bytes.byteLength, () => chatImageIdForBytes(bytes));
+}
+
+function remember(
+  attachment: AttachmentMetadata,
+  fallbackByteSize: number,
+  hash: () => Promise<string>,
+): Promise<string | null> {
   const known = hashed.get(attachment.id);
   if (known) return known;
   const run = (async () => {
     try {
-      const imageId = await chatImageIdForBase64(data);
+      const imageId = await hash();
       await hydrateSentChatImages();
-      const byteSize = attachment.byteSize ?? Math.floor((data.length * 3) / 4);
+      const byteSize = attachment.byteSize ?? fallbackByteSize;
       const entry: SentChatImage = { imageId, attachment, byteSize, usedAt: Date.now() };
       const byImageId = evictOverBudget({
         ...useSentChatImagesStore.getState().byImageId,

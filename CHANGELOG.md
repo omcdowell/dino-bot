@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.1.16
+
+### Chat
+
+- The attach menu takes videos from your library (uploaded to your computer as files, up to
+  200 MB) and Take photo (camera). The bot gets a video's saved path, type and duration, so it
+  can pull frames; a Claude Code bot gets an uploaded file's path.
+- Files you send show as chips (icon, name, size) and stay on your message, also when the chat is
+  read back from the bot's history; tap a chip to download the file again. Long names are
+  shortened so the extension shows.
+- Images in the chat (yours, tool images and images in replies) show whole in a box sized to the
+  image instead of being cropped. Long-press one, or use the full-screen view, to save it to
+  Photos or share it.
+
+### Desktop
+
+- The desktop app checks the public release at most every 6 hours and shows "New version
+  available" with a download for this computer; dismissed per version.
+- On macOS, `dinobot update` says when the installed desktop app is older than the new release,
+  with the release page link.
+
+### Fixed
+
+- Many large photos no longer freeze the app or loop on "Reconnecting": photos are scaled down,
+  uploaded one by one ahead of the message (with progress) and a retry sends only the rest. An
+  older host gets photos inline as before, and a message too big for it fails at once with a note
+  to update the host.
+- A computer whose bots already work (its own Claude login or a proxy that holds it) is not asked
+  to sign in again after pairing again; Settings shows "Your proxy holds the login" for a proxy.
+- Claude Code bots: a stopped message that Claude Code put back in its input box is cleared before
+  the next one, so the two are no longer sent as one; a step's text stays whole before the tool
+  call that follows it.
+- Usage shows one Claude card per computer: the Claude Code card stands in for the Claude sign-in
+  card.
+
 ## v0.1.15
 
 ### Pi and Claude Code only

@@ -39,7 +39,7 @@ const ClaudeCodeSchema = z.object({
   modsReady: z.boolean(),
   loggedIn: z.boolean(),
   authMethod: z.string().nullable(),
-  /** "Max plan", "Pro plan", "API key", … */
+  /** "Max plan", "Pro plan", "API key", "Through your proxy" (authMethod "proxy": no login of its own; the owner's proxy holds it), … */
   plan: z.string().nullable(),
   /** e.g. a Team/Enterprise login, where OptChat cannot run. */
   warning: z.string().nullable(),

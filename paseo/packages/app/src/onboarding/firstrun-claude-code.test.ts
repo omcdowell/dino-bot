@@ -8,7 +8,9 @@ import {
   firstRunClaudeCode,
   orderPiOptions,
   signedInWithClaudeCode,
+  signInGate,
 } from "./firstrun-claude-code";
+import { claudeCodeViaProxy } from "./engines-model";
 
 const card = (over: Partial<ClaudeCodeCard> = {}): ClaudeCodeCard => ({
   installed: true,
@@ -211,5 +213,67 @@ describe("Install Claude Code steps", () => {
       "failed",
       "todo",
     ]);
+  });
+});
+
+describe("signInGate: the sign-in step after pairing (SR2: asked to log in when already logged in)", () => {
+  const pi = (signedIn: string[]) => ({ available: true, signedIn });
+  const gate = (over: Partial<Parameters<typeof signInGate>[0]> = {}) =>
+    signInGate({
+      firstRun: true,
+      pick: false,
+      shown: false,
+      sessionActive: false,
+      loadError: false,
+      options: pi([]),
+      claudeCode: firstRunClaudeCode({ unsupported: false, card: card() }),
+      claudeCodeChecked: true,
+      ...over,
+    });
+  const cc = (over: Partial<ClaudeCodeCard>) => firstRunClaudeCode({ unsupported: false, card: card(over) });
+
+  it("Claude Code logged in (its own login): the step is done, skipped", () => {
+    expect(gate({ claudeCode: cc({ loggedIn: true, authMethod: "claude.ai", plan: "Max plan" }) })).toBe("skip");
+  });
+
+  it("API key only (pi has a ready Anthropic API key; Claude Code logged out): skipped", () => {
+    expect(gate({ options: pi(["Anthropic API key"]) })).toBe("skip");
+    // Claude Code on an API key of its own counts too.
+    expect(gate({ claudeCode: cc({ loggedIn: true, authMethod: "api_key", plan: "API key" }) })).toBe("skip");
+  });
+
+  it("proxy base URL (Claude Code through the owner's proxy; pi's placeholder key): skipped, shown as logged in", () => {
+    const viaProxy = cc({ loggedIn: true, authMethod: "proxy", plan: "Through your proxy" });
+    expect(viaProxy).toEqual({ kind: "logged-in", status: "Logged in · Through your proxy" });
+    expect(claudeCodeCardPressable(viaProxy)).toBe(false); // no "Choose" → no fresh login
+    expect(claudeCodeViaProxy({ loggedIn: true, authMethod: "proxy" })).toBe(true);
+    expect(claudeCodeViaProxy({ loggedIn: true, authMethod: "claude.ai" })).toBe(false);
+    expect(gate({ claudeCode: viaProxy })).toBe("skip");
+    expect(gate({ options: pi(["Anthropic through your proxy"]) })).toBe("skip");
+  });
+
+  it("nothing signed in (a real first-time user): the list, as before", () => {
+    expect(gate()).toBe("show");
+    expect(gate({ claudeCode: cc({ installed: false, version: null }) })).toBe("show");
+  });
+
+  it("waits for both answers before deciding; a failed engines.status does not hold it", () => {
+    expect(gate({ options: null })).toBe("wait");
+    const checking = firstRunClaudeCode({ unsupported: false, card: null });
+    expect(gate({ claudeCode: checking, claudeCodeChecked: false })).toBe("wait");
+    expect(gate({ claudeCode: checking, claudeCodeChecked: true })).toBe("show");
+    // pi already signed in: no need to wait for Claude Code.
+    expect(gate({ options: pi(["ChatGPT (Codex)"]), claudeCode: checking, claudeCodeChecked: false })).toBe("skip");
+    expect(gate({ claudeCode: firstRunClaudeCode({ unsupported: true, card: null }) })).toBe("show");
+  });
+
+  it("never skips from Settings, a named sign-in, Back from Choose models (pick), a sign-in going, once shown, or a load error", () => {
+    const signedIn = { options: pi(["Anthropic API key"]) };
+    expect(gate({ ...signedIn, firstRun: false })).toBe("show");
+    expect(gate({ ...signedIn, pick: true })).toBe("show");
+    expect(gate({ ...signedIn, sessionActive: true })).toBe("show");
+    expect(gate({ ...signedIn, shown: true })).toBe("show");
+    expect(gate({ ...signedIn, loadError: true })).toBe("show");
+    expect(gate({ options: { available: false, signedIn: [] } })).toBe("show");
   });
 });

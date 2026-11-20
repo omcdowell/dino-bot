@@ -123,4 +123,8 @@ describe("cc usage cards: the report", () => {
     assert.equal(source.id, "optchat-cc");
     assert.equal(source.label, "Claude");
   });
+
+  it("stands in for the Claude sign-in card: a host list with that card leaves this one out", () => {
+    assert.deepEqual(source.fallbackFor, ["claude"]);
+  });
 });

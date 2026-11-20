@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { humanizeName, pluginName, providerOverrides } from "../lib/provider-overrides.mjs";
-import { PhoneSignIn, signedInLabels } from "../lib/phone-signin.mjs";
+import { ANTHROPIC_PROXY_LABEL, PhoneSignIn, proxyPlaceholderKey, signedInLabels } from "../lib/phone-signin.mjs";
 import { defaultOption, signInOptions } from "../lib/signin.mjs";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -138,6 +138,19 @@ describe("sign-in list wording", () => {
     const auth = { "openai-codex": { type: "oauth" }, anthropic: { type: "oauth" }, openai: { type: "api_key" }, "some-new-provider": { type: "oauth" } };
     assert.deepEqual(signedInLabels(list, Object.keys(auth), auth), ["ChatGPT (Codex)", "Claude login (your plan, via Acme Relay)", "OpenAI API key", "some-new-provider"]);
     assert.deepEqual(signedInLabels(list, ["anthropic"], { anthropic: { type: "api_key" } }), ["Anthropic API key"]);
+  });
+
+  it("an Anthropic 'API key' that is a proxy's placeholder (no sk-ant- key) is named as the proxy, not as an API key (SR2)", async () => {
+    const L = fakeLayout();
+    const list = await signInOptions(L.app, {}, { overrides: [] });
+    const label = (key) => signedInLabels(list, ["anthropic"], { anthropic: { type: "api_key", key } })[0];
+    assert.equal(label("dummy"), ANTHROPIC_PROXY_LABEL);
+    assert.equal(label("proxy-placeholder-0123456789"), ANTHROPIC_PROXY_LABEL);
+    assert.equal(label("sk-ant-api03-ZZZZZZZZZZZZZZZZZZZZZZZZ91c0"), "Anthropic API key");
+    assert.equal(label("ANTHROPIC_API_KEY"), "Anthropic API key"); // an env variable may hold a real key
+    assert.equal(label("!op read secret"), "Anthropic API key");
+    assert.equal(proxyPlaceholderKey("openrouter", { type: "api_key", key: "dummy" }), false); // Anthropic only
+    assert.equal(proxyPlaceholderKey("anthropic", { type: "oauth" }), false);
   });
 
   const botsDir = process.env.DINOBOT_TEST_BOTS_DIR;
