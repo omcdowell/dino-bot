@@ -792,6 +792,30 @@ class DaemonClientSession {
       );
     return { settled: () => settled, error: () => error };
   }
+
+  /** Uploads a file of `size` bytes with uploadFile; settles like the client call. */
+  uploadFile(size: number): { settled: () => boolean; error: () => unknown } {
+    let settled = false;
+    let error: unknown = null;
+    this.client
+      .uploadFile({
+        fileName: "photo.jpg",
+        mimeType: "image/jpeg",
+        bytes: new Uint8Array(size),
+        requestId: "req-photo-upload",
+      })
+      .then(
+        () => {
+          settled = true;
+          return undefined;
+        },
+        (reason: unknown) => {
+          settled = true;
+          error = reason;
+        },
+      );
+    return { settled: () => settled, error: () => error };
+  }
 }
 
 function fakeHeartbeatClock(): void {
@@ -2348,6 +2372,28 @@ test("a photo draining on a slow uplink holds pings back without tearing the soc
   session.daemonGoesSilent();
   await session.advance(25_000);
   expect(session.teardownCount()).toBe(1);
+});
+
+test("a photo upload on a slow uplink waits the drain allowance before timing out", async () => {
+  fakeHeartbeatClock();
+  const session = new DaemonClientSession();
+  await session.connect();
+  // The host answers nothing while the photo's bytes are still coming through (40 kbit/s:
+  // an 800 KB photo needs about 164 s).
+  session.daemonGoesSilent();
+  const photoBytes = 800 * 1024;
+  const upload = session.uploadFile(photoBytes);
+
+  // Past the plain 60 s request timeout: the upload is still waiting, so the outbox does not
+  // resend the photo from byte 0.
+  await session.advance(170_000);
+  expect(session.state()).toEqual({ status: "connected" });
+  expect(upload.settled()).toBe(false);
+
+  // A host that never answers still fails the upload once the allowance is spent.
+  await session.advance(60_000 + uplinkDrainAllowanceMs(photoBytes));
+  expect(upload.settled()).toBe(true);
+  expect(upload.error()).toBeInstanceOf(Error);
 });
 
 test("uplink drain allowance: none for small frames, ~16 kbit/s for large ones, capped", () => {

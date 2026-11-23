@@ -57,6 +57,8 @@ describe("client activity tracking", () => {
       messageQueueLimit: null,
     });
     await client.connect();
+    // Attention events reach only clients that subscribe to them, as the app does.
+    await client.observeEvents(["agent_attention_required"], { notifications: true }).ready;
     return client;
   }
 

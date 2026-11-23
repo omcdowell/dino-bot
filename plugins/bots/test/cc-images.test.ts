@@ -10,7 +10,7 @@ import { after, describe, it } from "node:test";
 import type { ProviderEvent } from "@getpaseo/plugin/server/provider";
 import { CcHost } from "../server/cc/engine";
 import { createCcProvider, IMAGE_NOT_KEPT, piImageText, promptText } from "../server/cc/provider";
-import { userText } from "pi-optchat/src/run-log.ts";
+import { userText } from "pi-optchat/api";
 // @ts-expect-error plain JS mods, loaded by Claude Code
 import { register as registerView } from "../claude-code/view/hooks/register.js";
 

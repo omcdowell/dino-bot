@@ -28,15 +28,16 @@
     "@resvg/resvg-js": "^2.6.2"
   },
   "devDependencies": {
-    "@getpaseo/plugin": "0.11.1",
+    "@getpaseo/plugin": "file:../../paseo/packages/plugin",
+    "@getpaseo/protocol": "file:../../paseo/packages/protocol",
     "@tanstack/react-query": "^5.90.11",
     "@types/node": "^24.0.0",
     "@types/react": "~19.2.0",
+    "pi-optchat": "file:../../optchat",
     "react": "19.1.0",
     "react-native": "0.81.5",
     "tsx": "^4.20.0",
     "typescript": "^5.9.3",
-    "zod": "^4.4.3",
-    "pi-optchat": "file:../../optchat"
+    "zod": "^4.4.3"
   }
 }

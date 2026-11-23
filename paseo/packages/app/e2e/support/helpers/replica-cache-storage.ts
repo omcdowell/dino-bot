@@ -1,7 +1,11 @@
 import { expect, type Page } from "@playwright/test";
 
 const DATABASE_NAME = "paseo-replica-row-store";
+// Must match DATABASE_VERSION in src/runtime/replica-cache/row-store.web.ts: opening at an older
+// version throws VersionError. Version 2 added INDEX_STORE_NAME, which the app reads on a cold start.
+const DATABASE_VERSION = 2;
 const STORE_NAME = "rows";
+const INDEX_STORE_NAME = "row_index";
 const SINGLETON_ID = "singleton";
 
 type ReplicaRowKind = "agent" | "workspace" | "project" | "timeline" | "checkpoint";
@@ -58,10 +62,11 @@ declare global {
 
 async function readRows(input: {
   databaseName: string;
+  databaseVersion: number;
   storeName: string;
 }): Promise<ReplicaRowRecord[]> {
   const database = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(input.databaseName, 1);
+    const request = indexedDB.open(input.databaseName, input.databaseVersion);
     request.addEventListener("success", () => resolve(request.result));
     request.addEventListener("error", () => reject(request.error));
   });
@@ -111,6 +116,7 @@ function assembleCache(rows: ReplicaRowRecord[]): ReplicaCacheRecord {
 export async function readReplicaCache(page: Page): Promise<ReplicaCacheRecord | null> {
   const rows = await page.evaluate(readRows, {
     databaseName: DATABASE_NAME,
+    databaseVersion: DATABASE_VERSION,
     storeName: STORE_NAME,
   });
   return rows.length > 0 ? assembleCache(rows) : null;
@@ -183,23 +189,36 @@ export async function writeReplicaCache(page: Page, value: ReplicaCacheRecord): 
     }
   }
   await page.evaluate(
-    async ({ databaseName, storeName, nextRows }) => {
+    async ({ databaseName, databaseVersion, storeName, indexStoreName, nextRows }) => {
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
-        const request = indexedDB.open(databaseName, 1);
+        const request = indexedDB.open(databaseName, databaseVersion);
         request.addEventListener("success", () => resolve(request.result));
         request.addEventListener("error", () => reject(request.error));
       });
       await new Promise<void>((resolve, reject) => {
-        const transaction = database.transaction(storeName, "readwrite");
+        const transaction = database.transaction([storeName, indexStoreName], "readwrite");
         const store = transaction.objectStore(storeName);
+        const index = transaction.objectStore(indexStoreName);
         store.clear();
-        for (const row of nextRows) store.put(row);
+        index.clear();
+        const encoder = new TextEncoder();
+        for (const row of nextRows) {
+          store.put(row);
+          const { serverId, kind, id, payload } = row;
+          index.put({ serverId, kind, id, bytes: encoder.encode(payload).length, touchedAt: 0 });
+        }
         transaction.addEventListener("complete", () => resolve());
         transaction.addEventListener("error", () => reject(transaction.error));
         transaction.addEventListener("abort", () => reject(transaction.error));
       });
     },
-    { databaseName: DATABASE_NAME, storeName: STORE_NAME, nextRows: rows },
+    {
+      databaseName: DATABASE_NAME,
+      databaseVersion: DATABASE_VERSION,
+      storeName: STORE_NAME,
+      indexStoreName: INDEX_STORE_NAME,
+      nextRows: rows,
+    },
   );
 }
 
@@ -258,6 +277,7 @@ export async function observeReplicaCacheStorageWrites(page: Page): Promise<void
 export async function resetReplicaCacheStorageWriteObserver(page: Page): Promise<void> {
   const rows = await page.evaluate(readRows, {
     databaseName: DATABASE_NAME,
+    databaseVersion: DATABASE_VERSION,
     storeName: STORE_NAME,
   });
   const lastValues = Object.fromEntries(

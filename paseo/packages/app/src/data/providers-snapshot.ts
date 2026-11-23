@@ -9,7 +9,7 @@ import {
 import { queryClient as singletonQueryClient } from "./query-client";
 import { replaceProviderSnapshotIcons } from "@/data/provider-icons";
 import { agentCommandsQueryRoot } from "@/hooks/agent-commands-query";
-import type { AgentProvider } from "@getpaseo/protocol/agent-types";
+import type { AgentProvider, ProviderSnapshotEntry } from "@getpaseo/protocol/agent-types";
 import { normalizeWorkspacePath } from "@/utils/workspace-identity";
 
 export const PROVIDERS_SNAPSHOT_QUERY_ROOT = "providersSnapshot";
@@ -27,6 +27,30 @@ export function providersSnapshotQueryKey(serverId: string | null, cwd?: string 
   return normalizedCwd
     ? ([PROVIDERS_SNAPSHOT_QUERY_ROOT, serverId, "cwd", normalizedCwd] as const)
     : ([PROVIDERS_SNAPSHOT_QUERY_ROOT, serverId, "home"] as const);
+}
+
+/**
+ * The provider list kept on the device (provider-snapshot-cache.ts), shown while no live snapshot
+ * has loaded: offline, and on a cold start before the host answers (DI1 G4: the model chip read
+ * "Select model" offline). A workspace scope never seen on this device falls back to the home one.
+ * A separate key, so invalidating the live snapshots never touches it.
+ */
+export function providersDeviceSnapshotQueryKey(serverId: string | null, cwd?: string | null) {
+  return ["providersDeviceSnapshot", serverId, normalizeProvidersSnapshotCwd(cwd)] as const;
+}
+
+export async function readDeviceProvidersSnapshot(input: {
+  serverId: string;
+  cwd: string | null;
+  cache?: Pick<ProviderSnapshotCache, "read">;
+}): Promise<ProviderSnapshotEntry[] | null> {
+  const cache = input.cache ?? providerSnapshotCache;
+  const cached =
+    (await cache.read(input.serverId, input.cwd)) ??
+    (input.cwd === null ? null : await cache.read(input.serverId, null));
+  if (!cached) return null;
+  replaceProviderSnapshotIcons(input.serverId, cached.entries);
+  return cached.entries;
 }
 
 export function providersSnapshotRequestOptions(input: {

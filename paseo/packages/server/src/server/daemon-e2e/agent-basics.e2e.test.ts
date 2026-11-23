@@ -29,6 +29,8 @@ describe("daemon E2E", () => {
       cwd: "/tmp",
       title: "Test Agent",
     });
+    // Agent stream events reach only clients subscribed to the agent's timeline.
+    await ctx.client.subscribeAgentTimeline(agent.id, () => {}).ready;
 
     expect(agent.id).toBeTruthy();
     expect(agent.provider).toBe("codex");

@@ -1,0 +1,270 @@
+// DinoBot folders (paseo/ has its own .oxlintrc.json). Correctness rules only, so a finding is a likely bug.
+// build/merge-checks.mjs runs this on a merge's changed files and fails only on findings in added lines.
+// The no-restricted-imports overrides hold the bots import boundaries. Later overrides replace the rule for
+// the files they match, so each one repeats the patterns that still apply.
+{
+  "$schema": "./paseo/node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "typescript",
+    "unicorn",
+    "oxc"
+  ],
+  "categories": {
+    "correctness": "error"
+  },
+  "ignorePatterns": [
+    "paseo/**",
+    "**/node_modules/**",
+    "**/dist/**"
+  ],
+  "rules": {
+    "no-control-regex": "off",
+    "no-useless-escape": "off",
+    "unicorn/prefer-string-starts-ends-with": "off",
+    "unicorn/no-useless-spread": "off",
+    "unicorn/no-useless-fallback-in-spread": "off",
+    "no-unused-vars": [
+      "error",
+      {
+        "args": "none",
+        "caughtErrors": "none",
+        "varsIgnorePattern": "^_"
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "plugins/bots/**"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "pi-optchat/src/**",
+                  "**/optchat/src/**"
+                ],
+                "message": "Bots imports optchat only through its package root or `pi-optchat/api`, never optchat/src/ (18 Nov: an optchat type import reached pi's type graph and the plugin failed to load)."
+              },
+              {
+                "group": [
+                  "@getpaseo/*/src/**",
+                  "@getpaseo/*/dist/**",
+                  "@getpaseo/client/internal/**",
+                  "**/paseo/packages/**"
+                ],
+                "message": "Bots uses Paseo packages only through their declared exports (plugin SDK, client, protocol), never their src/, dist/ or internal/ files."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "plugins/bots/test/**",
+        "plugins/bots/scripts/**"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "pi-optchat/src/**",
+                  "**/optchat/src/**"
+                ],
+                "message": "Bots imports optchat only through its package root or `pi-optchat/api`, never optchat/src/ (18 Nov: an optchat type import reached pi's type graph and the plugin failed to load)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "plugins/bots/index.server.ts",
+        "plugins/bots/index.client.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "pi-optchat/src/**",
+                  "**/optchat/src/**"
+                ],
+                "message": "Bots imports optchat only through its package root or `pi-optchat/api`, never optchat/src/ (18 Nov: an optchat type import reached pi's type graph and the plugin failed to load)."
+              },
+              {
+                "group": [
+                  "@getpaseo/*/src/**",
+                  "@getpaseo/*/dist/**",
+                  "@getpaseo/client/internal/**",
+                  "**/paseo/packages/**"
+                ],
+                "message": "Bots uses Paseo packages only through their declared exports (plugin SDK, client, protocol), never their src/, dist/ or internal/ files."
+              },
+              {
+                "group": [
+                  "./**",
+                  "!./client",
+                  "!./client/**",
+                  "!./server",
+                  "!./server/**",
+                  "!./shared",
+                  "!./shared/**"
+                ],
+                "message": "Plugin modules belong in client/, server/ or shared/: Paseo's plugin compiler refuses anything else and the whole bots plugin fails to load (18 Nov, bot-dm/ import)."
+              },
+              {
+                "group": [
+                  "../**",
+                  "!../client",
+                  "!../client/**",
+                  "!../server",
+                  "!../server/**",
+                  "!../shared",
+                  "!../shared/**"
+                ],
+                "message": "Plugin modules belong in client/, server/ or shared/: Paseo's plugin compiler refuses anything else and the whole bots plugin fails to load (18 Nov, bot-dm/ import)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "plugins/bots/{client,server,shared}/*.{ts,tsx}"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "pi-optchat/src/**",
+                  "**/optchat/src/**"
+                ],
+                "message": "Bots imports optchat only through its package root or `pi-optchat/api`, never optchat/src/ (18 Nov: an optchat type import reached pi's type graph and the plugin failed to load)."
+              },
+              {
+                "group": [
+                  "@getpaseo/*/src/**",
+                  "@getpaseo/*/dist/**",
+                  "@getpaseo/client/internal/**",
+                  "**/paseo/packages/**"
+                ],
+                "message": "Bots uses Paseo packages only through their declared exports (plugin SDK, client, protocol), never their src/, dist/ or internal/ files."
+              },
+              {
+                "group": [
+                  "../**",
+                  "!../client",
+                  "!../client/**",
+                  "!../server",
+                  "!../server/**",
+                  "!../shared",
+                  "!../shared/**"
+                ],
+                "message": "Plugin modules belong in client/, server/ or shared/: Paseo's plugin compiler refuses anything else and the whole bots plugin fails to load (18 Nov, bot-dm/ import)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "plugins/bots/{client,server,shared}/*/*.{ts,tsx}"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "pi-optchat/src/**",
+                  "**/optchat/src/**"
+                ],
+                "message": "Bots imports optchat only through its package root or `pi-optchat/api`, never optchat/src/ (18 Nov: an optchat type import reached pi's type graph and the plugin failed to load)."
+              },
+              {
+                "group": [
+                  "@getpaseo/*/src/**",
+                  "@getpaseo/*/dist/**",
+                  "@getpaseo/client/internal/**",
+                  "**/paseo/packages/**"
+                ],
+                "message": "Bots uses Paseo packages only through their declared exports (plugin SDK, client, protocol), never their src/, dist/ or internal/ files."
+              },
+              {
+                "group": [
+                  "../../**",
+                  "!../../client",
+                  "!../../client/**",
+                  "!../../server",
+                  "!../../server/**",
+                  "!../../shared",
+                  "!../../shared/**"
+                ],
+                "message": "Plugin modules belong in client/, server/ or shared/: Paseo's plugin compiler refuses anything else and the whole bots plugin fails to load (18 Nov, bot-dm/ import)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "plugins/bots/{client,server,shared}/*/*/*.{ts,tsx}"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "pi-optchat/src/**",
+                  "**/optchat/src/**"
+                ],
+                "message": "Bots imports optchat only through its package root or `pi-optchat/api`, never optchat/src/ (18 Nov: an optchat type import reached pi's type graph and the plugin failed to load)."
+              },
+              {
+                "group": [
+                  "@getpaseo/*/src/**",
+                  "@getpaseo/*/dist/**",
+                  "@getpaseo/client/internal/**",
+                  "**/paseo/packages/**"
+                ],
+                "message": "Bots uses Paseo packages only through their declared exports (plugin SDK, client, protocol), never their src/, dist/ or internal/ files."
+              },
+              {
+                "group": [
+                  "../../../**",
+                  "!../../../client",
+                  "!../../../client/**",
+                  "!../../../server",
+                  "!../../../server/**",
+                  "!../../../shared",
+                  "!../../../shared/**"
+                ],
+                "message": "Plugin modules belong in client/, server/ or shared/: Paseo's plugin compiler refuses anything else and the whole bots plugin fails to load (18 Nov, bot-dm/ import)."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

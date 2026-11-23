@@ -129,6 +129,13 @@ function toQueryState(query: {
   return { data: query.data, error: query.error, isFetching: query.isFetching };
 }
 
+/**
+ * A host's own report list is kept on the device (`meta.persist`, data/persisted-queries.ts), so
+ * its last reports show offline and on a cold start, each with its "Updated … ago" time (DI1 G4).
+ * Agent reports are not kept: they are dropped as soon as their details close.
+ */
+const HOST_REPORTS_META = { persist: true } as const;
+
 /** Usage reports for one host, as shown on its settings page. */
 export function useHostUsage(serverId: string): { view: UsageView; refresh: () => void } {
   const queryClient = useQueryClient();
@@ -138,6 +145,7 @@ export function useHostUsage(serverId: string): { view: UsageView; refresh: () =
     queryKey: usageReportsQueryKey(serverId),
     queryFn: () => listReports(queryClient, serverId),
     enabled: isConnected && isSupported,
+    meta: HOST_REPORTS_META,
     dataShape: "list",
     staleTimeMs: REPORTS_STALE_TIME_MS,
   });
@@ -157,14 +165,16 @@ export function useHostUsage(serverId: string): { view: UsageView; refresh: () =
 const NO_REPORTS: UsageReportEntry[] = [];
 
 /**
- * The reports of the sidebar's usage host, which is connected and reports usage; none until they
- * load, or without a host.
+ * The reports of the sidebar's usage host; none until they load, or without a host. A host that is
+ * not connected is not asked: its reports kept on the device show instead.
  */
 export function useUsageHostReports(serverId: string | null): UsageReportEntry[] {
   const queryClient = useQueryClient();
+  const isConnected = useHostRuntimeIsConnected(serverId ?? "");
   const query = useFetchQuery({
     queryKey: usageReportsQueryKey(serverId ?? ""),
-    queryFn: serverId ? () => listReports(queryClient, serverId) : skipToken,
+    queryFn: serverId && isConnected ? () => listReports(queryClient, serverId) : skipToken,
+    meta: HOST_REPORTS_META,
     dataShape: "list",
     staleTimeMs: REPORTS_STALE_TIME_MS,
   });

@@ -11,7 +11,10 @@ export const DMS_SUMMARY_KEY = [...DMS_KEY, "summary"] as const;
 export const dmsThreadsKey = (botId: string) => [...DMS_KEY, "threads", botId] as const;
 export const dmsThreadKey = (botId: string, ref: string) => [...DMS_KEY, "thread", botId, ref] as const;
 
-/** Poll intervals (report 07: summary every 30–60 s, the open thread every 10 s). */
+/**
+ * Poll intervals (report 07: summary every 30–60 s, the open thread every 10 s), used only when the
+ * host cannot push: otherwise DMs arrive as the `dms` push kind (client/push.ts) and nothing polls.
+ */
 export const SUMMARY_POLL_MS = 30_000;
 export const THREADS_POLL_MS = 30_000;
 export const THREAD_POLL_MS = 10_000;

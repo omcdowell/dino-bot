@@ -86,19 +86,79 @@ export interface StreamUserRow {
   timestamp: number;
 }
 
+/** How far the app has the agent's timeline: the daemon's timeline epoch and the newest seq loaded. */
+export interface LoadedTimelineEnd {
+  epoch: string;
+  endSeq: number;
+}
+
+/**
+ * Taken messages whose canonical row the app's timeline has reached, by the row's position.
+ *
+ * When the daemon takes a message it says where the agent's row for it is (found by the
+ * message's client message ID: `record.row`). Once the loaded timeline reaches that seq, the
+ * row is either loaded (and matched by ID) or above the loaded page: the app came back after
+ * more than a page of rows and the catch-up jumped to the latest tail
+ * (`viewed-timeline-sync.ts`, fallbackToLatestTailOnOverflow), or a cold start loaded only the
+ * tail. Either way the message is in the chat's history and leaves the pinned list; before
+ * this, its bubble stayed pinned under every later reply, as if sent last (build 18).
+ *
+ * A different epoch means the daemon rebuilt the timeline after it took the message (a restart
+ * replays the agent's history): the row is in that history, or comes with its ID when the agent
+ * runs the message, so the bubble goes too.
+ */
+export function takenRecordsReachedByTimeline(
+  records: readonly OutboxRecord[],
+  loaded: LoadedTimelineEnd | null | undefined,
+  alreadyInStream: ReadonlySet<string> = new Set(),
+): string[] {
+  if (!loaded) return [];
+  return records
+    .filter(
+      (record) =>
+        record.state === "taken" &&
+        record.row !== undefined &&
+        !alreadyInStream.has(record.clientMessageId) &&
+        (record.row.epoch !== loaded.epoch || record.row.seq <= loaded.endSeq),
+    )
+    .map((record) => record.clientMessageId);
+}
+
+/** Taken messages the daemon gave no row position for (`record.row`): older daemons. */
+export function takenRecordsWithoutRow(records: readonly OutboxRecord[]): OutboxRecord[] {
+  return records.filter((record) => record.state === "taken" && record.row === undefined);
+}
+
+// COMPAT(msgRowPosition): the two rules below are for taken messages from daemons that do not
+// send the row position (send_agent_message_response.row, added after v0.1.16) and whose
+// history rows lack client message IDs. Remove after 2027-03-01.
+
 /** Phone and daemon clocks may disagree; a row this much older than the send still counts. */
 export const TAKEN_TEXT_MATCH_SKEW_MS = 10 * 60 * 1000;
 
 /**
- * Taken messages whose canonical row is in the stream but lost its client message ID.
- *
- * A daemon restart rebuilds the timeline from the provider's own history, which does not keep
- * client message IDs, so a message the agent took just before the restart comes back as a
- * plain user row. Without this the taken bubble stayed pinned under the chat (blue ticks,
- * no actions) until the outbox dropped it a day later. Only taken messages are matched: the
- * daemon has confirmed the agent has them, so their canonical row exists, and settling one
- * against the wrong identical row only hides a bubble for a delivered message.
- *
+ * Taken messages (no row position) whose canonical row is older than the loaded stream, by
+ * time: a taken message sent before every loaded row has its row above the loaded page.
+ * `oldestLoadedRowAt` is NaN when nothing is loaded: then nothing is settled.
+ */
+export function takenRecordsOlderThanStream(
+  records: readonly OutboxRecord[],
+  oldestLoadedRowAt: number,
+  alreadyInStream: ReadonlySet<string> = new Set(),
+): string[] {
+  if (!Number.isFinite(oldestLoadedRowAt)) return [];
+  return takenRecordsWithoutRow(records)
+    .filter(
+      (record) =>
+        !alreadyInStream.has(record.clientMessageId) &&
+        (record.sentAt ?? record.createdAt) < oldestLoadedRowAt,
+    )
+    .map((record) => record.clientMessageId);
+}
+
+/**
+ * Taken messages (no row position) whose canonical row is in the stream without its client
+ * message ID: an older daemon rebuilt the timeline from history that did not keep the IDs.
  * Each row settles at most one message; newer messages take newer rows. Rows that carry a
  * client message ID belong to that send and are never used here.
  */
@@ -107,8 +167,8 @@ export function matchTakenRecordsByText(
   rows: readonly StreamUserRow[],
   alreadyInStream: ReadonlySet<string> = new Set(),
 ): string[] {
-  const taken = records
-    .filter((record) => record.state === "taken" && !alreadyInStream.has(record.clientMessageId))
+  const taken = takenRecordsWithoutRow(records)
+    .filter((record) => !alreadyInStream.has(record.clientMessageId))
     .sort((a, b) => b.createdAt - a.createdAt);
   if (taken.length === 0) return [];
   const used = new Set<number>();

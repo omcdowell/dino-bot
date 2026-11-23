@@ -2540,7 +2540,7 @@ export class Session {
           entries: this.pluginRuntime.getLogs(msg.pluginId),
         },
       });
-      return undefined;
+      return Promise.resolve();
     }
     if (msg.type === "plugin.reload.request") {
       if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
@@ -2587,7 +2587,7 @@ export class Session {
           plugins: pluginCatalogForClient(this.pluginRuntime?.catalog() ?? [], msg.knownBundles),
         },
       });
-      return undefined;
+      return Promise.resolve();
     }
     if (msg.type === "plugin.rpc.invoke.request") {
       if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
@@ -2723,7 +2723,7 @@ export class Session {
         return this.handleShutdownServerRequest(msg.requestId);
       case "client_heartbeat":
         this.handleClientHeartbeat(msg);
-        return undefined;
+        return Promise.resolve();
       case "ping": {
         const now = Date.now();
         this.emit({
@@ -2735,7 +2735,7 @@ export class Session {
             serverSentAt: now,
           },
         });
-        return undefined;
+        return Promise.resolve();
       }
       default:
         return undefined;
@@ -2835,7 +2835,7 @@ export class Session {
           source,
         );
         this.refreshObservationProducers();
-        if (!msg.events.includes("checkout_status_update")) return undefined;
+        if (!msg.events.includes("checkout_status_update")) return Promise.resolve();
         return this.reconcileWorkspaceGitObservers().catch(async (error) => {
           await owner.release();
           throw error;
@@ -2851,7 +2851,7 @@ export class Session {
           },
           source,
         );
-        return undefined;
+        return Promise.resolve();
       }
       case "agent.fork_context.request":
         return this.handleAgentForkContextRequest(msg);
@@ -2951,14 +2951,14 @@ export class Session {
           type: "get_daemon_config_response",
           payload: { requestId: msg.requestId, config: this.daemonConfigStore.get() },
         });
-        return undefined;
+        return Promise.resolve();
       case "daemon.get_status.request":
         return this.daemonSession.handleGetStatusRequest(msg);
       case "daemon.get_pairing_offer.request":
         return this.daemonSession.handleGetPairingOfferRequest(msg);
       case "daemon.config.reload.request":
         this.daemonSession.handleConfigReloadRequest(msg);
-        return undefined;
+        return Promise.resolve();
       case "hub.management.daemon.connect.request":
       case "hub.management.daemon.get_status.request":
       case "hub.management.daemon.disconnect.request":
@@ -2976,7 +2976,7 @@ export class Session {
             config: this.daemonConfigStore.patch(msg.config),
           },
         });
-        return undefined;
+        return Promise.resolve();
       case "read_project_config_request":
         return this.projectConfigSession.handleReadProjectConfigRequest(msg);
       case "write_project_config_request":
@@ -3151,7 +3151,7 @@ export class Session {
         return this.workspaceFilesSession.handleFileDownloadTokenRequest(msg);
       case "file.upload.request":
         this.workspaceFilesSession.handleFileUploadRequest(msg, this.delivery);
-        return undefined;
+        return Promise.resolve();
       default:
         return undefined;
     }
@@ -3263,7 +3263,29 @@ export class Session {
           payload: { requestId: msg.requestId },
         });
         return;
+      default:
+        this.replyUnimplemented(msg);
     }
+  }
+
+  /**
+   * Every dispatcher above returns a promise for a message it handled (Promise.resolve() for a
+   * synchronous handler), so reaching here means no handler: answer instead of letting the client
+   * wait for its timeout.
+   */
+  private replyUnimplemented(msg: SessionInboundMessage): void {
+    const requestId = sessionRequestId(msg);
+    this.sessionLogger.warn({ messageType: msg.type, requestId }, "agent.session.unimplemented");
+    if (!requestId) return;
+    this.emit({
+      type: "rpc_error",
+      payload: {
+        requestId,
+        requestType: msg.type,
+        error: `Unimplemented: ${msg.type}`,
+        code: "unimplemented",
+      },
+    });
   }
 
   public resetPeakInflight(): void {
@@ -8736,6 +8758,20 @@ export class Session {
     }
   }
 
+  /**
+   * Where the agent's row for a sent message is, found by its id: the app settles its sent bubble
+   * against it even when the row is not in the part of the chat it has loaded. None while queued.
+   */
+  private submittedRowField(
+    agentId: string,
+    messageId: string | undefined,
+    disposition: string | undefined,
+  ): { row?: { epoch: string; seq: number } } {
+    if (!messageId || disposition === "queued") return {};
+    const row = this.agentManager.getSubmittedMessageRow(agentId, messageId);
+    return row ? { row } : {};
+  }
+
   private async handleSendAgentMessageRequest(
     msg: Extract<SessionInboundMessage, { type: "send_agent_message_request" }>,
   ): Promise<void> {
@@ -8899,6 +8935,7 @@ export class Session {
           accepted: true,
           error: null,
           ...(disposition ? { disposition } : {}),
+          ...this.submittedRowField(agentId, messageId, disposition),
         },
       });
     } catch (error) {

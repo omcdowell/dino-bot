@@ -14,14 +14,15 @@ import { runPaseoCli, startTestDaemon } from "./helpers/test-daemon.ts";
 
 console.log("=== Follow Commands With Closed Stdout Tests ===\n");
 
-const daemon = await startTestDaemon();
+// The dev-only mock provider stands in for a real agent; PASEO_NODE_ENV=development offers it.
+const daemon = await startTestDaemon({ env: { PASEO_NODE_ENV: "development" } });
 const host = `127.0.0.1:${daemon.port}`;
 
 try {
   // An agent created without a prompt stays idle, so no provider is called.
   const client = await connectToDaemon({ target: { kind: "endpoint", host } });
   const agent = await client.createAgent({
-    provider: "claude",
+    provider: "mock",
     cwd: daemon.workDir,
     title: "closed stdout",
   });

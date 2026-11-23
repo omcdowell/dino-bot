@@ -11,7 +11,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { ProviderPersistence, ProviderSessionSummary } from "@getpaseo/plugin/server/provider";
-import { memoryDirectory } from "pi-optchat/src/import/active.ts";
+import { memoryDirectory } from "pi-optchat/api";
 
 /** Log ranges [from, to) a chat no longer shows (rewound). */
 export type Hidden = Array<[number, number]>;

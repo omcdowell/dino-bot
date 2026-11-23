@@ -1389,6 +1389,47 @@ test("steering records concurrent early echoes as canonical submitted prompts", 
   }
 });
 
+test("finds where a submitted message's row is by its client message ID", async () => {
+  // MO2: the app settles a sent bubble against this position when the row itself is above the
+  // part of the chat it loaded (a cold start onto the latest tail).
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-row-"));
+  const session = new SteeringTestSession({ provider: "codex", cwd: workdir });
+  const client = new (class extends TestAgentClient {
+    override async createSession(): Promise<AgentSession> {
+      return session;
+    }
+  })();
+  const manager = new AgentManager({ clients: { codex: client }, logger });
+  let agentId: string | null = null;
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    agentId = agent.id;
+    const stream = manager.streamAgent(agent.id, "start");
+    void (async () => {
+      for await (const _event of stream) {
+      }
+    })();
+    await manager.waitForAgentRunStart(agent.id);
+    await manager.steerAgentRun(agent.id, "one", { clientMessageId: "client-one" });
+    const rows = await manager.getTimelineRows(agent.id);
+    const stored = rows.find(
+      (row) => row.item.type === "user_message" && row.item.clientMessageId === "client-one",
+    );
+    expect(stored).toBeDefined();
+    expect(manager.getSubmittedMessageRow(agent.id, "client-one")).toEqual({
+      epoch: manager.fetchTimeline(agent.id).epoch,
+      seq: stored?.seq,
+    });
+    expect(manager.getSubmittedMessageRow(agent.id, "never-sent")).toBeNull();
+    expect(manager.getSubmittedMessageRow("no-such-agent", "client-one")).toBeNull();
+  } finally {
+    if (agentId) await manager.closeAgent(agentId);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 class McpCapableTestAgentClient extends TestAgentClient {
   override readonly capabilities = {
     ...TEST_CAPABILITIES,

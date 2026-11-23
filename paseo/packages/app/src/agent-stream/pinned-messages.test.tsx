@@ -291,6 +291,183 @@ describe("PinnedMessages taken bubble after a daemon restart", () => {
   });
 });
 
+describe("PinnedMessages taken bubble whose row is older than the loaded stream (MO1)", () => {
+  // 2026-11-21 (build 18): a message sent at 20:33 and taken by the bot was drawn at
+  // the very bottom of the chat, under ten later bot replies. The app came back after more than
+  // a page of new rows, so the catch-up jumped to the latest tail and the canonical row (with the
+  // client message ID) was never in the stream to settle the bubble.
+  const createdAt = Date.parse("2026-11-20T20:32:59Z");
+  const sentAt = Date.parse("2026-11-20T20:33:30Z");
+  function takenRecord(): OutboxRecord {
+    return {
+      ...queuedRecord(),
+      clientMessageId: "cmid-old",
+      text: "go for the recommendations",
+      activeTurnBehavior: "queue",
+      createdAt,
+      sentAt,
+      attempts: 2,
+      everOnWire: true,
+      state: "taken",
+    };
+  }
+  function assistantRow(id: string, at: string) {
+    return { kind: "assistant_message" as const, id, text: `reply ${id}`, timestamp: new Date(at) };
+  }
+
+  beforeEach(() => {
+    const saved = new Map<string, string>();
+    setOutboxBackingStorageForTests({
+      getItem: async (key) => saved.get(key) ?? null,
+      setItem: async (key, value) => {
+        saved.set(key, value);
+      },
+    });
+    useSessionStore.getState().initializeSession(SERVER_ID, {} as DaemonClient);
+  });
+  afterEach(() => {
+    useSessionStore.getState().clearSession(SERVER_ID);
+  });
+
+  function render() {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <ToastProvider>
+            <PinnedMessages serverId={SERVER_ID} agentId={AGENT_ID} />
+          </ToastProvider>
+        </QueryClientProvider>,
+      ),
+    );
+    mounted.push({ root, container });
+    return container;
+  }
+
+  it("is not drawn under replies when the loaded stream starts after it was sent", () => {
+    useSessionStore.getState().setAgentStreamTail(
+      SERVER_ID,
+      new Map([
+        [
+          AGENT_ID,
+          [
+            assistantRow("a1", "2026-11-20T21:11:01Z"),
+            createUserMessage({
+              id: "row-dm",
+              messageId: "m-15019",
+              text: "[dm from a worker]",
+              timestamp: new Date("2026-11-20T21:31:37Z"),
+            }),
+            assistantRow("a2", "2026-11-20T22:14:10Z"),
+          ],
+        ],
+      ]),
+    );
+    useOutboxStore.setState({ records: [takenRecord()] });
+    const container = render();
+    expect(container.querySelector('[data-testid="pinned-messages"]')).toBeNull();
+    expect(useOutboxStore.getState().records).toEqual([]);
+  });
+
+  it("stays pinned while the loaded stream reaches back past the send (row still to come)", () => {
+    useSessionStore
+      .getState()
+      .setAgentStreamTail(
+        SERVER_ID,
+        new Map([
+          [
+            AGENT_ID,
+            [
+              assistantRow("a0", "2026-11-20T20:31:40Z"),
+              assistantRow("a1", "2026-11-20T20:33:31Z"),
+            ],
+          ],
+        ]),
+      );
+    useOutboxStore.setState({ records: [takenRecord()] });
+    const container = render();
+    expect(container.querySelector('[data-testid="pinned-messages"]')).not.toBeNull();
+    expect(useOutboxStore.getState().records).toHaveLength(1);
+  });
+});
+
+describe("PinnedMessages taken bubble with the daemon's row position (MO2)", () => {
+  // Same case as MO1, settled by ID instead of time: the daemon said where the message's row is
+  // (epoch e1, seq 120). The timeline ending at or past that row settles the bubble, whatever the
+  // clocks say; a timeline that ends before it keeps the bubble.
+  const sentAt = Date.parse("2026-11-20T20:33:30Z");
+  function takenRecord(): OutboxRecord {
+    return {
+      ...queuedRecord(),
+      clientMessageId: "cmid-row",
+      text: "go for the recommendations",
+      createdAt: sentAt,
+      sentAt,
+      attempts: 2,
+      everOnWire: true,
+      state: "taken",
+      row: { epoch: "e1", seq: 120 },
+    };
+  }
+  function assistantRow(id: string, at: number) {
+    return { kind: "assistant_message" as const, id, text: `reply ${id}`, timestamp: new Date(at) };
+  }
+
+  beforeEach(() => {
+    const saved = new Map<string, string>();
+    setOutboxBackingStorageForTests({
+      getItem: async (key) => saved.get(key) ?? null,
+      setItem: async (key, value) => {
+        saved.set(key, value);
+      },
+    });
+    useSessionStore.getState().initializeSession(SERVER_ID, {} as DaemonClient);
+  });
+  afterEach(() => {
+    useSessionStore.getState().clearSession(SERVER_ID);
+  });
+
+  function render(cursor: { epoch: string; startSeq: number; endSeq: number }) {
+    // Rows timestamped before the send: MO1's time rule alone would keep this bubble pinned.
+    useSessionStore
+      .getState()
+      .setAgentStreamTail(
+        SERVER_ID,
+        new Map([[AGENT_ID, [assistantRow("a1", sentAt - 60_000), assistantRow("a2", sentAt)]]]),
+      );
+    useSessionStore.getState().setAgentTimelineCursor(SERVER_ID, new Map([[AGENT_ID, cursor]]));
+    useOutboxStore.setState({ records: [takenRecord()] });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <ToastProvider>
+            <PinnedMessages serverId={SERVER_ID} agentId={AGENT_ID} />
+          </ToastProvider>
+        </QueryClientProvider>,
+      ),
+    );
+    mounted.push({ root, container });
+    return container;
+  }
+
+  it("is not drawn once the loaded timeline reaches past its row", () => {
+    const container = render({ epoch: "e1", startSeq: 150, endSeq: 190 });
+    expect(container.querySelector('[data-testid="pinned-messages"]')).toBeNull();
+    expect(useOutboxStore.getState().records).toEqual([]);
+  });
+
+  it("stays pinned while the loaded timeline ends before its row", () => {
+    const container = render({ epoch: "e1", startSeq: 80, endSeq: 119 });
+    expect(container.querySelector('[data-testid="pinned-messages"]')).not.toBeNull();
+    expect(useOutboxStore.getState().records).toHaveLength(1);
+  });
+});
+
 describe("resolvePinnedMeta while photos upload (UF1)", () => {
   const message = {
     key: "k",
@@ -310,5 +487,48 @@ describe("resolvePinnedMeta while photos upload (UF1)", () => {
 
   it("says it waits for the connection when offline, not that it uploads", () => {
     expect(resolvePinnedMeta(message, false, t, upload)).toMatch(/^Will send when connected · /);
+  });
+});
+
+describe("resolvePinnedMeta while a message is being retried (UT1)", () => {
+  const record: OutboxRecord = {
+    serverId: "srv",
+    agentId: "agent",
+    clientMessageId: "id-pic",
+    text: "pic",
+    images: [],
+    attachments: [],
+    composerAttachments: [],
+    activeTurnBehavior: "queue",
+    createdAt: Date.UTC(2026, 10, 20, 14, 22),
+    attempts: 3,
+    everOnWire: true,
+    nextAttemptAt: 0,
+    state: "outbox",
+    lastError: "Timeout waiting for message (60000ms)",
+  };
+  const message = {
+    key: "k",
+    clientMessageId: "id-pic",
+    text: "pic",
+    createdAt: record.createdAt,
+    state: "clock" as const,
+    remote: false,
+    record,
+  };
+  const t = (key: string, options?: Record<string, unknown>) => String(testI18n.t(key, options));
+
+  it("says why the last attempt failed, so a retry loop does not look like a slow upload", () => {
+    const upload = { index: 1, count: 1, sentBytes: 1024, totalBytes: 1024 };
+    expect(resolvePinnedMeta(message, true, t, upload)).toBe(
+      "Uploading photo 1 of 1 · 100% · Retrying: Timeout waiting for message (60000ms)",
+    );
+    expect(resolvePinnedMeta(message, true, t)).toBe(
+      "Retrying: Timeout waiting for message (60000ms)",
+    );
+  });
+
+  it("still says it waits for the connection when offline", () => {
+    expect(resolvePinnedMeta(message, false, t)).toMatch(/^Will send when connected · /);
   });
 });

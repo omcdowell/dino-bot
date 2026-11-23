@@ -32,7 +32,7 @@ import {
   type Compression,
   type Kind,
   type Memory,
-} from "pi-optchat/src/turn.ts";
+} from "pi-optchat/api";
 import { ccBotSkills, formatCcSkills, type CcSkill } from "./skills";
 import { readSettings as readBotsSettings } from "../settings";
 import { parseRunner, resolveRunner, type CompactorRunner, type RunnerWhy } from "./compactor-runner";
@@ -84,7 +84,7 @@ export type CcEvent =
   /** A cost Claude Code does not count: a compaction's `$.model.complete` (`costUsd` null: no price known). */
   | { type: "extra-usage"; tokens: CcTokens; costUsd: number | null; model: string | null }
   /** An inbox item typed just as a turn of the TUI's own started: Claude Code put it into that turn, which answered it. */
-  | { type: "merged"; id: string }
+  | { type: "merged"; id: string; text: string }
   /** An inbox item the TUI never took (typed and not seen, too often): it leaves the inbox. */
   | { type: "undelivered"; id: string; reason: string }
   /** The TUI waits on a permission prompt or a question in its terminal: inbox items wait too. */
@@ -635,7 +635,7 @@ export class CcEngine {
     this.items = this.items.filter((i) => i !== item);
     this.saveInbox();
     this.deliveryLog({ ev: "merged", id: item.id, how, typed: item.typed });
-    this.emit({ type: "merged", id: item.id });
+    this.emit({ type: "merged", id: item.id, text: item.text });
   }
 
   /** Types the next item, or follows up the one typed. One at a time; the engine's own timer calls it. */
@@ -965,12 +965,15 @@ export class CcEngine {
     };
   }
 
-  /** The newest log entries (messages, tool calls and their results), for the app's history of a reopened chat. */
-  recent(limit = 400): Array<{ i: number; kind: Kind; text: string; date: string }> {
+  /**
+   * The newest log entries (messages, tool calls and their results), for the app's history of a reopened chat. A user
+   * message that came through the inbox keeps its receipt: the id it was sent with (the app's clientMessageId).
+   */
+  recent(limit = 400): Array<{ i: number; kind: Kind; text: string; date: string; receipt?: string }> {
     return this.memory.root
       .filter((e) => e.kind === "user" || e.kind === "talk" || e.kind === "tool" || e.kind === "echo")
       .slice(-limit)
-      .map((e) => ({ i: e.i, kind: e.kind, text: e.text, date: e.date }));
+      .map((e) => ({ i: e.i, kind: e.kind, text: e.text, date: e.date, ...(e.receipt ? { receipt: e.receipt } : {}) }));
   }
 
   async close() {

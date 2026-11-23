@@ -117,6 +117,11 @@ import {
   type WebSocketRuntimeCounters,
   type WebSocketRuntimeDiagnosticSnapshot,
 } from "./websocket/runtime-metrics.js";
+import {
+  TRAFFIC_COUNTS_FILE,
+  TRAFFIC_COUNTS_FLUSH_MS,
+  TrafficCounts,
+} from "./websocket/traffic-counts.js";
 import { getProcessMemoryDiagnostics, getProcessUptimeSeconds } from "./process-diagnostics.js";
 import {
   CLIENT_SHUTDOWN_RPC_REASON,
@@ -154,6 +159,7 @@ import {
 } from "@getpaseo/protocol/compact-v2";
 import { OWNER_PERMISSIONS, type DaemonPermission } from "./authorization/index.js";
 import type { WorkspaceLabelService } from "./workspace-labels/index.js";
+import { MAX_WS_FRAME_BYTES } from "@getpaseo/protocol/ws-frame-limit";
 import {
   APPLICATION_SOCKET_LEASE_CHECK_INTERVAL_MS,
   ApplicationSocketLease,
@@ -709,7 +715,9 @@ export class VoiceAssistantWebSocketServer {
     | ((workspaceId: string, oldBranch: string | null, newBranch: string | null) => void)
     | null;
   private serverCapabilities: ServerCapabilities | undefined;
-  private readonly runtimeMetrics = new WebSocketRuntimeMetricsWindow();
+  private readonly trafficCounts: TrafficCounts;
+  private readonly runtimeMetrics: WebSocketRuntimeMetricsWindow;
+  private trafficCountsInterval: ReturnType<typeof setInterval> | null = null;
   private lastRuntimeMetricsSnapshot: WebSocketRuntimeDiagnosticPayload | null = null;
   private runtimeMetricsInterval: ReturnType<typeof setInterval> | null = null;
   private applicationSocketLeaseInterval: ReturnType<typeof setInterval> | null = null;
@@ -833,6 +841,8 @@ export class VoiceAssistantWebSocketServer {
     this.workspaceAutoName = workspaceAutoName;
     this.downloadTokenStore = downloadTokenStore;
     this.paseoHome = paseoHome;
+    this.trafficCounts = new TrafficCounts(join(paseoHome, TRAFFIC_COUNTS_FILE));
+    this.runtimeMetrics = new WebSocketRuntimeMetricsWindow(Date.now, this.trafficCounts);
     this.passwordHash = auth?.password;
     this.sessionTokens = new SessionTokenStore({
       getPasswordHash: () => this.passwordHash,
@@ -1177,6 +1187,7 @@ export class VoiceAssistantWebSocketServer {
     const wss = new WebSocketServer({
       server,
       path: "/ws",
+      maxPayload: MAX_WS_FRAME_BYTES,
       handleProtocols: (protocols) =>
         wsConfig.daemonKeyPair && protocols.has(DIRECT_E2EE_SUBPROTOCOL)
           ? selectDirectE2eeProtocol(protocols)
@@ -1232,6 +1243,19 @@ export class VoiceAssistantWebSocketServer {
     }, WS_RUNTIME_METRICS_FLUSH_MS);
     this.runtimeMetricsInterval = runtimeMetricsInterval;
     (runtimeMetricsInterval as unknown as { unref?: () => void }).unref?.();
+    const trafficCountsInterval = setInterval(() => {
+      this.flushTrafficCounts();
+    }, TRAFFIC_COUNTS_FLUSH_MS);
+    this.trafficCountsInterval = trafficCountsInterval;
+    (trafficCountsInterval as unknown as { unref?: () => void }).unref?.();
+  }
+
+  private flushTrafficCounts(options?: { final?: boolean }): void {
+    try {
+      this.trafficCounts.flush(options);
+    } catch (err) {
+      this.logger.warn({ err }, "traffic_counts.write_failed");
+    }
   }
 
   private startApplicationSocketLeaseInterval(): void {
@@ -1506,12 +1530,17 @@ export class VoiceAssistantWebSocketServer {
       clearInterval(this.runtimeMetricsInterval);
       this.runtimeMetricsInterval = null;
     }
+    if (this.trafficCountsInterval) {
+      clearInterval(this.trafficCountsInterval);
+      this.trafficCountsInterval = null;
+    }
     if (this.applicationSocketLeaseInterval) {
       clearInterval(this.applicationSocketLeaseInterval);
       this.applicationSocketLeaseInterval = null;
     }
     this.applicationSocketLease.clear();
     this.flushRuntimeMetrics({ final: true });
+    this.flushTrafficCounts({ final: true });
     this.eventLoopDelayMonitor?.disable();
     this.eventLoopDelayMonitor = null;
 

@@ -222,7 +222,7 @@ export class TerminalSessionController {
       case "terminal_input":
         if (!ownership.currentSource) throw new Error("Terminal input requires a source");
         this.handleTerminalInput(msg, ownership.currentSource);
-        return undefined;
+        return Promise.resolve();
       case "kill_terminal_request":
         return this.handleKillTerminalRequest(msg);
       case "capture_terminal_request":

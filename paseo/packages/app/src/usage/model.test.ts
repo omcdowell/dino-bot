@@ -64,6 +64,28 @@ describe("resolveUsageView", () => {
     ).toEqual({ kind: "unavailable", message: "Connect to Laptop to see usage" });
   });
 
+  it("shows the reports kept on the device while the host is not connected", () => {
+    const reports = [entry({})];
+    for (const supportsUsage of [true, false]) {
+      expect(
+        resolveUsageView({
+          hostLabel: "Laptop",
+          isConnected: false,
+          supportsUsage,
+          query: { data: reports, error: null, isFetching: false },
+        }),
+      ).toEqual({ kind: "ready", reports, isRefreshing: false });
+    }
+    expect(
+      resolveUsageView({
+        hostLabel: "Laptop",
+        isConnected: false,
+        supportsUsage: true,
+        query: ready([]),
+      }),
+    ).toEqual({ kind: "unavailable", message: "Connect to Laptop to see usage" });
+  });
+
   it("moves from loading to ready to error", () => {
     const base = { hostLabel: "Laptop", isConnected: true, supportsUsage: true };
     expect(resolveUsageView({ ...base, query: undefined })).toEqual({ kind: "loading" });
@@ -114,6 +136,28 @@ describe("resolveUsageHostId", () => {
         hosts: hosts.slice(0, 2),
       }),
     ).toBeNull();
+  });
+});
+
+describe("resolveUsageHostId with no host connected", () => {
+  const offline: UsageHost[] = [
+    { serverId: "x", label: "X", isConnected: false, supportsUsage: false },
+    { serverId: "y", label: "Y", isConnected: false, supportsUsage: false },
+  ];
+
+  it("reads the picked, else the active, else the first host, from the device", () => {
+    expect(resolveUsageHostId({ pickedServerId: "y", activeServerId: "x", hosts: offline })).toBe(
+      "y",
+    );
+    expect(resolveUsageHostId({ pickedServerId: null, activeServerId: "y", hosts: offline })).toBe(
+      "y",
+    );
+    expect(
+      resolveUsageHostId({ pickedServerId: "gone", activeServerId: null, hosts: offline }),
+    ).toBe("x");
+    expect(resolveUsageHostId({ pickedServerId: null, activeServerId: null, hosts: [] })).toBe(
+      null,
+    );
   });
 });
 

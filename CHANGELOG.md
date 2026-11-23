@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.1.17
+
+### Chat
+
+- Usage (the Settings card and the sidebar) keeps the last reports from each computer and shows
+  them offline or on a cold start, with their Updated time. The provider list is read from the
+  copy on disk until a live one loads.
+- While the computer is not connected, an open turn is shown as last known: no timer or working
+  indicator, and the composer shows a plain Send.
+- Bot DMs are pushed to the app by the host instead of polled every 10 to
+  30 seconds, so new messages and delivery statuses show at once. An older host is still polled.
+
+### Fixed
+
+- A message you sent no longer stays pinned at the bottom of the chat, under every later reply,
+  when you come back after more than a page of new messages. The host now tells the app where
+  the message's row is; with an older host the app settles it when every loaded row is newer.
+- Claude Code bots: every user message in replayed history, and messages kept through a host
+  restart, carry the app's message ID, so the app matches them to what you sent.
+- A photo sent over a slow uplink no longer times out at 60 seconds and restarts from the first
+  byte: the upload waits as long as the photo needs to drain.
+- A pending message whose last attempt failed shows "Retrying: <error>" while the computer is
+  connected, so a message stuck in a resend loop no longer looks like one on its way.
+
 ## v0.1.16
 
 ### Chat

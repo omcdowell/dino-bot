@@ -21,7 +21,7 @@
     "test": "tsx --test test/*.test.ts"
   },
   "devDependencies": {
-    "@getpaseo/plugin": "0.11.1",
+    "@getpaseo/plugin": "file:../../paseo/packages/plugin",
     "@types/node": "^24.0.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.3",

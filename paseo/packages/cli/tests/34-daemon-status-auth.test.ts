@@ -97,7 +97,7 @@ import('node:fs').then(({appendFileSync}) => {
       join(home, "config.json"),
       JSON.stringify({
         version: 1,
-        agents: { providers: { claude: { command: { mode: "replace", argv: [provider] } } } },
+        agents: { providers: { pi: { command: { mode: "replace", argv: [provider] } } } },
       }),
     );
     slowDaemon = await startTestDaemon({

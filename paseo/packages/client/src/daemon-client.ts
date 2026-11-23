@@ -591,6 +591,17 @@ export interface SendMessageOptions {
 export interface SendAgentMessageResult {
   /** How the agent took the message; absent from older daemons and for a repeated message id. */
   disposition?: SendAgentMessageResponseMessage["payload"]["disposition"];
+  /** Where the agent's row for the message is in the daemon's timeline; absent from older daemons. */
+  row?: SendAgentMessageResponseMessage["payload"]["row"];
+}
+
+function sendAgentMessageResult(
+  payload: SendAgentMessageResponseMessage["payload"],
+): SendAgentMessageResult {
+  return {
+    ...(payload.disposition ? { disposition: payload.disposition } : {}),
+    ...(payload.row ? { row: payload.row } : {}),
+  };
 }
 
 export interface AgentAttentionRequiredNotification {
@@ -4221,7 +4232,7 @@ export class DaemonClient {
     if (!payload.accepted) {
       throw new Error(payload.error ?? "sendAgentMessage rejected");
     }
-    return payload.disposition ? { disposition: payload.disposition } : {};
+    return sendAgentMessageResult(payload);
   }
 
   /** Sends a daemon-held (queued) message now, steered into the running turn. */
@@ -5770,6 +5781,9 @@ export class DaemonClient {
         requestId: resolvedRequestId,
       },
       responseType: "file.upload.response",
+      // The answer comes only after every byte is through the uplink. Wait as long as the inline
+      // photo path does, or a slow link times out mid-upload and the outbox resends from byte 0.
+      timeout: DEFAULT_SESSION_RPC_TIMEOUT_MS + uplinkDrainAllowanceMs(bytes.byteLength),
       options: { skipQueue: true },
     });
 

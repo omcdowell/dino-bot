@@ -64,7 +64,7 @@ export interface CcUsageSourceOptions {
   now?: () => number;
 }
 
-/** `fallbackFor` is newer than the pinned @getpaseo/plugin types; a daemon without it ignores the field. */
+/** `fallbackFor` is always set here (optional in the SDK type); a daemon without it ignores the field. */
 export type CcUsageSourceRegistration = UsageSourceRegistration & { fallbackFor: string[] };
 
 export function createCcUsageSource(opts: CcUsageSourceOptions): CcUsageSourceRegistration {

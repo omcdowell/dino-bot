@@ -4,13 +4,16 @@
  * The app keeps plugin queries marked `meta: { persist: true }` per host (plugin-cache.ts in the
  * Paseo app): dehydrated after a 2 s debounce, restored before the host answers. Two limits shape
  * this file:
- * - The app drops ALL of a plugin's persisted queries when their JSON passes 1 MB (avatars, bots
- *   list, previews included, about 350 KB today). So the group threads kept here have a hard byte
- *   budget: THREAD_CACHE_MAX messages per group, at most THREAD_CACHE_GROUP_BYTES per group and
- *   THREAD_CACHE_BYTES for all groups (least recently changed groups go first).
- * - A query with no observer is garbage-collected after 5 min, and a removed query is removed from
- *   storage too. So all groups share ONE persisted query (ROOMS_THREAD_CACHE_KEY) that the home,
- *   the sidebar and the group screen observe, with gcTime Infinity.
+ * - The app keeps at most 1 MB of a plugin's persisted queries (avatars, bots list, previews
+ *   included, about 350 KB today); above that it leaves out the largest queries first and logs a
+ *   warning naming them. One big thread query would be the first to go, so the group threads kept
+ *   here have a hard byte budget: THREAD_CACHE_MAX messages per group, at most
+ *   THREAD_CACHE_GROUP_BYTES per group and THREAD_CACHE_BYTES for all groups (least recently
+ *   changed groups go first).
+ * - A removed query is removed from storage too. The app's plugin query client never
+ *   garbage-collects persisted queries, and all groups share ONE persisted query
+ *   (ROOMS_THREAD_CACHE_KEY) that the home, the sidebar and the group screen observe, with gcTime
+ *   Infinity.
  *
  * Shape safety: anything read from the device may be an older or partial shape (a cached
  * pre-multi-lead `rooms.list` blanked the home on 2026-10-13). Every reader here normalises: a bad

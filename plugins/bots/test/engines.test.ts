@@ -76,13 +76,13 @@ export const CC_UNSUPPORTED: Record<string, string> = {
 
 let piN = 0;
 async function piBot(): Promise<Driver> {
-  // pi's side runs pi's packages (pi-optchat's own node_modules); loaded by name so this plugin's tsc does not
-  // type-check pi's sources under the plugin's settings.
-  const controller = "pi-optchat/src/controller.ts";
-  const profiles = "pi-optchat/src/profiles.ts";
+  // pi's side runs pi's packages (pi-optchat's own node_modules); its internals are not in pi-optchat/api, so they are
+  // loaded from the source folder, by a path in a variable so this plugin's tsc does not type-check pi's sources.
+  const controller = "../../../optchat/src/controller.ts";
+  const profiles = "../../../optchat/src/profiles.ts";
   const { SessionController } = await import(controller);
   const { createProfile } = await import(profiles);
-  const { restartGuard, restartReason, fixtureIo } = await import("pi-optchat/src/restart-guard.ts");
+  const { restartGuard, restartReason, fixtureIo } = await import("../../../optchat/src/restart-guard.ts");
   const name = `pi-${++piN}`;
   createProfile(name);
   const boundaries: any[] = [];

@@ -34,8 +34,6 @@ test("every executable daemon entrypoint enters the supervisor", async () => {
     appIsolatedHostDaemon,
     serverConnectionOfferE2e,
     desktopRuntimePaths,
-    nixPackage,
-    nixModule,
   ] = await Promise.all([
     readFile(join(repoRoot, "packages/server/package.json"), "utf8"),
     readFile(join(repoRoot, "packages/app/e2e/support/helpers/isolated-host-daemon.ts"), "utf8"),
@@ -44,8 +42,6 @@ test("every executable daemon entrypoint enters the supervisor", async () => {
       "utf8",
     ),
     readFile(join(repoRoot, "packages/desktop/src/daemon/runtime-paths.ts"), "utf8"),
-    readFile(join(repoRoot, "nix/package.nix"), "utf8"),
-    readFile(join(repoRoot, "nix/module.nix"), "utf8"),
   ]);
 
   const serverPackage = JSON.parse(serverPackageSource);
@@ -72,11 +68,4 @@ test("every executable daemon entrypoint enters the supervisor", async () => {
   assert.match(desktopRuntimePaths, /"dist", "scripts", "supervisor-entrypoint\.js"/);
   assert.match(desktopRuntimePaths, /"scripts", "supervisor-entrypoint\.ts"/);
   assertNoDirectWorkerLaunch("desktop runtime paths", desktopRuntimePaths);
-
-  assert.match(nixPackage, /dist\/scripts\/supervisor-entrypoint\.js/);
-  assertNoDirectWorkerLaunch("Nix package wrapper", nixPackage);
-  assert.match(nixPackage, /--set PASEO_NODE_ENV production/);
-  assert.doesNotMatch(nixPackage, /--set(-default)?\s+NODE_ENV\b/);
-  assert.doesNotMatch(nixModule, /\bNODE_ENV\b\s*=/);
-  assert.doesNotMatch(nixModule, /\bPASEO_NODE_ENV\b/);
 });

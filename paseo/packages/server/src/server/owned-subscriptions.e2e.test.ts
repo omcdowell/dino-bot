@@ -1462,7 +1462,7 @@ test("request outcomes for import and attention reach only their requesting sock
       }),
     );
     const agent = await admin.createAgent({
-      provider: "codex",
+      provider: "mock",
       cwd: daemon.staticDir,
       title: "Attention",
     });

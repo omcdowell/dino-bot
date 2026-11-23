@@ -53,6 +53,7 @@ import {
 import { ContextWindowMeter } from "@/components/context-window-meter";
 import { useImageAttachmentPicker } from "@/hooks/use-image-attachment-picker";
 import { selectAgentTurnPresentation, useSessionStore } from "@/stores/session-store";
+import { presentTurnForConnection } from "@/timeline/turn-liveness";
 import { useFilePicker } from "@/hooks/use-file-picker";
 import { useFileDrop } from "@/components/file-drop/use-file-drop";
 import type { DroppedItem } from "@/components/file-drop/types";
@@ -1598,11 +1599,20 @@ function ComposerContentImpl({
     onSubmitMessageRef.current = onSubmitMessage;
   }, [onSubmitMessage]);
 
+  // Offline, a turn is last known, not live (G13): no "Send and steer" for a turn that may be over.
   const hasActiveTurn = useSessionStore(
-    (state) => selectAgentTurnPresentation(state.sessions[serverId], agentId).isActive,
+    (state) =>
+      presentTurnForConnection(
+        selectAgentTurnPresentation(state.sessions[serverId], agentId),
+        isConnected,
+      ).isActive,
   );
   const isCancellingAgent = useSessionStore(
-    (state) => selectAgentTurnPresentation(state.sessions[serverId], agentId).isCancelling,
+    (state) =>
+      presentTurnForConnection(
+        selectAgentTurnPresentation(state.sessions[serverId], agentId),
+        isConnected,
+      ).isCancelling,
   );
   const isAgentRunning = hasActiveTurn;
   // Queueing behind a permission prompt would strand the message: the turn is

@@ -4,13 +4,13 @@ import { PUSH_CHECK_MS, PUSH_KINDS, PUSH_LEASE_MS, pushEventName, type PushKind 
 export type Emit = (name: string, data: unknown) => void;
 
 /**
- * Pushes each bots-home kind (previews, workers, quiet) to the apps when it changes.
+ * Pushes each bots-home kind (previews, workers, quiet) and the DMs revision to the apps when it changes.
  * `publish` is called with every freshly computed value, from RPC handlers and from the
  * watch loop; a value that differs from the last one bumps the kind's revision and is emitted.
  * The loop runs only while a client called within PUSH_LEASE_MS, so an idle host does no work.
  */
 export class BotsPush {
-  private readonly revs: Record<PushKind, number> = { previews: 0, workers: 0, quiet: 0 };
+  private readonly revs: Record<PushKind, number> = { previews: 0, workers: 0, quiet: 0, dms: 0 };
   private readonly hashes = new Map<PushKind, string>();
   private leaseUntil = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;

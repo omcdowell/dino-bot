@@ -206,11 +206,13 @@ describe("setAgentMode", () => {
       subscribe: {},
     });
 
-    // Create a Codex agent with default mode ("auto")
+    // Start in "auto". The injected test codex client has no manifest default mode since the
+    // codex provider was deleted, so the starting mode is chosen here.
     const agent = await ctx.client.createAgent({
       provider: "codex",
       model: CODEX_TEST_MODEL,
       thinkingOptionId: CODEX_TEST_THINKING_OPTION_ID,
+      modeId: "auto",
       cwd,
       title: "Mode Switch Test Agent",
     });
@@ -218,7 +220,7 @@ describe("setAgentMode", () => {
     expect(agent.id).toBeTruthy();
     expect(agent.status).toBe("idle");
 
-    // Verify initial mode is "auto" (the default)
+    // Verify the initial mode
     expect(agent.currentModeId).toBe("auto");
 
     // Clear message queue before mode switch

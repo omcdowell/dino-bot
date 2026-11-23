@@ -1264,6 +1264,23 @@ export class AgentManager {
     }
   }
 
+  /**
+   * Where the canonical user row of a client message sits in this daemon's timeline, found by its
+   * client message ID: the timeline epoch and the row's seq. Null when there is no such row.
+   */
+  getSubmittedMessageRow(
+    agentId: string,
+    clientMessageId: string,
+  ): { epoch: string; seq: number } | null {
+    if (!this.agents.has(agentId)) return null;
+    try {
+      const row = this.timelineStore.getSubmittedUserMessage(agentId, clientMessageId);
+      return row ? { epoch: this.timelineStore.getEpoch(agentId), seq: row.seq } : null;
+    } catch {
+      return null;
+    }
+  }
+
   getAgent(id: string): ManagedAgent | null {
     const agent = this.agents.get(id);
     return agent ? { ...agent } : null;

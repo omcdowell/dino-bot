@@ -10,6 +10,7 @@ import { botsOpenRpc, type Bot } from "../shared/rpc";
 import { openBotFromSidebar, startingLabel, type BotsSidebarItemProps } from "./bot-open";
 import { BOTS_QUERY_KEY } from "./bot-data";
 import { DMS_SUMMARY_KEY, SUMMARY_POLL_MS, explorerHostsPanels, showDmsRow } from "./dms-format";
+import { pollUnlessPushed } from "./push";
 import { useBotRowStatus, useBotsData, usePreviews, useRefreshPreviewsOnChange, type QuietAnswer } from "./bot-data";
 import { holdOrder, recencyOf, sinceShort, spokenSince } from "./home-format";
 import { effectiveHomeState, homeLayout, sidebarOrder } from "./manage-format";
@@ -193,7 +194,8 @@ export function BotsSidebarItem({ theme, layout, currentScreen, openScreen, navi
     queryKey: DMS_SUMMARY_KEY,
     queryFn: () => dmsSummary({}),
     staleTime: 10_000,
-    refetchInterval: SUMMARY_POLL_MS,
+    // Pushed as the `dms` kind (useBotsData mounts the push wiring); polled only without pushes.
+    refetchInterval: pollUnlessPushed(SUMMARY_POLL_MS),
     enabled: dmsRows,
   });
   const { previews } = usePreviews();

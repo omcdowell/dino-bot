@@ -349,6 +349,23 @@ describe("ProviderSnapshotManager public surface", () => {
     }
   });
 
+  test("an injected dev-only client (mock) registers without dev mode", () => {
+    const withoutClient = new ProviderSnapshotManager({ logger: createTestLogger() });
+    const withClient = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      extraClients: { mock: createExtraClient("mock") },
+    });
+    try {
+      expect(withoutClient.hasProvider("mock")).toBe(false);
+      expect(withClient.hasProvider("mock")).toBe(true);
+      expect(withClient.hasProvider("mock-slow")).toBe(false);
+      expect(withClient.getProviderLabel("mock")).toBe("Mock Load Test");
+    } finally {
+      withoutClient.destroy();
+      withClient.destroy();
+    }
+  });
+
   test("getProviderLabel returns the override label when provided", () => {
     const manager = new ProviderSnapshotManager({
       logger: createTestLogger(),

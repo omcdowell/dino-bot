@@ -109,6 +109,7 @@ async function startOfflineMcpDaemon(): Promise<OfflineMcpDaemon> {
       corsAllowedOrigins: [],
       hostnames: true,
       mcpEnabled: true,
+      mcpInjectIntoAgents: true,
       staticDir,
       mcpDebug: false,
       agentClients: createTestAgentClients(),
@@ -243,6 +244,7 @@ describe("agent MCP end-to-end (offline)", () => {
       corsAllowedOrigins: [],
       hostnames: true,
       mcpEnabled: true,
+      mcpInjectIntoAgents: true,
       staticDir,
       mcpDebug: false,
       agentClients: createTestAgentClients(),
@@ -333,6 +335,7 @@ describe("agent MCP end-to-end (offline)", () => {
       corsAllowedOrigins: [],
       hostnames: true,
       mcpEnabled: true,
+      mcpInjectIntoAgents: true,
       staticDir,
       mcpDebug: false,
       agentClients: createTestAgentClients(),
@@ -390,7 +393,7 @@ describe("agent MCP end-to-end (offline)", () => {
     }
   }, 30_000);
 
-  test("create_agent auto-injects paseo MCP by default and can be disabled", async () => {
+  test("create_agent injects paseo MCP when enabled and not when disabled", async () => {
     const paseoHome = await mkdtemp(path.join(os.tmpdir(), "paseo-home-"));
     const staticDir = await mkdtemp(path.join(os.tmpdir(), "paseo-static-"));
     const agentCwd = await mkdtemp(path.join(os.tmpdir(), "paseo-agent-cwd-"));
@@ -403,6 +406,7 @@ describe("agent MCP end-to-end (offline)", () => {
       corsAllowedOrigins: [],
       hostnames: true,
       mcpEnabled: true,
+      mcpInjectIntoAgents: true,
       staticDir,
       mcpDebug: false,
       agentClients: createMcpRecordingAgentClients(recorder),
@@ -513,6 +517,7 @@ describe("agent MCP end-to-end (offline)", () => {
       corsAllowedOrigins: [],
       hostnames: true,
       mcpEnabled: true,
+      mcpInjectIntoAgents: true,
       staticDir,
       mcpDebug: false,
       agentClients: createMcpRecordingAgentClients(recorder),
@@ -572,6 +577,7 @@ describe("agent MCP end-to-end (offline)", () => {
       corsAllowedOrigins: [],
       hostnames: true,
       mcpEnabled: true,
+      mcpInjectIntoAgents: true,
       staticDir,
       mcpDebug: false,
       agentClients: createTestAgentClients(),
@@ -749,6 +755,7 @@ describe("agent MCP end-to-end (offline)", () => {
       corsAllowedOrigins: [],
       hostnames: true,
       mcpEnabled: true,
+      mcpInjectIntoAgents: true,
       staticDir,
       mcpDebug: false,
       agentClients: {
@@ -799,6 +806,7 @@ describe("agent MCP end-to-end (offline)", () => {
       corsAllowedOrigins: [],
       hostnames: true,
       mcpEnabled: true,
+      mcpInjectIntoAgents: true,
       staticDir,
       mcpDebug: false,
       agentClients: createTestAgentClients(),

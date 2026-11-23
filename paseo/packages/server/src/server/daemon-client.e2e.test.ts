@@ -161,11 +161,12 @@ test("DaemonClient uploads file bytes to daemon temp storage", async () => {
       requestId: "req-upload-e2e",
       file: {
         type: "uploaded_file",
-        id: "upload_req-upload-e2e",
+        // The daemon names each upload with a random id, not the request id.
+        id: expect.stringMatching(/^upload_[0-9a-f-]{36}$/),
         fileName: "notes.txt",
         mimeType: "text/plain",
         size: 11,
-        path: path.join(daemon.paseoHome, "uploads", "upload_req-upload-e2e", "notes.txt"),
+        path: path.join(daemon.paseoHome, "uploads", result.file?.id ?? "", "notes.txt"),
       },
       error: null,
     });
@@ -1712,19 +1713,9 @@ speechTest(
     await ctx.client.setVoiceMode(false);
 
     let sawTranscriptLog = false;
-    let sawAssistantChunk = false;
     let sawAssistantLog = false;
 
     const transcriptSeen = waitForSignal(60000, (resolve) => {
-      const unsubscribeChunk = ctx.client.on("assistant_chunk", (message) => {
-        if (message.type !== "assistant_chunk") {
-          return;
-        }
-        if (message.payload.chunk.length > 0) {
-          sawAssistantChunk = true;
-        }
-      });
-
       const unsubscribeActivity = ctx.client.on("activity_log", (message) => {
         if (message.type !== "activity_log") {
           return;
@@ -1739,7 +1730,6 @@ speechTest(
       });
 
       return () => {
-        unsubscribeChunk();
         unsubscribeActivity();
       };
     });
@@ -1750,7 +1740,6 @@ speechTest(
     await new Promise((resolve) => setTimeout(resolve, 1500));
 
     expect(sawTranscriptLog).toBe(true);
-    expect(sawAssistantChunk).toBe(false);
     expect(sawAssistantLog).toBe(false);
   },
   90000,

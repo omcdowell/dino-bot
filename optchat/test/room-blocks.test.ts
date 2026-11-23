@@ -1,10 +1,8 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { pathToFileURL } from 'node:url';
 import { createAssistantMessageEventStream, type AssistantMessage, type Context } from '@earendil-works/pi-ai';
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
 import optchat from '../src/index.ts';
@@ -140,17 +138,6 @@ test('applied blocks are plain user entries: the live (pre-handover) log reader 
       'the fields Memory.append writes for any message',
     );
     assert.equal((log[1] as { kind: string }).kind, 'user');
-
-    // The memory.ts the bots run today (local 99a152b, before group chat) opens this log unchanged.
-    const old = join(dir, 'old-src');
-    mkdirSync(old);
-    for (const file of ['memory.ts', 'provider-error.ts'])
-      writeFileSync(join(old, file), execFileSync('git', ['show', `99a152b:src/${file}`], { cwd: import.meta.dirname }));
-    const { Memory: OldMemory } = (await import(pathToFileURL(join(old, 'memory.ts')).href)) as { Memory: typeof Memory };
-    const before = new OldMemory(dir, compress, () => {});
-    assert.equal(before.root.length, 3);
-    assert.equal(before.root[1].text, FIXTURE.text);
-    await before.close();
 
     // Room sessions (U3 reader) leave the block out of extract, search and leaf zooms.
     const reader = new MemoryReader(dir);

@@ -21,6 +21,7 @@ import {
   updateOutboxRecord,
   useOutboxStore,
   type OutboxRecord,
+  type OutboxRowPosition,
 } from "@/stores/outbox-store";
 
 /**
@@ -47,7 +48,7 @@ export interface OutboxSendClient {
       dictated?: boolean;
       onReceived?: () => void;
     },
-  ) => Promise<{ disposition?: string } | void>;
+  ) => Promise<{ disposition?: string; row?: OutboxRowPosition } | void>;
   /** Chunked binary upload (file.upload); photos go this way on hosts with imageUploads. */
   uploadFile?: (input: {
     fileName: string;
@@ -303,9 +304,11 @@ export class OutboxSender {
       const current = getOutboxRecord(id);
       if (!current || current.state === "cancelling") return;
       const disposition = result ? result.disposition : undefined;
+      const row = result ? result.row : undefined;
       await updateOutboxRecord(id, {
         state: disposition === "queued" ? "queued" : "taken",
         lastError: undefined,
+        ...(row && disposition !== "queued" ? { row } : {}),
         nextAttemptAt:
           disposition === "queued"
             ? this.now() + Math.max(SETTLE_RETRY_MS, outboxBackoffMs(attempts, this.random))

@@ -23,7 +23,11 @@ import {
   type FileTransferFrame,
 } from "@getpaseo/protocol/binary-frames/index";
 import { Session } from "./session.js";
-import { OWNER_PERMISSIONS, type DaemonPermission } from "./authorization/index.js";
+import {
+  OWNER_PERMISSIONS,
+  SessionAuthorization,
+  type DaemonPermission,
+} from "./authorization/index.js";
 import { DownloadTokenStore } from "./file-download/token-store.js";
 import { StructuredAgentFallbackError } from "./agent/agent-response-loop.js";
 import type { StoredAgentRecord } from "./agent/agent-storage.js";
@@ -877,6 +881,44 @@ describe("session authorization permissions", () => {
         payload: {
           requestId: "after-scope-change",
           clientSentAt: 2,
+          serverReceivedAt: expect.any(Number),
+          serverSentAt: expect.any(Number),
+        },
+      },
+    ]);
+  });
+});
+
+describe("dispatch fall-through", () => {
+  test("a request no handler takes gets an unimplemented rpc_error; a handled one does not", async () => {
+    const messages: SessionOutboundMessage[] = [];
+    const session = createSessionForTest({ messages });
+
+    // Every inbound type in the schema has a handler now (chat/* and loop/* were removed from the
+    // schema), so a retired type stands in. It has no permission entry, so the check is let through.
+    const allows = vi.spyOn(SessionAuthorization.prototype, "allowsInbound").mockReturnValue(true);
+    await session.handleMessage({
+      type: "chat/list",
+      requestId: "unhandled",
+    } as unknown as SessionInboundMessage);
+    allows.mockRestore();
+    await session.handleMessage({ type: "ping", requestId: "handled", clientSentAt: 1 });
+
+    expect(messages).toEqual([
+      {
+        type: "rpc_error",
+        payload: {
+          requestId: "unhandled",
+          requestType: "chat/list",
+          error: "Unimplemented: chat/list",
+          code: "unimplemented",
+        },
+      },
+      {
+        type: "pong",
+        payload: {
+          requestId: "handled",
+          clientSentAt: 1,
           serverReceivedAt: expect.any(Number),
           serverSentAt: expect.any(Number),
         },

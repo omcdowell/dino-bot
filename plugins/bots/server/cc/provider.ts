@@ -196,7 +196,8 @@ export function replayItems(entries: ReturnType<CcEngine["recent"]>): Array<{ ti
   const open: Array<{ name: string; input: unknown; at: number }> = [];
   for (const e of entries) {
     const id = `m-${e.i}`;
-    if (e.kind === "user") out.push({ timestamp: e.date, item: { type: "user_message", id, text: skillCommandText(e.text) || e.text, revertToken: { i: e.i } } });
+    // The receipt is the id the message was sent with (the prompt's clientMessageId): the app finds its sent message by it.
+    if (e.kind === "user") out.push({ timestamp: e.date, item: { type: "user_message", id, text: skillCommandText(e.text) || e.text, ...(e.receipt ? { clientMessageId: e.receipt } : {}), revertToken: { i: e.i } } });
     else if (e.kind === "talk") out.push({ timestamp: e.date, item: { type: "assistant_message", id, text: e.text } });
     else if (e.kind === "tool") {
       const sp = e.text.indexOf(" ");
@@ -407,11 +408,14 @@ function connection(deps: CcProviderDeps, capabilities: readonly string[]): Prov
     if (e.type !== "blocked" && e.type !== "usage" && e.type !== "extra-usage" && e.type !== "session" && e.type !== "warning") unblock(s);
     type Item = Extract<ProviderEvent, { type: "timeline.item" }>["item"];
     const item = (it: Item) => emit({ type: "timeline.item", sessionId: s.id, item: it, timestamp: new Date().toISOString() });
-    /** A prompt the TUI submitted itself: Claude Code's notice that a background task ended is no message of the person's, a row for the task. */
-    const submitted = (raw: string, origin: string | undefined, id: string) => {
+    /**
+     * A prompt the TUI submitted itself: Claude Code's notice that a background task ended is no message of the person's, a row for the task.
+     * `sentAs`: the inbox item's id when it was one Paseo sent before this session (a daemon restart): its clientMessageId.
+     */
+    const submitted = (raw: string, origin: string | undefined, id: string, sentAs?: string) => {
       const text = afterView(raw);
       const notice = parseTaskNotification(text) ?? (origin === "task-notification" ? { taskId: null, toolUseId: null, status: null, summary: text.slice(0, 300) || null, outputFile: null } : null);
-      item(notice ? taskNotificationItem(notice, id) : { type: "user_message", id: `u-${id}`, text, revertToken: { turn: id } });
+      item(notice ? taskNotificationItem(notice, id) : { type: "user_message", id: `u-${id}`, text, ...(sentAs ? { clientMessageId: sentAs } : {}), revertToken: { turn: id } });
     };
     switch (e.type) {
       case "started": {
@@ -424,7 +428,7 @@ function connection(deps: CcProviderDeps, capabilities: readonly string[]): Prov
           // A steered message, shown when it was sent: its turn starts now.
           emit({ type: "session.turn", sessionId: s.id, turnId: e.id, state: "started" });
         } else if (!ours) {
-          submitted(e.text, e.origin, s.current!);
+          submitted(e.text, e.origin, s.current!, e.id ?? undefined);
           emit({ type: "session.turn", sessionId: s.id, turnId: s.current!, state: "started" });
         }
         return;
@@ -465,7 +469,8 @@ function connection(deps: CcProviderDeps, capabilities: readonly string[]): Prov
         // Answered inside the turn that was running: its own turn ends with it.
         s.stopping.delete(e.id);
         if (s.steered.delete(e.id)) return;
-        if (!s.waiting.includes(e.id)) return;
+        // Sent before this session (kept in the inbox through a daemon restart): its row was never shown here.
+        if (!s.waiting.includes(e.id)) return void submitted(e.text, undefined, e.id, e.id);
         s.waiting = s.waiting.filter((id) => id !== e.id);
         emit({ type: "session.turn", sessionId: s.id, turnId: e.id, state: "completed" });
         return;

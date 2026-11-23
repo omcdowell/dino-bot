@@ -3,6 +3,7 @@ import { Buffer } from "buffer";
 import type { ProviderSnapshotEntry } from "@getpaseo/protocol/agent-types";
 import { compactProviderSnapshot } from "@getpaseo/protocol/provider-snapshot-codec";
 import { createProviderSnapshotCache, type ProviderSnapshotCache } from "./provider-snapshot-cache";
+import { readDeviceProvidersSnapshot } from "./providers-snapshot";
 
 const SNAPSHOT_KEY_PREFIX = "@paseo/provider-snapshot/v2:";
 const SNAPSHOT_INDEX_KEY = "@paseo/provider-snapshot-index/v2";
@@ -778,4 +779,39 @@ it("coalesces missing bodies and keeps a newer pushed association when an older 
   } finally {
     queryClient.clear();
   }
+});
+
+describe("the provider list offline (readDeviceProvidersSnapshot)", () => {
+  async function written(storage: ReturnType<typeof createStorage>, cwd: string | null) {
+    const entries = snapshotEntries(cwd ? "workspace" : "home");
+    await createProviderSnapshotCache(storage).write({
+      serverId: "server-1",
+      cwd,
+      hash: cwd ? "hash-workspace" : "hash-home",
+      generatedAt: "2026-11-20T10:00:00.000Z",
+      compactSnapshot: compactProviderSnapshot(entries),
+    });
+    return entries;
+  }
+
+  it("gives back the last list after a restart, with no host", async () => {
+    const storage = createStorage();
+    const entries = await written(storage, "/repo-a");
+    const restarted = createProviderSnapshotCache(storage);
+    expect(
+      await readDeviceProvidersSnapshot({ serverId: "server-1", cwd: "/repo-a", cache: restarted }),
+    ).toEqual(entries);
+  });
+
+  it("falls back to the home list for a workspace never seen on this device", async () => {
+    const storage = createStorage();
+    const home = await written(storage, null);
+    const restarted = createProviderSnapshotCache(storage);
+    expect(
+      await readDeviceProvidersSnapshot({ serverId: "server-1", cwd: "/repo-b", cache: restarted }),
+    ).toEqual(home);
+    expect(
+      await readDeviceProvidersSnapshot({ serverId: "server-2", cwd: null, cache: restarted }),
+    ).toBeNull();
+  });
 });

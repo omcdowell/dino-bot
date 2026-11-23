@@ -128,8 +128,23 @@ function titleCase(id: string): string {
     .join(" ");
 }
 
+/** Paseo's project names by root path. Throws when the daemon does not answer. */
+async function projectNames(paseo: Pick<BotsPaseo, "projects">): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  for (const project of (await paseo.projects.list()).projects) {
+    names.set(project.projectRootPath, project.projectCustomName || project.projectDisplayName);
+  }
+  return names;
+}
+
 /** A bot is any folder under `root` that holds an OptChat profile marker. */
 export async function discoverBots(root: string, paseo: Pick<BotsPaseo, "projects">): Promise<Bot[]> {
+  // Names fall back to the folder; discovery must not fail because the directory is busy.
+  return botsInDir(root, await projectNames(paseo).catch(() => new Map<string, string>()));
+}
+
+/** The bots under `root`, named from `names` (Paseo project names) where .bot.json gives none. */
+export async function botsInDir(root: string, names: ReadonlyMap<string, string>): Promise<Bot[]> {
   let dirs: string[];
   try {
     dirs = (await readdir(root, { withFileTypes: true }))
@@ -137,14 +152,6 @@ export async function discoverBots(root: string, paseo: Pick<BotsPaseo, "project
       .map((entry) => entry.name);
   } catch {
     return [];
-  }
-  const names = new Map<string, string>();
-  try {
-    for (const project of (await paseo.projects.list()).projects) {
-      names.set(project.projectRootPath, project.projectCustomName || project.projectDisplayName);
-    }
-  } catch {
-    // Names fall back to the folder; discovery must not fail because the directory is busy.
   }
   const bots: Bot[] = [];
   for (const id of dirs) {
@@ -221,6 +228,98 @@ export function botOfAgent(agent: AgentLike, bots: Array<Pick<Bot, "id" | "cwd">
 
 async function activeAgents(paseo: Pick<BotsPaseo, "agents">): Promise<AgentLike[]> {
   return (await paseo.agents.list()).entries.map((entry) => entry.agent);
+}
+
+/**
+ * Daemon lifecycle hooks after which the project or agent list may read differently: a chat made,
+ * archived or closed, a turn's start or end (status, activity time, "finished" attention), a
+ * permission asked or answered (attention), a workspace (project) added or archived.
+ */
+export const LIST_CHANGE_EVENTS = [
+  "agent.created",
+  "agent.closed",
+  "agent.archived",
+  "agent.turn_started",
+  "agent.turn_ended",
+  "agent.permission_requested",
+  "agent.permission_resolved",
+  "workspace.created",
+  "workspace.archived",
+] as const;
+
+/** How long cached daemon lists are trusted with no change event (the informer's full resync). */
+export const LISTS_RESYNC_MS = 30_000;
+/**
+ * After a change event, reads keep going to the daemon this long: the event may reach the plugin
+ * before the daemon's list shows the change (a turn's end before the agent reads idle).
+ */
+export const LISTS_SETTLE_MS = 2_000;
+
+export interface DaemonListsValue {
+  names: ReadonlyMap<string, string>;
+  agents: AgentLike[];
+}
+
+/**
+ * The two daemon lists every bots read needs (`project.list` for names, `fetch_agents` for chats),
+ * listed once and then followed (Kubernetes informer pattern): after `watch()`, reads share one
+ * cached copy until a change event (`changed()`, from the daemon's lifecycle hooks and the plugin's
+ * own writes) or LISTS_RESYNC_MS, whichever comes first. The resync covers changes no hook reports
+ * (attention cleared on another device, a renamed project) and any event that was missed.
+ * Before `watch()` (a host without lifecycle hooks) every read goes to the daemon, as before.
+ * Bot folders are always read fresh: they are local files, not daemon calls.
+ */
+export class DaemonLists {
+  private cached: (DaemonListsValue & { at: number }) | null = null;
+  private inflight: { at: number; promise: Promise<DaemonListsValue> } | null = null;
+  private changedAt = Number.NEGATIVE_INFINITY;
+  private watching = false;
+
+  constructor(
+    private readonly options: { resyncMs?: number; settleMs?: number; now?: () => number } = {},
+  ) {}
+
+  /** Change events arrive from now on, so cached lists can be trusted between them. */
+  watch(): void {
+    this.watching = true;
+  }
+
+  /** Something the lists show may have changed: the next read after the settle window lists again. */
+  changed(): void {
+    this.changedAt = this.now();
+  }
+
+  async read(paseo: Pick<BotsPaseo, "projects" | "agents">): Promise<DaemonListsValue> {
+    if (!this.watching) return this.list(paseo);
+    const now = this.now();
+    // A copy listed before the last change settled could miss it; so could one older than a resync.
+    const validFrom = this.changedAt + (this.options.settleMs ?? LISTS_SETTLE_MS);
+    const cached = this.cached;
+    if (cached && cached.at >= validFrom && now - cached.at < (this.options.resyncMs ?? LISTS_RESYNC_MS)) return cached;
+    if (this.inflight && this.inflight.at >= validFrom) return this.inflight.promise;
+    const promise = this.list(paseo).then((value) => {
+      // A failed name list is not kept: the next read asks again.
+      if (value.complete && (!this.cached || now >= this.cached.at)) this.cached = { ...value, at: now };
+      return value;
+    });
+    const entry = { at: now, promise };
+    this.inflight = entry;
+    const clear = () => {
+      if (this.inflight === entry) this.inflight = null;
+    };
+    promise.then(clear, clear);
+    return promise;
+  }
+
+  private async list(paseo: Pick<BotsPaseo, "projects" | "agents">): Promise<DaemonListsValue & { complete: boolean }> {
+    const [names, agents] = await Promise.all([projectNames(paseo).catch(() => null), activeAgents(paseo)]);
+    // Names fall back to the last good list, then to the folder: a busy daemon must not break discovery.
+    return { names: names ?? this.cached?.names ?? new Map(), agents, complete: names !== null };
+  }
+
+  private now(): number {
+    return (this.options.now ?? Date.now)();
+  }
 }
 
 /** New chats follow the "bot" agent profile, so model and thinking are edited in Paseo settings. */
@@ -345,20 +444,31 @@ export class BotLocks {
 
 export class BotsService {
   private readonly locks = new BotLocks();
-  constructor(private readonly root: string) {}
+  constructor(
+    private readonly root: string,
+    /** Shared daemon lists for the read paths; writes (open, new chat, archive) still read fresh. */
+    readonly lists: DaemonLists = new DaemonLists(),
+  ) {}
+
+  /** Bots (folders read now) and agents (the shared daemon lists). */
+  private async read(paseo: BotsPaseo): Promise<{ bots: Bot[]; agents: AgentLike[] }> {
+    const { names, agents } = await this.lists.read(paseo);
+    return { bots: await botsInDir(this.root, names), agents };
+  }
 
   /**
    * Applies keepLiveChanges. Runs at start (backfill), after open/newChat and from the home poll,
    * so chats started by hand pick up the label too. Returns how many labels were written.
    */
   async syncKeepLive(paseo: BotsPaseo): Promise<number> {
-    const [bots, agents] = await Promise.all([discoverBots(this.root, paseo), activeAgents(paseo)]);
+    const { bots, agents } = await this.read(paseo);
     let written = 0;
     for (const { agentId, value } of keepLiveChanges(bots, agents)) {
       const ref = paseo.agents.ref(agentId);
       if (!ref.setLabels) return written;
       await ref.setLabels({ [KEEP_LIVE_LABEL]: value });
       written += 1;
+      this.lists.changed();
     }
     return written;
   }
@@ -370,7 +480,7 @@ export class BotsService {
 
   /** Bots with their current chat, plus a map from any live agent id to the bot it is a chat of. */
   async listWithOwners(paseo: BotsPaseo): Promise<{ bots: Bot[]; ownerOf: (agentId: string) => string | null }> {
-    const [bots, agents] = await Promise.all([discoverBots(this.root, paseo), activeAgents(paseo)]);
+    const { bots, agents } = await this.read(paseo);
     const owners = new Map<string, string>();
     for (const agent of agents) {
       const owner = botOfAgent(agent, bots);
@@ -384,7 +494,7 @@ export class BotsService {
 
   /** Bots with their current chat, the chats themselves and the owner map, from one read of each. */
   async snapshot(paseo: BotsPaseo): Promise<{ bots: Bot[]; chats: Map<string, AgentLike>; ownerOf: (agentId: string) => string | null }> {
-    const [bots, agents] = await Promise.all([discoverBots(this.root, paseo), activeAgents(paseo)]);
+    const { bots, agents } = await this.read(paseo);
     const owners = new Map<string, string>();
     for (const agent of agents) {
       const owner = botOfAgent(agent, bots);
@@ -401,13 +511,13 @@ export class BotsService {
 
   /** Each bot's current chat, as Paseo lists it (status and attention fields included). */
   async chats(paseo: BotsPaseo): Promise<AgentLike[]> {
-    const [bots, agents] = await Promise.all([discoverBots(this.root, paseo), activeAgents(paseo)]);
+    const { bots, agents } = await this.read(paseo);
     return bots.map((bot) => chatFor(bot, agents)).filter((agent): agent is AgentLike => agent !== null);
   }
 
   /** Each bot with its current chat (null when it has none), from one directory read. */
   async botChats(paseo: BotsPaseo): Promise<Array<{ bot: Bot; chat: AgentLike | null }>> {
-    const [bots, agents] = await Promise.all([discoverBots(this.root, paseo), activeAgents(paseo)]);
+    const { bots, agents } = await this.read(paseo);
     return bots.map((bot) => {
       const chat = chatFor(bot, agents);
       return { bot: { ...bot, agentId: chat?.id ?? null }, chat };
@@ -425,7 +535,9 @@ export class BotsService {
       const bot = await this.bot(botId, paseo);
       const existing = chatFor(bot, await activeAgents(paseo));
       if (existing) return { agentId: existing.id, created: false };
-      return { agentId: await createChat(bot, paseo), created: true };
+      const agentId = await createChat(bot, paseo);
+      this.lists.changed();
+      return { agentId, created: true };
     });
   }
 
@@ -449,6 +561,7 @@ export class BotsService {
         (agent) => !agent.archivedAt && (agent.labels?.[BOT_LABEL] === bot.id || (!agent.labels?.[BOT_LABEL] && agent.cwd === bot.cwd)),
       );
       for (const chat of open) await paseo.agents.ref(chat.id).archive();
+      this.lists.changed();
       return open.length;
     });
   }
@@ -466,8 +579,12 @@ export class BotsService {
       );
       // The new chat keeps the model and thinking of the chat it replaces (a switch made in the app).
       const carried = carriedChatConfig(chatFor(bot, agents) ?? undefined);
-      for (const chat of open) await paseo.agents.ref(chat.id).archive();
-      return { agentId: await createChat(bot, paseo, carried), archived: open.length };
+      try {
+        for (const chat of open) await paseo.agents.ref(chat.id).archive();
+        return { agentId: await createChat(bot, paseo, carried), archived: open.length };
+      } finally {
+        this.lists.changed();
+      }
     });
   }
 }

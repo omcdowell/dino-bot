@@ -441,14 +441,12 @@ async function expectCompletedSubmissionClearsAfterMissedRunningTransition(
     gate.holdNextClientRequest("send_agent_message_request");
     const userMessage = await submitImageOnlyMessage(page);
     await gate.waitForHeldClientRequest();
-    gate.setServerMessageSuppressed("agent_status", true);
     gate.setServerMessageSuppressed("agent_update", true);
     gate.releaseHeldClientRequest();
     await gate.waitForServerMessage("send_agent_message_response");
     await expect(userMessage).toHaveAttribute("aria-busy", "false");
     await gate.drop();
     await agent.client.waitForFinish(agent.agentId, 30_000);
-    gate.setServerMessageSuppressed("agent_status", false);
     gate.setServerMessageSuppressed("agent_update", false);
     gate.restoreFresh();
     await gate.waitForServerMessage("fetch_agent_timeline_response", 2);
@@ -476,7 +474,6 @@ async function expectProviderAcknowledgementBeforeRpcAcceptanceSettlesSubmission
     await openAgentRoute(page, { workspaceId: agent.workspaceId, agentId: agent.agentId });
     await expectComposerVisible(page);
     await expectAgentIdle(page);
-    gate.setServerMessageSuppressed("agent_status", true);
     gate.setServerMessageSuppressed("agent_update", true);
     gate.holdNextServerMessage("send_agent_message_response");
     const userMessage = await submitMessageWithImage(page, prompt);
@@ -490,7 +487,6 @@ async function expectProviderAcknowledgementBeforeRpcAcceptanceSettlesSubmission
     await expect(userMessage).toHaveAttribute("aria-busy", "false");
 
     await agent.client.waitForFinish(agent.agentId, 30_000);
-    gate.setServerMessageSuppressed("agent_status", false);
     gate.setServerMessageSuppressed("agent_update", false);
     gate.restoreFresh();
     await expectVisibleAgentSurfacesIdle(page);

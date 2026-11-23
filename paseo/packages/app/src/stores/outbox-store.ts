@@ -19,7 +19,8 @@ import { retainAttachmentForGarbageCollection } from "@/attachments/gc-retention
  * - outbox: clock. Only on this device as far as we know.
  * - received: single tick. The daemon has recorded it.
  * - queued: grey double tick. The daemon holds it until the agent is idle.
- * - taken: blue double tick. The agent has it; waiting for the canonical row to replace the bubble.
+ * - taken: blue double tick. The agent has it; waiting for the canonical row to replace the bubble
+ *   (the row with its clientMessageId, or the daemon's row position for it: pinned-model.ts).
  * - failed: red "!". Definitely rejected.
  * - unknown: "?". The daemon cannot say what happened.
  * - cancelling: hidden; a delete is waiting for the daemon to confirm.
@@ -58,6 +59,14 @@ export interface OutboxRecord {
   deletedTooLate?: boolean;
   /** Photos already on the host (file.upload), by attachment id: a retry sends only the rest. */
   uploadedImages?: Record<string, ImageUploadRef>;
+  /** Taken: where the daemon has the agent's row for this message (found by its id). */
+  row?: OutboxRowPosition;
+}
+
+/** A row in the daemon's agent timeline: its timeline epoch and seq. */
+export interface OutboxRowPosition {
+  epoch: string;
+  seq: number;
 }
 
 /** An Edit put a message back into this agent's composer draft; mounted composers show it. */
@@ -106,6 +115,7 @@ const PersistedOutboxSchema = z.object({
             z.object({ id: z.string(), fileName: z.string(), mimeType: z.string() }),
           )
           .optional(),
+        row: z.object({ epoch: z.string(), seq: z.number() }).optional(),
       })
       .passthrough(),
   ),

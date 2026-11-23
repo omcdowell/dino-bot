@@ -45,7 +45,7 @@ export function outboxUploadPercent(progress: OutboxUploadProgress): number {
 
 /**
  * Hosts without imageUploads still get the photos inline. A frame over the daemon's socket limit
- * (ws maxPayload, 100 MiB) closes the connection and can never succeed, so the outbox fails such
+ * (MAX_WS_FRAME_BYTES in @getpaseo/protocol/ws-frame-limit, 100 MiB) closes the connection and can never succeed, so the outbox fails such
  * a message at once instead. The limit leaves room for base64 (4/3) and, on an encrypted
  * connection, base64 of the ciphertext (4/3 again): 100 MiB / (16/9) is about 59 MB of photos.
  */

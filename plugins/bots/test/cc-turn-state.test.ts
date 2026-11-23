@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { CcEngine, CcHost } from "../server/cc/engine";
 import type { CcDelivery } from "../server/cc/deliver";
-import { createCcProvider } from "../server/cc/provider";
+import { createCcProvider, replayItems } from "../server/cc/provider";
 // @ts-expect-error plain JS mods, loaded by Claude Code
 import { register as registerInbox } from "../claude-code/inbox/hooks/register.js";
 import type { ProviderEvent } from "@getpaseo/plugin/server/provider";
@@ -220,6 +220,58 @@ describe("M3: the daemon restarts mid-turn (the TUI goes on)", () => {
     assert.equal(e.queued, 0);
     const logged = e.memory.root.filter((x) => x.kind === "user");
     assert.deepEqual(logged.map((x) => [x.text, x.receipt]), [["long job", "m1"]]);
+  });
+});
+
+describe("MO2: every user row carries the ID the app sent it with", () => {
+  const userRows = (events: ProviderEvent[]) =>
+    events.flatMap((ev) => (ev.type === "timeline.item" && ev.item.type === "user_message" ? [[(ev.item as any).text, (ev.item as any).clientMessageId]] : []));
+
+  it("live, and again in the history replayed after a daemon restart (the receipt is the app's ID)", async () => {
+    const { send, tui, engine, events } = await chat();
+    await send("msg_1795206779884_hws2m8r3s", "go for it");
+    await until(() => tui.st === "working");
+    await tui.end({ answered: true, reason: "answer" });
+    await engine.handle("POST", "/append", q, { messages: [{ kind: "user", text: "go for it" }, { kind: "talk", text: "on it" }] });
+    await tick(30);
+    assert.deepEqual(userRows(events), [["go for it", "msg_1795206779884_hws2m8r3s"]]);
+    const user = engine.recent().find((x) => x.kind === "user")!;
+    assert.equal(user.receipt, "msg_1795206779884_hws2m8r3s");
+    const replayed = replayItems(engine.recent()).find((x) => x.item.type === "user_message")!.item as any;
+    assert.equal(replayed.clientMessageId, "msg_1795206779884_hws2m8r3s");
+    assert.equal(replayed.id, `m-${user.i}`); // rewind still goes by the memory index
+  });
+
+  it("a message kept in the bot's inbox through a daemon restart: its row, when its turn starts, has its ID", async () => {
+    const { tui, engine, events } = await chat();
+    // Sent through the previous daemon: the engine's inbox has it, this provider session never did.
+    engine.enqueue("sent before the restart", "msg_old_1");
+    await until(() => tui.st === "working");
+    await tick(30);
+    assert.deepEqual(userRows(events), [["sent before the restart", "msg_old_1"]]);
+  });
+
+  it("a message from before the restart merged into a running turn: shown once, with its ID", async () => {
+    const { tui, engine, events } = await chat();
+    tui.prompt = async (text: string) => {
+      tui.typed.push(text);
+      tui.st = "working";
+      await engine.handle("POST", "/turn", q, { running: true, typed: true, text: "<task-notification>done</task-notification>", origin: "task-notification" });
+      setTimeout(() => void engine.handle("POST", "/turn", q, { running: true, typed: true, text, origin: "composer" }), 3);
+      return { ok: true as const };
+    };
+    engine.enqueue("merged after restart", "msg_old_2");
+    await until(() => userRows(events).some(([text]) => text === "merged after restart"));
+    await tick(30);
+    assert.deepEqual(
+      userRows(events).filter(([text]) => text === "merged after restart"),
+      [["merged after restart", "msg_old_2"]],
+    );
+  });
+
+  it("history logged before receipts were kept replays without an ID, as before", () => {
+    const rows = replayItems([{ i: 0, kind: "user", text: "old", date: "d" } as any]);
+    assert.equal((rows[0]!.item as any).clientMessageId, undefined);
   });
 });
 

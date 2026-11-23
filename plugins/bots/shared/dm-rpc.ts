@@ -49,7 +49,14 @@ const SkippedSchema = z.object({ invalid: z.number(), unknown: z.number(), trunc
 export const dmsSummaryRpc = defineRpc({
   name: "dms.summary",
   input: z.object({}),
-  output: z.object({ bots: z.array(DmBotSummarySchema) }),
+  output: z.object({
+    bots: z.array(DmBotSummarySchema),
+    /**
+     * Changes whenever any thread view would change (a message, or a delivery status joined in from
+     * another sender's outbox), so the pushed summary also tells open threads to refetch.
+     */
+    stamp: z.string().optional(),
+  }),
 });
 
 export const dmsThreadsRpc = defineRpc({

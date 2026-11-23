@@ -10,11 +10,15 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { exportBrowser } from "pi-optchat/src/browser.ts";
-import { backgroundState, discardBackground, finishBackground } from "pi-optchat/src/import/auto.ts";
-import { pendingImport } from "pi-optchat/src/import/job.ts";
-import { lockProfile } from "pi-optchat/src/lock.ts";
-import type { Memory } from "pi-optchat/src/memory.ts";
+import {
+  backgroundState,
+  discardBackground,
+  exportBrowser,
+  finishBackground,
+  lockProfile,
+  pendingImport,
+  type Memory,
+} from "pi-optchat/api";
 import type { ProviderCommand, ProviderUsage } from "@getpaseo/plugin/server/provider";
 
 export const OPTCHAT_ACTIONS = ["browse", "import", "usage", "settings", "instructions"] as const;

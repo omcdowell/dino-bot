@@ -60,6 +60,8 @@ test("rapid fire messages then single wait", async () => {
     title: "Rapid Fire Test",
     modeId: "bypassPermissions",
   });
+  // Agent stream events reach only clients subscribed to the agent's timeline.
+  await ctx.client.subscribeAgentTimeline(agent.id, () => {}).ready;
 
   // Send 3 messages without waiting - tests that waitForFinish
   // finds the idle AFTER the last running state

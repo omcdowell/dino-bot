@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createPluginCache, pluginCacheKey, type PluginCacheStorage } from "./plugin-cache";
 
 function memoryStorage() {
@@ -234,7 +234,17 @@ describe("plugin cache", () => {
         meta: { persist: true },
       });
     }
-    await cache.track("host-a", [plugin]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await cache.track("host-a", [plugin]);
+      // G10: a trim is counted and said, so a growing query is seen before a blank screen is.
+      expect(cache.trimCount()).toBe(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain("plugin-cache bots");
+      expect(warn.mock.calls[0]?.[1]).toEqual(['["bots","avatar","huge"]']);
+    } finally {
+      warn.mockRestore();
+    }
     const kept = await createPluginCache(storage).load("host-a");
     expect(kept?.plugins[0]?.queries?.queries.map((query) => query.queryKey)).toEqual([
       ["bots", "list"],

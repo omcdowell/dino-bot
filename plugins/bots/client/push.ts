@@ -1,6 +1,7 @@
 import { useRpc } from "@getpaseo/plugin/client";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useSyncExternalStore } from "react";
+import { dmsSummaryRpc } from "../shared/dm-rpc";
 import { botsPreviewsRpc } from "../shared/home-rpc";
 import {
   botsRevRpc,
@@ -13,6 +14,7 @@ import {
 } from "../shared/push-rpc";
 import { botsQuietRpc } from "../shared/rpc";
 import { botsWorkersRpc } from "../shared/workers-rpc";
+import { DMS_KEY, DMS_SUMMARY_KEY } from "./dms-format";
 
 /** `client.events` on Paseo apps with plugin events (older apps: missing). */
 export interface BotEvents {
@@ -25,15 +27,41 @@ export const PUSH_KEYS: Record<PushKind, readonly unknown[]> = {
   previews: ["bots", "previews"],
   workers: ["bots", "workers"],
   quiet: ["bots", "quiet"],
+  dms: DMS_SUMMARY_KEY,
 };
-const OUTPUTS = { previews: botsPreviewsRpc.output, workers: botsWorkersRpc.output, quiet: botsQuietRpc.output };
+const OUTPUTS = {
+  previews: botsPreviewsRpc.output,
+  workers: botsWorkersRpc.output,
+  quiet: botsQuietRpc.output,
+  dms: dmsSummaryRpc.output,
+};
+/**
+ * A prefix of the kind's own key whose other queries its push makes stale: a DMs push carries only
+ * the summary, so open thread lists and threads under DMS_KEY refetch (only mounted queries fetch).
+ */
+const DEPENDENTS: Partial<Record<PushKind, readonly unknown[]>> = { dms: DMS_KEY };
+
+const sameKey = (a: readonly unknown[], b: readonly unknown[]) => JSON.stringify(a) === JSON.stringify(b);
+
+/** A push arrived (its value is in the cache already), or one may have been missed (`pushed` false). */
+function refresh(queryClient: QueryClient, kind: PushKind, pushed: boolean): void {
+  const own = PUSH_KEYS[kind];
+  const dependents = DEPENDENTS[kind];
+  if (!pushed) {
+    void queryClient.invalidateQueries({ queryKey: dependents ?? own });
+    return;
+  }
+  if (dependents) {
+    void queryClient.invalidateQueries({ queryKey: dependents, predicate: (query) => !sameKey(query.queryKey, own) });
+  }
+}
 
 /**
  * One installation (one host) per plugin bundle evaluation, so this module state is per host:
  * the app's event hub and the revision of the last push applied per kind.
  */
 let events: BotEvents | null = null;
-const applied: Record<PushKind, number | null> = { previews: null, workers: null, quiet: null };
+const applied: Record<PushKind, number | null> = { previews: null, workers: null, quiet: null, dms: null };
 const attached = new Map<QueryClient, { count: number; release: () => void }>();
 
 export function setBotEvents(value: BotEvents | undefined): void {
@@ -54,7 +82,7 @@ export function pollUnlessPushed(pollMs: number) {
 }
 
 /** Pushed values go straight into the query cache; going live refetches what may have been missed. */
-function attach(queryClient: QueryClient, hub: BotEvents): () => void {
+export function attach(queryClient: QueryClient, hub: BotEvents): () => void {
   const offs = PUSH_KINDS.map((kind) =>
     hub.on(pushEventName(kind), (raw) => {
       const event = PushEventSchema.safeParse(raw);
@@ -63,12 +91,13 @@ function attach(queryClient: QueryClient, hub: BotEvents): () => void {
       if (!data.success) return;
       applied[kind] = event.data.rev;
       queryClient.setQueryData(PUSH_KEYS[kind], data.data);
+      refresh(queryClient, kind, true);
     }),
   );
   offs.push(
     hub.onLiveChange((live) => {
       if (!live) return;
-      for (const kind of PUSH_KINDS) void queryClient.invalidateQueries({ queryKey: PUSH_KEYS[kind] });
+      for (const kind of PUSH_KINDS) refresh(queryClient, kind, false);
     }),
   );
   return () => offs.forEach((off) => off());
@@ -107,7 +136,7 @@ export function useBotsPush(): boolean {
       for (const kind of PUSH_KINDS) applied[kind] ??= answer.revs[kind];
       for (const kind of staleKinds(applied, answer.revs)) {
         applied[kind] = answer.revs[kind];
-        void queryClient.invalidateQueries({ queryKey: PUSH_KEYS[kind] });
+        refresh(queryClient, kind, false);
       }
       return answer;
     },

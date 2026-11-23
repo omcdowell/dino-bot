@@ -105,13 +105,13 @@ export function shouldPersistQuery(query: Pick<Query, "meta" | "state">): boolea
 }
 
 /**
- * A plugin's query client. Persisted queries are the plugin's device cache, so they are never
- * garbage-collected (unless the plugin sets its own `gcTime`): with TanStack's default 5 min, a
- * screen left off for 5 minutes (the phone home while a chat is open) lost its data, the device
- * copy was rewritten without it, and the next visit or cold start fetched it again (avatar-reload,
- * 2026-10-12). Other queries keep the default.
+ * A query client whose persisted queries are a device cache (a plugin's, or the app's own: see
+ * data/query-client.ts), so they are never garbage-collected (unless the query sets its own
+ * `gcTime`): with TanStack's default 5 min, a screen left off for 5 minutes (the phone home while
+ * a chat is open) lost its data, the device copy was rewritten without it, and the next visit or
+ * cold start fetched it again (avatar-reload, 2026-10-12). Other queries keep the default.
  */
-class PluginQueryClient extends QueryClient {
+export class PersistedQueryClient extends QueryClient {
   override defaultQueryOptions<
     TQueryFnData = unknown,
     TError = DefaultError,
@@ -141,7 +141,7 @@ class PluginQueryClient extends QueryClient {
 }
 
 export function createPluginQueryClient(): QueryClient {
-  return new PluginQueryClient();
+  return new PersistedQueryClient();
 }
 
 export function dehydratePersisted(client: QueryClient): DehydratedState {
@@ -153,10 +153,14 @@ export function dehydratePersisted(client: QueryClient): DehydratedState {
 
 /**
  * The persisted queries trimmed to `maxBytes` of JSON: the largest go first, so one big entry
- * (a bot avatar is up to 512 KB) does not cost the plugin its whole device cache.
+ * (a bot avatar is up to 512 KB) does not cost the plugin its whole device cache. `trimmed` lists
+ * the keys of the queries left out, so the caller can say so (a trimmed query is blank offline).
  */
-function withinLimit(state: DehydratedState, maxBytes: number): DehydratedState {
-  if (JSON.stringify(state).length <= maxBytes) return state;
+export function trimPersisted(
+  state: DehydratedState,
+  maxBytes: number,
+): { state: DehydratedState; trimmed: QueryKey[] } {
+  if (JSON.stringify(state).length <= maxBytes) return { state, trimmed: [] };
   const sized = state.queries.map((query) => ({
     query,
     size: JSON.stringify(query).length,
@@ -170,9 +174,18 @@ function withinLimit(state: DehydratedState, maxBytes: number): DehydratedState 
     total -= entry.size + 1;
   }
   return {
-    ...state,
-    queries: state.queries.filter((query) => !dropped.has(query)),
+    state: { ...state, queries: state.queries.filter((query) => !dropped.has(query)) },
+    trimmed: [...dropped].map((query) => query.queryKey),
   };
+}
+
+/** Says that a device cache left queries out (G10: trims were silent). */
+export function logTrim(cache: string, trimmed: readonly QueryKey[], maxBytes: number): void {
+  if (trimmed.length === 0) return;
+  console.warn(
+    `[${cache}] persisted queries over ${maxBytes} bytes: left out the ${trimmed.length} largest`,
+    trimmed.map((key) => JSON.stringify(key).slice(0, 120)),
+  );
 }
 
 function parseJson<T>(raw: string | null, schema: z.ZodType<T>): T | null {
@@ -215,6 +228,8 @@ export function createPluginCache(
   const absentSince = new Map<string, Map<string, number>>();
   /** Per host: the stored queries of plugins that were absent at load, by plugin id. */
   const parked = new Map<string, Map<string, DehydratedState>>();
+  /** Queries left out of written device copies by the byte limit, since start (G10). */
+  let trims = 0;
 
   const hostBundles = (serverId: string) => {
     let byId = bundles.get(serverId);
@@ -290,10 +305,14 @@ export function createPluginCache(
     const key = queriesKey(serverId, plugin.id);
     timers.delete(key);
     if (plugin.lifetime.signal.aborted) return Promise.resolve();
-    const state = withinLimit(dehydratePersisted(plugin.queryClient), maxQueryBytes);
+    const { state, trimmed } = trimPersisted(dehydratePersisted(plugin.queryClient), maxQueryBytes);
     const json = JSON.stringify(state);
     if (writtenQueries.get(key) === json) return Promise.resolve();
     writtenQueries.set(key, json);
+    if (trimmed.length > 0) {
+      trims += trimmed.length;
+      logTrim(`plugin-cache ${plugin.id}`, trimmed, maxQueryBytes);
+    }
     if (state.queries.length === 0 || json.length > maxQueryBytes) {
       return quietly(storage.removeItem(key));
     }
@@ -445,6 +464,11 @@ export function createPluginCache(
         writes.push(writeQueries(serverId, plugin));
       }
       return Promise.all(writes).then(() => undefined);
+    },
+
+    /** How many queries the byte limit has left out of written device copies since start. */
+    trimCount(): number {
+      return trims;
     },
 
     /** Writes pending query changes now (tests, app going to the background). */

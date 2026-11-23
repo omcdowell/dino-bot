@@ -165,7 +165,9 @@ test("the daemon acknowledges a tracked message before the agent takes it", asyn
     messageId: "ack-order",
     onReceived: () => events.push("received-again"),
   });
-  expect(repeat).toEqual({});
+  // No fresh dispatch to report; only where the message's row already is.
+  expect(repeat).toEqual({ row: first.row });
+  expect(repeat.row).toBeDefined();
   expect(events).toEqual(["received", "accepted:turn_started", "received-again"]);
 });
 
@@ -221,6 +223,41 @@ test("a queued message sent to an idle agent starts at once", async () => {
   expect(result.disposition).toBe("turn_started");
   expect(await userMessageIds(client, agent.id)).toEqual(["idle-queue"]);
 });
+
+test("the daemon says where a taken message's row is, also on a retry once a queued one ran", async () => {
+  // MO2: the app settles its sent bubble against this row position even when the row is above
+  // the part of the chat it loaded, instead of guessing from timestamps or text.
+  const { client, agent } = await setup();
+  async function rowOf(messageId: string) {
+    const timeline = await client.fetchAgentTimeline(agent.id, { limit: 200 });
+    const entry = timeline.entries.find(
+      (candidate) =>
+        candidate.item.type === "user_message" && candidate.item.clientMessageId === messageId,
+    );
+    return entry ? { epoch: timeline.epoch, seq: entry.seqStart } : undefined;
+  }
+  const first = await client.sendAgentMessage(agent.id, "starts a turn", { messageId: "r-first" });
+  expect(first.disposition).toBe("turn_started");
+  expect(first.row).toEqual(await rowOf("r-first"));
+
+  const held = await client.sendAgentMessage(agent.id, "waits its turn", {
+    messageId: "r-held",
+    activeTurnBehavior: "queue",
+  });
+  expect(held.disposition).toBe("queued");
+  expect(held.row).toBeUndefined();
+  await expect
+    .poll(() => userMessageIds(client, agent.id), { timeout: 20_000, interval: 250 })
+    .toEqual(["r-first", "r-held"]);
+  // The app's outbox resends a queued message until the daemon no longer holds it.
+  const retry = await client.sendAgentMessage(agent.id, "waits its turn", {
+    messageId: "r-held",
+    activeTurnBehavior: "queue",
+  });
+  expect(retry.disposition).toBeUndefined();
+  expect(retry.row).toEqual(await rowOf("r-held"));
+  expect(retry.row?.seq).toBeGreaterThan(first.row?.seq ?? Number.POSITIVE_INFINITY);
+}, 40_000);
 
 test("a queued message after a failed turn starts a new turn instead of waiting forever", async () => {
   const { client, agent } = await setup();

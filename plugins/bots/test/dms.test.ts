@@ -241,6 +241,31 @@ test("an outbound DM whose latest status is failed flags its thread as a problem
   assert.deepEqual(threads.map((t) => [t.thread, t.has_problem, t.last_status]), [[B, false, "steered"], [A, true, "failed"]]);
 });
 
+test("the DMs push stamp moves on a delivery status from another sender's outbox; the summary does not", async () => {
+  const { root, dir } = fixtureRoot();
+  const workersRoot = join(dir, "workers");
+  cpSync(WORKER_FIXTURES, workersRoot, { recursive: true });
+  const { dms } = service(root, { workersRoot });
+  const first = await dms.summaryWithStamp();
+  assert.deepEqual(first.bots, await dms.summary());
+  assert.deepEqual(await dms.summaryWithStamp(), first, "nothing changed: same stamp, so nothing is pushed");
+  appendFileSync(
+    join(workersRoot, "wp1-bot-dm", "outbox.jsonl"),
+    `${JSON.stringify({ v: 1, type: "status", id: T3, ts: "2026-10-08T09:30:00.000Z", status: "refused", detail: "busy" })}\n`,
+  );
+  const second = await dms.summaryWithStamp();
+  assert.deepEqual(second.bots, first.bots);
+  assert.notEqual(second.stamp, first.stamp);
+  // A new message moves both.
+  appendFileSync(
+    join(root, "bitzer", "dm", "inbox.jsonl"),
+    `${JSON.stringify(message({ id: "01K6ZQ5V8M00000000000000AB", thread: "01K6ZQ5V8M00000000000000AB", ts: "2026-10-08T09:40:00.000Z", from: "scrat", to: "bitzer" }))}\n`,
+  );
+  const third = await dms.summaryWithStamp();
+  assert.notEqual(third.stamp, second.stamp);
+  assert.equal(third.bots.find((b) => b.botId === "bitzer")!.total, first.bots.find((b) => b.botId === "bitzer")!.total + 1);
+});
+
 test("the workers root defaults to bot-dm's state dir", () => {
   assert.match(defaultWorkersRoot({}), /\/\.local\/state\/bot-dm\/workers$/);
   assert.equal(defaultWorkersRoot({ XDG_STATE_HOME: "/x" }), "/x/bot-dm/workers");

@@ -10,6 +10,7 @@ import { botsListRpc, botsOpenRpc } from "../shared/rpc";
 import { BOTS_QUERY_KEY } from "./sidebar";
 import { useDmFocus } from "./dms-focus";
 import { openChatPatiently, startingLabel } from "./bot-open";
+import { pollUnlessPushed, useBotsPush } from "./push";
 import {
   DMS_KEY,
   botForDirectory,
@@ -207,10 +208,12 @@ function ThreadView({
   const [sending, setSending] = useState(false);
   const scroller = useRef<{ scrollToEnd(options?: { animated?: boolean }): void } | null>(null);
   const ref = threadRef.threadId ?? threadRef.messageId ?? "";
+  // A changed DM arrives as a `dms` push that refetches this thread; polled only without pushes.
+  useBotsPush();
   const { data, error, isLoading } = useQuery({
     queryKey: dmsThreadKey(botId, ref),
     queryFn: () => fetchThread({ botId, ...threadRef }),
-    refetchInterval: THREAD_POLL_MS,
+    refetchInterval: pollUnlessPushed(THREAD_POLL_MS),
   });
   const thread = data?.thread ?? null;
   const messages = data?.messages ?? [];
@@ -363,10 +366,11 @@ export function DmsView({
   // Another bot, or a card asking for another thread, selects the new target.
   useEffect(() => setSelected(focus?.ref ?? null), [botId, focus?.seq]);
 
+  useBotsPush();
   const { data, error, isLoading } = useQuery({
     queryKey: dmsThreadsKey(botId),
     queryFn: () => fetchThreads({ botId }),
-    refetchInterval: THREADS_POLL_MS,
+    refetchInterval: pollUnlessPushed(THREADS_POLL_MS),
     enabled: !!botId,
   });
   const threads = data?.threads ?? [];

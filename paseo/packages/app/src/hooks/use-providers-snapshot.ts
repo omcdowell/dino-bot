@@ -6,11 +6,13 @@ import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { useSessionStore } from "@/stores/session-store";
-import { useReplicaQuery } from "@/data/query";
+import { useFetchQuery, useReplicaQuery } from "@/data/query";
 import { queryClient as singletonQueryClient } from "@/data/query-client";
 import {
   normalizeProvidersSnapshotCwd,
+  providersDeviceSnapshotQueryKey,
   providersSnapshotQueryKey,
+  readDeviceProvidersSnapshot,
   providersSnapshotQueryRoot,
   fetchProvidersSnapshot,
   refreshAndApplyProvidersSnapshot,
@@ -91,6 +93,19 @@ export function useProvidersSnapshot(
     },
   });
 
+  // Until a live snapshot loads (offline, or a cold start before the host answers), the list kept
+  // on the device. Read once per scope; the live snapshot replaces it as soon as it lands.
+  const hasLiveSnapshot = snapshotQuery.data !== undefined;
+  const deviceQuery = useFetchQuery({
+    queryKey: providersDeviceSnapshotQueryKey(serverId, cwd),
+    queryFn: () => readDeviceProvidersSnapshot({ serverId: serverId ?? "", cwd }),
+    enabled: Boolean(enabled && serverId && !hasLiveSnapshot),
+    dataShape: "value",
+    immutableWhen: () => true,
+    retry: false,
+    structuralSharing: false,
+  });
+
   const refreshMutation = useMutation({
     mutationFn: async (providers?: AgentProvider[]) => {
       if (!client || !serverId) {
@@ -130,7 +145,7 @@ export function useProvidersSnapshot(
   );
 
   return {
-    entries: snapshotQuery.data?.entries ?? undefined,
+    entries: snapshotQuery.data?.entries ?? deviceQuery.data ?? undefined,
     isLoading: snapshotQuery.isLoading,
     isFetching: snapshotQuery.isFetching,
     isRefreshing,

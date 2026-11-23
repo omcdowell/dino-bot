@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { reduceTurnLiveness, resolveTurnPresentation, TURN_LIVENESS_IDLE } from "./turn-liveness";
+import {
+  presentTurnForConnection,
+  reduceTurnLiveness,
+  resolveTurnPresentation,
+  TURN_LIVENESS_IDLE,
+} from "./turn-liveness";
 
 describe("turn activity", () => {
   const startedAt = new Date("2026-07-31T10:00:00.000Z");
@@ -74,5 +79,33 @@ describe("turn activity", () => {
       startedAt: null,
       turnId: null,
     });
+  });
+});
+
+describe("a turn stored open, shown after a relaunch (G13)", () => {
+  // The device copy of a turn that had just finished: written before its close landed.
+  const stored = reduceTurnLiveness(TURN_LIVENESS_IDLE, {
+    type: "snapshot",
+    activeTurn: { turnId: "turn-1", startedAt: new Date("2026-11-20T10:00:00.000Z") },
+  });
+
+  it("is not shown as running while the host is not connected", () => {
+    expect(presentTurnForConnection(resolveTurnPresentation(stored, false), false)).toEqual({
+      isActive: false,
+      isCancelling: false,
+      startedAt: null,
+      turnId: null,
+    });
+  });
+
+  it("is shown as the host says once it is connected", () => {
+    const live = resolveTurnPresentation(stored, false);
+    expect(presentTurnForConnection(live, true)).toBe(live);
+    expect(live).toMatchObject({ isActive: true, turnId: "turn-1" });
+  });
+
+  it("leaves an idle turn as it is", () => {
+    const idle = resolveTurnPresentation(TURN_LIVENESS_IDLE, false);
+    expect(presentTurnForConnection(idle, false)).toBe(idle);
   });
 });

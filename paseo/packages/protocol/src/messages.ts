@@ -28,22 +28,6 @@ import { ProviderPaseoToolsPolicySchema } from "./provider-config.js";
 import { TOOL_CALL_ICON_NAMES } from "./agent-types.js";
 import { WORKSPACE_LABEL_COLORS } from "./workspace-labels.js";
 import {
-  ChatCreateRequestSchema,
-  ChatListRequestSchema,
-  ChatInspectRequestSchema,
-  ChatDeleteRequestSchema,
-  ChatPostRequestSchema,
-  ChatReadRequestSchema,
-  ChatWaitRequestSchema,
-  ChatCreateResponseSchema,
-  ChatListResponseSchema,
-  ChatInspectResponseSchema,
-  ChatDeleteResponseSchema,
-  ChatPostResponseSchema,
-  ChatReadResponseSchema,
-  ChatWaitResponseSchema,
-} from "./chat/rpc-schemas.js";
-import {
   ScheduleCreateRequestSchema,
   ScheduleListRequestSchema,
   ScheduleInspectRequestSchema,
@@ -63,18 +47,6 @@ import {
   ScheduleRunOnceResponseSchema,
   ScheduleUpdateResponseSchema,
 } from "./schedule/rpc-schemas.js";
-import {
-  LoopRunRequestSchema,
-  LoopListRequestSchema,
-  LoopInspectRequestSchema,
-  LoopLogsRequestSchema,
-  LoopStopRequestSchema,
-  LoopRunResponseSchema,
-  LoopListResponseSchema,
-  LoopInspectResponseSchema,
-  LoopLogsResponseSchema,
-  LoopStopResponseSchema,
-} from "./loop/rpc-schemas.js";
 import {
   BROWSER_AUTOMATION_COMMAND_NAMES,
   BrowserAutomationExecuteRequestSchema,
@@ -3617,13 +3589,6 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   TerminalInputSchema,
   KillTerminalRequestSchema,
   CaptureTerminalRequestSchema,
-  ChatCreateRequestSchema,
-  ChatListRequestSchema,
-  ChatInspectRequestSchema,
-  ChatDeleteRequestSchema,
-  ChatPostRequestSchema,
-  ChatReadRequestSchema,
-  ChatWaitRequestSchema,
   ScheduleCreateRequestSchema,
   ScheduleListRequestSchema,
   ScheduleInspectRequestSchema,
@@ -3633,11 +3598,6 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ScheduleDeleteRequestSchema,
   ScheduleRunOnceRequestSchema,
   ScheduleUpdateRequestSchema,
-  LoopRunRequestSchema,
-  LoopListRequestSchema,
-  LoopInspectRequestSchema,
-  LoopLogsRequestSchema,
-  LoopStopRequestSchema,
 ]);
 
 export type SessionInboundMessage = z.infer<typeof SessionInboundMessageSchema>;
@@ -3658,13 +3618,6 @@ export const ActivityLogPayloadSchema = z.object({
 export const ActivityLogMessageSchema = z.object({
   type: z.literal("activity_log"),
   payload: ActivityLogPayloadSchema,
-});
-
-export const AssistantChunkMessageSchema = z.object({
-  type: z.literal("assistant_chunk"),
-  payload: z.object({
-    chunk: z.string(),
-  }),
 });
 
 export const AudioOutputMessageSchema = z.object({
@@ -4425,15 +4378,6 @@ export const AgentStreamMessageSchema = z.object({
     // Present for timeline events. Maps 1:1 to canonical in-memory timeline rows.
     seq: z.number().int().nonnegative().optional(),
     epoch: z.string().optional(),
-  }),
-});
-
-export const AgentStatusMessageSchema = z.object({
-  type: z.literal("agent_status"),
-  payload: z.object({
-    agentId: z.string(),
-    status: z.string(),
-    info: AgentSnapshotPayloadSchema,
   }),
 });
 
@@ -5341,6 +5285,12 @@ export const SendAgentMessageResponseMessageSchema = z.object({
     error: z.string().nullable(),
     /** How the agent took the message. Absent from older daemons and on failure. */
     disposition: SendAgentMessageDispositionSchema.optional(),
+    /**
+     * The agent's canonical user row for messageId in this daemon's timeline (epoch and seq),
+     * looked up by the id. Absent from older daemons, while the message is queued, and when the
+     * timeline has no row for it.
+     */
+    row: z.object({ epoch: z.string(), seq: z.number().int().nonnegative() }).optional(),
   }),
 });
 
@@ -7393,7 +7343,6 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   AgentSkillsSaveSelectionResponseSchema,
   AgentSkillsImportLegacySelectionResponseSchema,
   ActivityLogMessageSchema,
-  AssistantChunkMessageSchema,
   AudioOutputMessageSchema,
   TranscriptionResultMessageSchema,
   VoiceInputStateMessageSchema,
@@ -7424,7 +7373,6 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   WorkspaceSetupStatusResponseMessageSchema,
   WorkspaceSetupRunResponseMessageSchema,
   AgentStreamMessageSchema,
-  AgentStatusMessageSchema,
   FetchAgentsResponseMessageSchema,
   FetchAgentHistoryResponseMessageSchema,
   FetchRecentProviderSessionsResponseMessageSchema,
@@ -7576,13 +7524,6 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   CaptureTerminalResponseSchema,
   TerminalStreamExitSchema,
   TerminalAttentionRequiredSchema,
-  ChatCreateResponseSchema,
-  ChatListResponseSchema,
-  ChatInspectResponseSchema,
-  ChatDeleteResponseSchema,
-  ChatPostResponseSchema,
-  ChatReadResponseSchema,
-  ChatWaitResponseSchema,
   ScheduleCreateResponseSchema,
   ScheduleListResponseSchema,
   ScheduleInspectResponseSchema,
@@ -7592,11 +7533,6 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ScheduleDeleteResponseSchema,
   ScheduleRunOnceResponseSchema,
   ScheduleUpdateResponseSchema,
-  LoopRunResponseSchema,
-  LoopListResponseSchema,
-  LoopInspectResponseSchema,
-  LoopLogsResponseSchema,
-  LoopStopResponseSchema,
   DaemonUpdateProgressMessageSchema,
   DaemonUpdateResponseSchema,
 ]);
@@ -7605,7 +7541,6 @@ export type SessionOutboundMessage = z.infer<typeof SessionOutboundMessageSchema
 
 // Type exports for individual message types
 export type ActivityLogMessage = z.infer<typeof ActivityLogMessageSchema>;
-export type AssistantChunkMessage = z.infer<typeof AssistantChunkMessageSchema>;
 export type AudioOutputMessage = z.infer<typeof AudioOutputMessageSchema>;
 export type TranscriptionResultMessage = z.infer<typeof TranscriptionResultMessageSchema>;
 export type StatusMessage = z.infer<typeof StatusMessageSchema>;
@@ -7625,7 +7560,6 @@ export type WorkspaceSetupRunResponseMessage = z.infer<
   typeof WorkspaceSetupRunResponseMessageSchema
 >;
 export type AgentStreamMessage = z.infer<typeof AgentStreamMessageSchema>;
-export type AgentStatusMessage = z.infer<typeof AgentStatusMessageSchema>;
 export type ProjectCheckoutLitePayload = z.infer<typeof ProjectCheckoutLitePayloadSchema>;
 export type ProjectPlacementPayload = z.infer<typeof ProjectPlacementPayloadSchema>;
 export type WorkspaceStateBucket = z.infer<typeof WorkspaceStateBucketSchema>;
@@ -7761,13 +7695,6 @@ export type ProviderUsageDetail = z.infer<typeof ProviderUsageDetailSchema>;
 export type ProviderUsageListResponseMessage = z.infer<
   typeof ProviderUsageListResponseMessageSchema
 >;
-export type ChatCreateResponse = z.infer<typeof ChatCreateResponseSchema>;
-export type ChatListResponse = z.infer<typeof ChatListResponseSchema>;
-export type ChatInspectResponse = z.infer<typeof ChatInspectResponseSchema>;
-export type ChatDeleteResponse = z.infer<typeof ChatDeleteResponseSchema>;
-export type ChatPostResponse = z.infer<typeof ChatPostResponseSchema>;
-export type ChatReadResponse = z.infer<typeof ChatReadResponseSchema>;
-export type ChatWaitResponse = z.infer<typeof ChatWaitResponseSchema>;
 export type ScheduleCreateResponse = z.infer<typeof ScheduleCreateResponseSchema>;
 export type ScheduleListResponse = z.infer<typeof ScheduleListResponseSchema>;
 export type ScheduleInspectResponse = z.infer<typeof ScheduleInspectResponseSchema>;
@@ -7777,11 +7704,6 @@ export type ScheduleResumeResponse = z.infer<typeof ScheduleResumeResponseSchema
 export type ScheduleDeleteResponse = z.infer<typeof ScheduleDeleteResponseSchema>;
 export type ScheduleRunOnceResponse = z.infer<typeof ScheduleRunOnceResponseSchema>;
 export type ScheduleUpdateResponse = z.infer<typeof ScheduleUpdateResponseSchema>;
-export type LoopRunResponse = z.infer<typeof LoopRunResponseSchema>;
-export type LoopListResponse = z.infer<typeof LoopListResponseSchema>;
-export type LoopInspectResponse = z.infer<typeof LoopInspectResponseSchema>;
-export type LoopLogsResponse = z.infer<typeof LoopLogsResponseSchema>;
-export type LoopStopResponse = z.infer<typeof LoopStopResponseSchema>;
 
 // Type exports for payload types
 export type ActivityLogPayload = z.infer<typeof ActivityLogPayloadSchema>;
@@ -7829,13 +7751,6 @@ export type RefreshProvidersSnapshotRequestMessage = z.infer<
 export type ProviderDiagnosticRequestMessage = z.infer<
   typeof ProviderDiagnosticRequestMessageSchema
 >;
-export type ChatCreateRequest = z.infer<typeof ChatCreateRequestSchema>;
-export type ChatListRequest = z.infer<typeof ChatListRequestSchema>;
-export type ChatInspectRequest = z.infer<typeof ChatInspectRequestSchema>;
-export type ChatDeleteRequest = z.infer<typeof ChatDeleteRequestSchema>;
-export type ChatPostRequest = z.infer<typeof ChatPostRequestSchema>;
-export type ChatReadRequest = z.infer<typeof ChatReadRequestSchema>;
-export type ChatWaitRequest = z.infer<typeof ChatWaitRequestSchema>;
 export type ScheduleCreateRequest = z.infer<typeof ScheduleCreateRequestSchema>;
 export type ScheduleListRequest = z.infer<typeof ScheduleListRequestSchema>;
 export type ScheduleInspectRequest = z.infer<typeof ScheduleInspectRequestSchema>;
@@ -7845,11 +7760,6 @@ export type ScheduleResumeRequest = z.infer<typeof ScheduleResumeRequestSchema>;
 export type ScheduleDeleteRequest = z.infer<typeof ScheduleDeleteRequestSchema>;
 export type ScheduleRunOnceRequest = z.infer<typeof ScheduleRunOnceRequestSchema>;
 export type ScheduleUpdateRequest = z.infer<typeof ScheduleUpdateRequestSchema>;
-export type LoopRunRequest = z.infer<typeof LoopRunRequestSchema>;
-export type LoopListRequest = z.infer<typeof LoopListRequestSchema>;
-export type LoopInspectRequest = z.infer<typeof LoopInspectRequestSchema>;
-export type LoopLogsRequest = z.infer<typeof LoopLogsRequestSchema>;
-export type LoopStopRequest = z.infer<typeof LoopStopRequestSchema>;
 export type ResumeAgentRequestMessage = z.infer<typeof ResumeAgentRequestMessageSchema>;
 export type DeleteAgentRequestMessage = z.infer<typeof DeleteAgentRequestMessageSchema>;
 export type UpdateAgentRequestMessage = z.infer<typeof UpdateAgentRequestMessageSchema>;

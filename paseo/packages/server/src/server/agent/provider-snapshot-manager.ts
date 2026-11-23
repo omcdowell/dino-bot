@@ -267,7 +267,7 @@ export class ProviderSnapshotManager {
     this.managedProcesses = options.managedProcesses;
     this.isDev = options.isDev === true;
     this.extraClients = options.extraClients ?? {};
-    this.injectedOnlyDefinitions = createInjectedOnlyDefinitions(this.extraClients);
+    this.injectedOnlyDefinitions = createInjectedOnlyDefinitions(this.extraClients, this.isDev);
     this.runtimeSettings = options.runtimeSettings;
     this.providerOverrides = options.providerOverrides;
     this.baseProviderOverrides = options.providerOverrides;
@@ -1264,14 +1264,28 @@ export function sameSnapshotRecords(
 
 function createInjectedOnlyDefinitions(
   extraClients: Partial<Record<AgentProvider, AgentClient>>,
+  isDev: boolean,
 ): Map<string, RegisteredProviderDefinition> {
-  const known = new Set([
-    ...AGENT_PROVIDER_DEFINITIONS.map((definition) => definition.id),
-    ...DEV_AGENT_PROVIDER_DEFINITIONS.map((definition) => definition.id),
-  ]);
+  const builtin = new Set(AGENT_PROVIDER_DEFINITIONS.map((definition) => definition.id));
+  const devDefinitions = new Map(
+    DEV_AGENT_PROVIDER_DEFINITIONS.map((definition) => [definition.id, definition]),
+  );
   const definitions = new Map<string, RegisteredProviderDefinition>();
   for (const [provider, client] of Object.entries(extraClients)) {
-    if (!client || known.has(provider)) continue;
+    if (!client || builtin.has(provider)) continue;
+    const devDefinition = devDefinitions.get(provider);
+    if (devDefinition) {
+      // A dev-only provider (mock) is built in when isDev; otherwise an injected client
+      // still registers, with its manifest modes, so tests need not turn on dev mode.
+      if (!isDev) {
+        definitions.set(provider, {
+          ...devDefinition,
+          supportsExactMcpPreapproval: false,
+          createClient: () => client,
+        });
+      }
+      continue;
+    }
     definitions.set(provider, {
       id: provider,
       label: provider,

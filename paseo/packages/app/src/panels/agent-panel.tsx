@@ -85,6 +85,7 @@ import {
   type Agent,
   useSessionStore,
 } from "@/stores/session-store";
+import { presentTurnForConnection } from "@/timeline/turn-liveness";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 import type { Theme } from "@/styles/theme";
@@ -323,10 +324,21 @@ function storeFetchedAgentDetail(input: {
   return hydrated;
 }
 
+/** The tab's status: offline, a stored "running" is last known (G13), shown as idle. */
+function tabStatus(
+  status: Agent["status"],
+  isTurnActive: boolean,
+  isConnected: boolean,
+): Agent["status"] {
+  if (isTurnActive) return "running";
+  return !isConnected && status === "running" ? "idle" : status;
+}
+
 function useAgentPanelDescriptor(
   target: { kind: "agent"; agentId: string },
   context: { serverId: string },
 ): PanelDescriptor {
+  const isConnected = useHostRuntimeIsConnected(context.serverId);
   const descriptorState = useSessionStore(
     useShallow((state) => {
       const session = state.sessions[context.serverId];
@@ -339,7 +351,10 @@ function useAgentPanelDescriptor(
         pendingPermissionCount: agent?.pendingPermissions.length ?? 0,
         requiresAttention: agent?.requiresAttention ?? false,
         attentionReason: agent?.attentionReason ?? null,
-        isTurnActive: selectAgentTurnPresentation(session, target.agentId).isActive,
+        isTurnActive: presentTurnForConnection(
+          selectAgentTurnPresentation(session, target.agentId),
+          isConnected,
+        ).isActive,
       };
     }),
   );
@@ -355,7 +370,7 @@ function useAgentPanelDescriptor(
     icon,
     statusBucket: descriptorState.status
       ? deriveSidebarStateBucket({
-          status: descriptorState.isTurnActive ? "running" : descriptorState.status,
+          status: tabStatus(descriptorState.status, descriptorState.isTurnActive, isConnected),
           pendingPermissionCount: descriptorState.pendingPermissionCount,
           requiresAttention: descriptorState.requiresAttention,
           attentionReason: descriptorState.attentionReason,
@@ -1370,10 +1385,14 @@ const AgentStreamSection = memo(function AgentStreamSection({
         : EMPTY_MESSAGE_SUBMISSIONS,
     ),
   );
+  const isHostConnected = useHostRuntimeIsConnected(serverId);
   const turnPresentation = useSessionStore(
     useShallow((state) =>
       agentId
-        ? selectAgentTurnPresentation(state.sessions[serverId], agentId)
+        ? presentTurnForConnection(
+            selectAgentTurnPresentation(state.sessions[serverId], agentId),
+            isHostConnected,
+          )
         : { isActive: false, isCancelling: false, startedAt: null, turnId: null },
     ),
   );

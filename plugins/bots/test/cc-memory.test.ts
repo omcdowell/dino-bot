@@ -8,7 +8,7 @@ import { after, describe, it } from "node:test";
 import { CcEngine, CcHost } from "../server/cc/engine";
 import { createCcProvider } from "../server/cc/provider";
 import type { ProviderEvent } from "@getpaseo/plugin/server/provider";
-import { Memory } from "pi-optchat/src/memory.ts";
+import { Memory } from "pi-optchat/api";
 // @ts-expect-error plain JS mods, loaded by Claude Code
 import { register as registerTrigger } from "../claude-code/trigger/hooks/register.js";
 // @ts-expect-error plain JS mods, loaded by Claude Code

@@ -42,6 +42,10 @@ Watch for: `paseo/package.json` `prepare` (lefthook runs only in a standalone pa
 `allowScripts.lefthook: false`. Keep both: inside this repo lefthook's install would overwrite this
 repo's (or a global `core.hooksPath`'s) git hooks.
 
+`plugins/bots` and `addons/paseo-apns` link `paseo/packages/plugin` (and bots `protocol`) as `file:`
+dependencies, so they typecheck and test against the SDK pulled here (their dist: `npm run
+build:server-deps` in `paseo/`). Run bots' `tsc --noEmit` after a pull; never install an npm copy.
+
 ## Pull a new upstream pi-optchat
 
 ```sh
@@ -50,7 +54,9 @@ git subtree pull --prefix=optchat --squash https://github.com/jonaslsaa/pi-optch
 (cd optchat && CI=true npm ci && npm test)
 ```
 
-Keep upstream's `LICENSE` (MIT, Jonas Silva's copyright) as it is.
+Keep upstream's `LICENSE` (MIT, Jonas Silva's copyright) as it is. Keep this fork's `exports` in
+`optchat/package.json` and `src/api.ts`: the bots plugin imports only `pi-optchat/api`. If upstream
+moves a function, fix the re-export there (bots' `tsc --noEmit` fails until it is).
 
 ## Rules
 

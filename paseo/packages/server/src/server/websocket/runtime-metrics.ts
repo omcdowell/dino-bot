@@ -1,5 +1,6 @@
 import type { SessionOutboundMessage, WSOutboundMessage } from "../messages.js";
 import type { ProcessMemoryDiagnostics } from "../process-diagnostics.js";
+import type { TrafficCounts } from "./traffic-counts.js";
 
 export interface WebSocketRuntimeCounters {
   connectedAwaitingHello: number;
@@ -94,7 +95,11 @@ export class WebSocketRuntimeMetricsWindow {
   private readonly bufferedAmountSamples: number[] = [];
   private readonly requestLatencies = new Map<string, number[]>();
 
-  constructor(private readonly clock: Clock = Date.now) {
+  constructor(
+    private readonly clock: Clock = Date.now,
+    /** Full per-type counts (the snapshot keeps only the top types). */
+    private readonly traffic?: TrafficCounts,
+  ) {
     this.windowStartedAt = this.clock();
   }
 
@@ -104,21 +109,26 @@ export class WebSocketRuntimeMetricsWindow {
 
   recordInboundMessage(type: string): void {
     incrementCount(this.inboundMessageCounts, type);
+    this.traffic?.record("in", type);
   }
 
   recordInboundSessionRequest(type: string): void {
     incrementCount(this.inboundSessionRequestCounts, type);
+    this.traffic?.record("inSession", type);
   }
 
   recordOutboundMessage(message: WSOutboundMessage, bufferedAmount?: number): void {
     if (message.type !== "session") {
       incrementCount(this.outboundMessageCounts, message.type);
+      this.traffic?.record("out", message.type);
       this.recordBufferedAmount(bufferedAmount);
       return;
     }
 
     incrementCount(this.outboundMessageCounts, "session_message");
     incrementCount(this.outboundSessionMessageCounts, message.message.type);
+    this.traffic?.record("out", "session_message");
+    this.traffic?.record("outSession", message.message.type);
 
     if (message.message.type === "agent_stream") {
       this.recordOutboundAgentStreamMessage(message.message.payload);
@@ -129,6 +139,7 @@ export class WebSocketRuntimeMetricsWindow {
 
   recordOutboundBinaryFrame(bufferedAmount?: number): void {
     incrementCount(this.outboundBinaryFrameCounts, "binary");
+    this.traffic?.record("outBinary", "binary");
     this.recordBufferedAmount(bufferedAmount);
   }
 
@@ -167,6 +178,7 @@ export class WebSocketRuntimeMetricsWindow {
     const { agentId, event } = payload;
     const eventType = event.type === "timeline" ? `timeline:${event.item.type}` : event.type;
     incrementCount(this.outboundAgentStreamCounts, eventType);
+    this.traffic?.record("outStream", eventType);
     incrementCount(this.outboundAgentStreamByAgentCounts, agentId);
   }
 

@@ -48,7 +48,7 @@ The heart of Paseo. A Node.js process that:
 - Streams agent output in real time via a timeline model
 - Provides agent-to-agent tools through a transport-neutral tool catalog, with MCP as one adapter
 - Optionally connects outbound to a relay for remote access
-- Optionally serves the browser web client from the same HTTP server (self-hosting guide: [public-docs/web-ui.md](../public-docs/web-ui.md))
+- Optionally serves the browser web client from the same HTTP server
 
 All paths are under `packages/server/src/`.
 
@@ -271,7 +271,7 @@ New session RPCs use dotted names with `.request` and `.response` suffixes, such
 - `agent_stream` — New timeline event from a running agent
 - `workspace_update`, `script_status_update`, `workspace_setup_progress` — Workspace state
 - `agent_permission_request` / `agent_permission_resolved` — Tool-call permission flow
-- `agent_deleted`, `agent_archived`, `agent_status`, `agent_list`
+- `agent_deleted`, `agent_archived`, `agent_list`
 - `checkout_status_update`, `checkout_diff_update`, and the full `checkout_*` request/response set for git operations
 
 Agent snapshots optionally carry the daemon-owned active turn identity, and turn lifecycle stream events
@@ -279,7 +279,7 @@ optionally carry the same `turnId`. New clients use these fields when present an
 status once at the directory boundary rather than maintaining a second activity model.
 
 - Terminal subscribe/input/capture commands
-- Voice/dictation streaming events (`dictation_stream_*`, `assistant_chunk`, `audio_output`, `transcription_result`)
+- Voice/dictation streaming events (`dictation_stream_*`, `audio_output`, `transcription_result`)
 - Request/response pairs for fetch, list, create, etc., correlated by `requestId`; failures use `rpc_error`
 
 `directory_suggestions_request` is one daemon-owned filesystem search capability. The daemon
@@ -466,7 +466,7 @@ $PASEO_HOME/
 
 The supervisor alone publishes its ready worker's endpoint in `paseo.pid`, clears it before respawn, and fails if any worker exits before first readiness. CLI home selection trusts only that live record; config expresses desired state, never an endpoint fallback. POSIX home stop signals the captured supervisor without TCP. Windows graceful stop and ordinary RPCs trust the published endpoint. This metadata is not cryptographic listener ownership: edited endpoints, copied identities, PID reuse, and address takeover races remain outside that guarantee. A stale heartbeat never permits reclaiming a live lock.
 
-Worker restart retains supervisor arguments/environment and rereads the configuration file. Updating a package and observing its new worker version do not refresh the running supervisor code; the launcher owns full-process replacement. See [CLI lifecycle contracts](../public-docs/cli.md#daemon-management).
+Worker restart retains supervisor arguments/environment and rereads the configuration file. Updating a package and observing its new worker version do not refresh the running supervisor code; the launcher owns full-process replacement.
 
 ## Deployment models
 

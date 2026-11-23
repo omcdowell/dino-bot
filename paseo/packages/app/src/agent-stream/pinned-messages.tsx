@@ -25,6 +25,9 @@ import {
 import {
   buildPinnedMessages,
   matchTakenRecordsByText,
+  takenRecordsOlderThanStream,
+  takenRecordsReachedByTimeline,
+  takenRecordsWithoutRow,
   type DaemonQueueItem,
   type PinnedMessage,
   type StreamUserRow,
@@ -46,8 +49,10 @@ export function collectStreamClientMessageIds(
   if (!session || wanted.length === 0) return "";
   const want = new Set(wanted);
   const found = new Set<string>();
-  const needTextMatch = records.some((record) => record.state === "taken");
+  // COMPAT(msgRowPosition): taken messages an older daemon gave no row position.
+  const legacy = takenRecordsWithoutRow(records);
   const rows: StreamUserRow[] = [];
+  let oldestLoadedRowAt = Number.NaN;
   // Tail is the committed history, head the live turn after it: rows end up oldest first.
   for (const items of [
     session.agentStreamTail.get(agentId),
@@ -55,9 +60,13 @@ export function collectStreamClientMessageIds(
   ]) {
     if (!items) continue;
     for (const item of items) {
+      if (legacy.length > 0 && item.timestamp instanceof Date) {
+        const at = item.timestamp.getTime();
+        if (Number.isFinite(at) && !(at >= oldestLoadedRowAt)) oldestLoadedRowAt = at;
+      }
       if (item.kind !== "user_message") continue;
       if (item.clientMessageId && want.has(item.clientMessageId)) found.add(item.clientMessageId);
-      if (needTextMatch) {
+      if (legacy.length > 0) {
         rows.push({
           clientMessageId: item.clientMessageId,
           text: item.text,
@@ -66,8 +75,11 @@ export function collectStreamClientMessageIds(
       }
     }
   }
-  if (needTextMatch) {
-    for (const id of matchTakenRecordsByText(records, rows, found)) found.add(id);
+  const cursor = session.agentTimelineCursor.get(agentId);
+  for (const id of takenRecordsReachedByTimeline(records, cursor, found)) found.add(id);
+  if (legacy.length > 0) {
+    for (const id of matchTakenRecordsByText(legacy, rows, found)) found.add(id);
+    for (const id of takenRecordsOlderThanStream(legacy, oldestLoadedRowAt, found)) found.add(id);
   }
   return [...found].sort().join("\n");
 }
@@ -303,16 +315,24 @@ export function resolvePinnedMeta(
   if (message.remote) return `${t("delivery.note.queuedOtherDevice")} · ${time}`;
   const record = message.record;
   if (record?.deletedTooLate) return t("delivery.note.deletedTooLate");
-  if (upload && message.state === "clock" && isConnected) {
-    return t("delivery.note.uploadingPhotos", {
+  if (message.state === "clock" && !isConnected) {
+    return `${t("delivery.note.waitingOffline")} · ${time}`;
+  }
+  // Transport failures are retried for ever (outbox/sender.ts). Say why the last try failed, so a
+  // message that keeps failing on a connected host does not look like one still on its way.
+  const retrying =
+    message.state === "clock" && record?.lastError
+      ? t("delivery.note.retrying", { error: record.lastError })
+      : null;
+  if (upload && message.state === "clock") {
+    const uploading = t("delivery.note.uploadingPhotos", {
       index: upload.index,
       count: upload.count,
       percent: outboxUploadPercent(upload),
     });
+    return retrying ? `${uploading} · ${retrying}` : uploading;
   }
-  if (message.state === "clock" && !isConnected) {
-    return `${t("delivery.note.waitingOffline")} · ${time}`;
-  }
+  if (retrying) return retrying;
   if (message.state === "failed" && record?.lastError) return record.lastError;
   return time;
 }

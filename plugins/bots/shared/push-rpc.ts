@@ -2,12 +2,12 @@ import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 
 /**
- * Bots-home data pushed instead of polled (Paseo hosts with plugin events, `server.emit`).
+ * Bots-home data and DMs pushed instead of polled (Paseo hosts with plugin events, `server.emit`).
  * The server recomputes each kind every PUSH_CHECK_MS while someone is watching and emits
  * `bots.<kind>` with `{ rev, data }` (data = the kind's RPC output) only when it changed.
  * Clients that receive pushes stop polling and only check `bots.rev` every REV_CHECK_MS.
  */
-export const PUSH_KINDS = ["previews", "workers", "quiet"] as const;
+export const PUSH_KINDS = ["previews", "workers", "quiet", "dms"] as const;
 export type PushKind = (typeof PUSH_KINDS)[number];
 
 export const pushEventName = (kind: PushKind) => `bots.${kind}` as const;
@@ -20,7 +20,12 @@ export const botsRevRpc = defineRpc({
   output: z.object({
     /** False: this host cannot push (old Paseo); poll as before. */
     push: z.boolean(),
-    revs: z.object({ previews: z.number().int(), workers: z.number().int(), quiet: z.number().int() }),
+    revs: z.object({
+      previews: z.number().int(),
+      workers: z.number().int(),
+      quiet: z.number().int(),
+      dms: z.number().int(),
+    }),
   }),
 });
 

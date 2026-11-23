@@ -4,6 +4,9 @@ import {
   buildPinnedMessages,
   matchTakenRecordsByText,
   TAKEN_TEXT_MATCH_SKEW_MS,
+  takenRecordsOlderThanStream,
+  takenRecordsReachedByTimeline,
+  takenRecordsWithoutRow,
 } from "./pinned-model";
 
 function record(id: string, state: OutboxRecord["state"], createdAt: number): OutboxRecord {
@@ -137,5 +140,80 @@ describe("taken messages whose canonical row lost its client message ID", () => 
       [],
     );
     expect(matchTakenRecordsByText([a], [{ text: "go", timestamp: Number.NaN }])).toEqual(["a"]);
+  });
+});
+
+describe("taken messages whose canonical row is older than the loaded stream (MO1)", () => {
+  test("settles a taken message sent before every loaded row", () => {
+    const records = [{ ...record("old", "taken", 1_000), sentAt: 2_000 }];
+    expect(takenRecordsOlderThanStream(records, 5_000)).toEqual(["old"]);
+  });
+
+  test("keeps it while the loaded stream reaches back to or past the send", () => {
+    const records = [{ ...record("live", "taken", 1_000), sentAt: 2_000 }];
+    expect(takenRecordsOlderThanStream(records, 2_000)).toEqual([]);
+    expect(takenRecordsOlderThanStream(records, 1_500)).toEqual([]);
+  });
+
+  test("settles nothing when no row is loaded", () => {
+    expect(takenRecordsOlderThanStream([record("x", "taken", 1)], Number.NaN)).toEqual([]);
+  });
+
+  test("only taken messages: one the agent has not taken stays pinned", () => {
+    const records = (["outbox", "received", "queued", "failed", "unknown"] as const).map((state) =>
+      record(state, state, 1),
+    );
+    expect(takenRecordsOlderThanStream(records, 5_000)).toEqual([]);
+  });
+
+  test("skips messages already settled by ID or text", () => {
+    expect(
+      takenRecordsOlderThanStream([record("seen", "taken", 1)], 5_000, new Set(["seen"])),
+    ).toEqual([]);
+  });
+});
+
+describe("taken messages settled by the row position the daemon returned (MO2)", () => {
+  function withRow(id: string, epoch: string, seq: number): OutboxRecord {
+    return { ...record(id, "taken", 1), row: { epoch, seq } };
+  }
+
+  test("settles once the loaded timeline reaches the row, even if the row is not loaded", () => {
+    const records = [withRow("m", "e1", 120)];
+    // Build 18, 2026-11-20: the app came back to the latest 40 rows (150..190); row 120 is above them.
+    expect(takenRecordsReachedByTimeline(records, { epoch: "e1", endSeq: 190 })).toEqual(["m"]);
+    expect(takenRecordsReachedByTimeline(records, { epoch: "e1", endSeq: 120 })).toEqual(["m"]);
+  });
+
+  test("stays pinned while the loaded timeline ends before the row", () => {
+    expect(
+      takenRecordsReachedByTimeline([withRow("m", "e1", 120)], { epoch: "e1", endSeq: 119 }),
+    ).toEqual([]);
+  });
+
+  test("settles when the daemon rebuilt its timeline (new epoch) after taking the message", () => {
+    expect(
+      takenRecordsReachedByTimeline([withRow("m", "e1", 120)], { epoch: "e2", endSeq: 3 }),
+    ).toEqual(["m"]);
+  });
+
+  test("settles nothing before the app has loaded any timeline", () => {
+    expect(takenRecordsReachedByTimeline([withRow("m", "e1", 1)], undefined)).toEqual([]);
+    expect(takenRecordsReachedByTimeline([withRow("m", "e1", 1)], null)).toEqual([]);
+  });
+
+  test("ignores records that are not taken, have no row, or are already in the stream", () => {
+    const loaded = { epoch: "e1", endSeq: 999 };
+    const queued: OutboxRecord = { ...record("q", "queued", 1), row: { epoch: "e1", seq: 1 } };
+    expect(takenRecordsReachedByTimeline([queued], loaded)).toEqual([]);
+    expect(takenRecordsReachedByTimeline([record("legacy", "taken", 1)], loaded)).toEqual([]);
+    expect(
+      takenRecordsReachedByTimeline([withRow("seen", "e1", 1)], loaded, new Set(["seen"])),
+    ).toEqual([]);
+  });
+
+  test("only taken records without a row fall back to the text and time rules", () => {
+    const records = [withRow("new", "e1", 1), record("old", "taken", 1), record("q", "queued", 1)];
+    expect(takenRecordsWithoutRow(records).map((r) => r.clientMessageId)).toEqual(["old"]);
   });
 });

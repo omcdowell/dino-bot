@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { BotsService, setCcChatCreated, setClaudeCodeReady, setDefaultChatModel, type BotsPaseo } from "./server/bots";
+import { BotsService, DaemonLists, LIST_CHANGE_EVENTS, setCcChatCreated, setClaudeCodeReady, setDefaultChatModel, type BotsPaseo } from "./server/bots";
 import { reloadIfHistory } from "./server/cc/history-reload";
 import { DmsService, type DmsPaseo } from "./server/dms";
 import { WorkersService } from "./server/workers";
@@ -127,7 +127,10 @@ export default function contribute(server: PluginServerContext) {
   // Plan usage cards (5-hour, weekly) for those bots, from the windows their Claude Code reports (server/cc/usage-source.ts).
   // Paseo finds them through the plugin session's usage scope (daemon: PluginAgentSession.usageSession()).
   server.registerUsageSource(createCcUsageSource({ botsRoot: root, botDir: (bot) => ccHost.botDir(bot), provider: CC_PROVIDER }));
-  const service = new BotsService(root);
+  // Project and agent lists: listed once, then followed through the daemon's lifecycle hooks with a
+  // full resync every LISTS_RESYNC_MS (server/bots.ts DaemonLists). Without hooks every read lists.
+  const lists = new DaemonLists();
+  const service = new BotsService(root, lists);
   // PaseoApi is structurally wider than the slices the services need.
   const sdk = (paseo: unknown) => paseo as BotsPaseo;
 
@@ -140,6 +143,8 @@ export default function contribute(server: PluginServerContext) {
     previews: () => withApi(previewsFor),
     workers: () => withApi(workersFor),
     quiet: () => withApi(quietFor),
+    // Local ledger reads only, no Paseo API needed.
+    dms: () => dms.summaryWithStamp(),
   });
   const withApi = <T>(compute: (api: BotsPaseo) => Promise<T>): Promise<T> => {
     if (!lastApi) return Promise.reject(new Error("no Paseo API yet"));
@@ -212,6 +217,14 @@ export default function contribute(server: PluginServerContext) {
     onError: () => {},
   });
   const on = (server as { on?: PluginServerContext["on"] }).on?.bind(server);
+  if (on) {
+    try {
+      for (const name of LIST_CHANGE_EVENTS) on(name, () => lists.changed());
+      lists.watch();
+    } catch {
+      // A daemon that does not know one of these events: keep listing on every read.
+    }
+  }
   on?.("agent.turn_started", (event, { paseo }) => busyFeed.turnStarted(sdk(paseo), event.agent.id));
 
   // Rows: hide "New reply" when only bot DMs started the turns behind it (decision 2026-10-08).
@@ -229,16 +242,35 @@ export default function contribute(server: PluginServerContext) {
 
   // DMs: reads ~/bots/<bot>/dm/*.jsonl (written by bot-dm); writes only the user's replies. A plain
   // read-only view: no read state, no unread counts (the DMs are not addressed to the user).
+  // Pushed as the `dms` kind: the summary with a stamp of every thread view, so apps refetch an open
+  // thread only when it changed instead of polling it. Any DM call keeps the watch loop's lease.
   const dms = new DmsService({
     root,
     openChat: (botId, paseo) => service.open(botId, sdk(paseo)),
   });
-  server.handle(dmsSummaryRpc, async () => ({ bots: await dms.summary() }));
-  server.handle(dmsThreadsRpc, ({ botId }) => dms.threads(botId));
-  server.handle(dmsThreadRpc, ({ botId, threadId, messageId }) => dms.thread(botId, { threadId, messageId }));
-  server.handle(dmsReplyRpc, ({ botId, threadId, text }, { paseo }) =>
-    dms.reply(botId, threadId, text, paseo as unknown as DmsPaseo),
-  );
+  const publishDms = async () => {
+    const result = await dms.summaryWithStamp();
+    push.publish("dms", result);
+    return result;
+  };
+  server.handle(dmsSummaryRpc, () => {
+    push.touch();
+    return publishDms();
+  });
+  server.handle(dmsThreadsRpc, ({ botId }) => {
+    push.touch();
+    return dms.threads(botId);
+  });
+  server.handle(dmsThreadRpc, ({ botId, threadId, messageId }) => {
+    push.touch();
+    return dms.thread(botId, { threadId, messageId });
+  });
+  server.handle(dmsReplyRpc, async ({ botId, threadId, text }, { paseo }) => {
+    const result = await dms.reply(botId, threadId, text, paseo as unknown as DmsPaseo);
+    // Other devices see the reply now rather than at the next watch tick.
+    void publishDms().catch(() => {});
+    return result;
+  });
 
   // Phone home (layout A): one-line previews (last reply or sent DM) and the latest turn's start.
   const previews = new PreviewsService();

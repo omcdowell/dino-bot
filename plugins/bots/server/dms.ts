@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -192,13 +192,24 @@ export class DmsService {
   }
 
   async summary(): Promise<DmBotSummary[]> {
-    const out: DmBotSummary[] = [];
+    return (await this.summaryWithStamp()).bots;
+  }
+
+  /**
+   * The summary plus a stamp of every bot's thread views (ids and joined statuses), for the DMs push.
+   * Reads go through the ledger cache, so an unchanged ledger costs a stat per file.
+   */
+  async summaryWithStamp(): Promise<{ bots: DmBotSummary[]; stamp: string }> {
+    const bots: DmBotSummary[] = [];
+    const hash = createHash("sha1");
     for (const botId of await this.ledgerBots()) {
-      const { messages } = await this.ownMessages(botId);
-      if (!messages.length) continue;
-      out.push({ botId, total: messages.length, last_ts: messages[messages.length - 1]!.ts });
+      const { views } = await this.views(botId);
+      if (!views.length) continue;
+      bots.push({ botId, total: views.length, last_ts: views[views.length - 1]!.ts });
+      hash.update(botId).update("\n");
+      for (const v of views) hash.update(`${v.id} ${v.status ?? ""} ${v.status_detail ?? ""}\n`);
     }
-    return out;
+    return { bots, stamp: hash.digest("base64") };
   }
 
   /** When the bot last sent or received a DM (for the phone home's recency order). */

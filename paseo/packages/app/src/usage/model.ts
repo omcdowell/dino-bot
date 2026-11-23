@@ -108,7 +108,13 @@ export function resolveUsageView(input: {
   query: UsageQueryState | undefined;
 }): UsageView {
   const { hostLabel, isConnected, supportsUsage, query } = input;
-  if (!isConnected) return { kind: "unavailable", message: usageCopy.hostUnavailable(hostLabel) };
+  if (!isConnected) {
+    // The last reports kept on the device, each with its "Updated … ago" time.
+    if (query?.data && query.data.length > 0) {
+      return { kind: "ready", reports: query.data, isRefreshing: false };
+    }
+    return { kind: "unavailable", message: usageCopy.hostUnavailable(hostLabel) };
+  }
   if (!supportsUsage) {
     return { kind: "unavailable", message: usageCopy.hostUpgradeRequired(hostLabel) };
   }
@@ -165,13 +171,20 @@ export interface UsageHostChoice {
 
 /**
  * The host the sidebar Usage row reads: the picked host, else the active workspace's host, else the
- * first host. Each only while it is connected and reports usage.
+ * first host. Each only while it is connected and reports usage. With no host connected, the picked
+ * (else active, else first) host, whose reports kept on the device then show.
  */
 export function resolveUsageHostId(choice: UsageHostChoice): string | null {
   const reporting = choice.hosts.filter((host) => host.isConnected && host.supportsUsage);
   const find = (serverId: string | null) => reporting.find((host) => host.serverId === serverId);
+  const live = find(choice.pickedServerId) ?? find(choice.activeServerId) ?? reporting[0];
+  if (live) return live.serverId;
+  if (choice.hosts.some((host) => host.isConnected)) return null;
+  const known = (serverId: string | null) =>
+    choice.hosts.find((host) => host.serverId === serverId);
   return (
-    (find(choice.pickedServerId) ?? find(choice.activeServerId) ?? reporting[0])?.serverId ?? null
+    (known(choice.pickedServerId) ?? known(choice.activeServerId) ?? choice.hosts[0])?.serverId ??
+    null
   );
 }
 

@@ -2,9 +2,9 @@
  * The Paseo mic in the group composer.
  *
  * Paseo builds from 28 on expose the app's dictation to plugins as `usePluginDictation` and
- * `DictationOverlay` on `@getpaseo/plugin/client/react-native`. The SDK this plugin compiles
- * against (0.11.1) does not declare them, and older apps do not have them, so the group screen
- * looks them up on the module at load time and hides the mic when they are missing.
+ * `DictationOverlay` on `@getpaseo/plugin/client/react-native`. Older apps do not have them,
+ * so the group screen looks them up on the module at load time and hides the mic when they are
+ * missing.
  * No react-native import here, so the helpers run under `tsx --test`.
  */
 import type { ComponentType } from "react";

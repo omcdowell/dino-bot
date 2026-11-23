@@ -3,7 +3,7 @@ import { ExpoRoot } from "expo-router";
 import Head from "expo-router/head";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { queryClient } from "@/data/query-client";
+import { queryClient, startPersistedQueries } from "@/data/query-client";
 import { I18nProvider } from "@/i18n/provider";
 import { RootErrorBoundary } from "@/components/root-error-boundary";
 
@@ -13,6 +13,8 @@ const { ctx: context } = require("expo-router/_ctx") as {
 };
 
 export function RootApp() {
+  // Usage and other `meta.persist` queries show from the device before any host answers.
+  startPersistedQueries();
   return <RootRouter context={context} />;
 }
 

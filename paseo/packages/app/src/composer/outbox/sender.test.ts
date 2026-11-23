@@ -41,7 +41,7 @@ interface SendCall {
   messageId: string;
   activeTurnBehavior?: string;
   dictated?: boolean;
-  resolve: (value: { disposition?: string }) => void;
+  resolve: (value: { disposition?: string; row?: { epoch: string; seq: number } }) => void;
   reject: (error: Error) => void;
   received: () => void;
 }
@@ -177,6 +177,42 @@ test("ticks follow the daemon: clock, single, grey double, then taken", async ()
   daemon.calls[0].resolve({ disposition: "queued" });
   await settle();
   expect(getOutboxRecord("id-one")?.state).toBe("queued");
+});
+
+test("a taken message keeps where the daemon says its row is; a queued one does not", async () => {
+  // MO2: the pinned bubble settles against this row position, not by timestamp or text.
+  // Hydrate drops taken records older than a day by the wall clock.
+  now = Date.now();
+  await write("held");
+  await settle();
+  daemon.calls[0].resolve({ disposition: "queued", row: { epoch: "e1", seq: 7 } });
+  await settle();
+  expect(getOutboxRecord("id-held")).toMatchObject({ state: "queued" });
+  expect(getOutboxRecord("id-held")?.row).toBeUndefined();
+
+  await write("now");
+  await settle();
+  daemon.calls
+    .find((call) => call.text === "now")
+    ?.resolve({
+      disposition: "turn_started",
+      row: { epoch: "e1", seq: 9 },
+    });
+  await settle();
+  expect(getOutboxRecord("id-now")).toMatchObject({
+    state: "taken",
+    row: { epoch: "e1", seq: 9 },
+  });
+
+  // A cold start (the case this is for) reads it back from storage.
+  await flushOutbox();
+  sender.dispose();
+  const saved = storage.values.get("paseo-outbox");
+  setOutboxBackingStorageForTests(storage);
+  storage.values.set("paseo-outbox", saved ?? "");
+  await hydrateOutbox();
+  expect(getOutboxRecord("id-now")?.row).toEqual({ epoch: "e1", seq: 9 });
+  sender = makeSender();
 });
 
 test("messages go one at a time per agent, in order, each after the previous has a tick", async () => {

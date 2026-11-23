@@ -74,6 +74,29 @@ export function resolveTurnPresentation(
   };
 }
 
+const NO_TURN_PRESENTATION: TurnPresentation = {
+  isActive: false,
+  isCancelling: false,
+  startedAt: null,
+  turnId: null,
+};
+
+/**
+ * What the chat shows of a turn while its host is not connected (DI1 G13). The device copy of a
+ * turn is written at most once a second, so an app that ends within a second of a turn finishing
+ * comes back with the turn still open; offline that showed a cut-off reply, a ticking timer and
+ * "Send and steer" for as long as the host stayed away. Until the host confirms, a turn is last
+ * known, not live: no timer, no working indicator, and sending is a plain send. The stored turn is
+ * left as it is: on connect the host's deltas from the stored cursor close or keep it.
+ */
+export function presentTurnForConnection(
+  presentation: TurnPresentation,
+  hostConnected: boolean,
+): TurnPresentation {
+  if (hostConnected || (!presentation.isActive && !presentation.isCancelling)) return presentation;
+  return NO_TURN_PRESENTATION;
+}
+
 function closeTurn(current: TurnLiveness, turnId: string | null): TurnLiveness {
   // COMPAT(agentTurnIdentity): added in v0.2.6, remove after 2027-01-31 once daemon floor >= v0.2.6.
   const targetsDifferentIdentifiedTurn =
